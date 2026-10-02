@@ -143,8 +143,11 @@ a committed delta reply before killing/restarting the receiver. `personal-lan.sp
 checks settings and conflict resolution in Chromium in both themes. Test fixtures are
 synthetic; none of the inventoried working copies is modified.
 
-Native Windows-to-Mac acceptance remains open: the user confirmed the Mac is currently
-unavailable. The Windows process harness does not substitute for that acceptance.
+The native Windows/macOS pilot has verified pinned pairing, automatic board exchange,
+offline edits across a Windows API restart, conflict retention, and resolution through
+the Windows UI with a peer ACK. Native acceptance remains open for the remaining checks,
+including the Mac checkout binding and participant mapping on both devices. The Windows
+process harness does not substitute for those checks.
 Current validation results and the remaining native acceptance are recorded in the
 [implementation plan](../.ai-factory/plans/personal-lan-handoff.md).
 
