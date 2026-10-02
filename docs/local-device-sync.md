@@ -426,8 +426,10 @@ both with legacy access and a real admin session/CSRF token. Anonymous denial
 and missing/stale revision checks remain strict. `start_ai` uses a backlog fixture
 in both modes so its personal execution gate is not masked by a wrong-stage error.
 The API fixture now has 10 tests (54 across the four commands); both inherited
-login settings pass locally. Only the corrected API suite needs a native Mac
-rerun; these results still do not close the P13 lifecycle or P14 native-stop gates.
+login settings pass locally. On 2026-10-03 the user confirmed the corrected API
+rerun passed on native Mac. Together with the earlier shared/data/agent results,
+all 54 targeted fixture tests are accepted on Mac. This is user-reported native
+evidence; it does not close the P13 lifecycle or P14 native-stop gates.
 After the fixture correction, the complete Windows `ai:validate` gate passed
 again: 3337 tests, one existing skip, coverage above 70% in every package
 (API minimum 70.18%), builds 7/7, Chromium 8/8, k6 3/3 and protocol check.
