@@ -324,10 +324,10 @@ export function useTaskDetailActions(task: Task | undefined, onClose: () => void
     taskEvent.mutate({
       id: task.id,
       event: "approve_done",
-      deletePlanFile: deletePlanOnApprove,
-      commitOnApprove,
+      deletePlanFile: task.personalMode ? false : deletePlanOnApprove,
+      commitOnApprove: task.personalMode ? false : commitOnApprove,
     });
-    if (commitOnApprove) {
+    if (commitOnApprove && !task.personalMode) {
       // Wait for WS ack — do NOT close the modal yet.
       console.debug("[approve-done] awaiting commit WS ack for", task.id);
       setCommitPending(true);

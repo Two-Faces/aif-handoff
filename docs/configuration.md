@@ -784,3 +784,15 @@ The `getProjectConfig(projectRoot)` utility in `@aif/shared` reads and caches co
 
 - [Getting Started](getting-started.md) — installation and first run
 - [Architecture](architecture.md) — how the agent pipeline uses these settings
+
+## Personal peer settings
+
+| Variable                | Default          | Meaning                                            |
+| ----------------------- | ---------------- | -------------------------------------------------- |
+| `AIF_PERSONAL_MODE`     | `false`          | Block execution; use local board/attach workflow   |
+| `AIF_PEER_ENABLED`      | `false`          | Opt in to the separate authenticated peer listener |
+| `AIF_PEER_PORT`         | `3010`           | TLS peer listener port; browser API stays loopback |
+| `AIF_PEER_IDENTITY_DIR` | `~/.aif-handoff` | Local TLS identity directory; never synchronized   |
+
+Peer startup requires personal mode or an already attached personal project. Pairing,
+backups and native acceptance are documented in [Local device sync](local-device-sync.md).

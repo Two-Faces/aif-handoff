@@ -155,7 +155,14 @@ function conflictMessage(error: unknown): string {
 
 type HandoffTask = Pick<
   Task,
-  "id" | "executionOwner" | "ownershipRevision" | "assignees" | "status" | "autoMode"
+  | "id"
+  | "executionOwner"
+  | "ownershipRevision"
+  | "assignees"
+  | "status"
+  | "autoMode"
+  | "syncRevisions"
+  | "personalMode"
 >;
 
 function requiredResumeAction(
@@ -180,6 +187,7 @@ export function HandoffDialog({ task, open, onOpenChange }: HandoffDialogProps) 
 }
 
 function OpenHandoffDialog({ task, open, onOpenChange }: HandoffDialogProps) {
+  const [baseTask] = useState(task);
   const { session } = useAuth();
   const isAdmin = session?.participant?.role === "admin";
   const { data: managedParticipants = [] } = useParticipants(open && isAdmin);
@@ -220,6 +228,7 @@ function OpenHandoffDialog({ task, open, onOpenChange }: HandoffDialogProps) {
           expectedOwnershipRevision: task.ownershipRevision,
           expectedExecutionOwner: task.executionOwner,
           expectedStatus: task.status,
+          expectedSyncRevisions: baseTask.syncRevisions,
           ...(reason.trim() ? { reason: reason.trim() } : {}),
           ...(resumeAction ? { resumeAction } : {}),
         },

@@ -112,6 +112,14 @@ data/                    # SQLite database files (gitignored)
 
 ## Key Entry Points
 
+Personal LAN M1 adds `packages/shared/src/sync/` (strict portable contracts/causality),
+data `syncJournal.ts`, `syncCheckpoints.ts`, `syncMutations.ts`, `syncDomain.ts`,
+`syncConflicts.ts`, `peers.ts` and `peerSync.ts`. The API owns pinned TLS transport in
+`services/peerIdentity.ts`, `peerTransport.ts`, `peerProtocol.ts`, `peerSync.ts` and local
+administration in `routes/peers.ts` / `routes/personal.ts`. Personal projects are
+board-only: do not remove execution guards before the M2 grant/fencing gate. See
+`docs/local-device-sync.md` for recovery, mutation inventory and native acceptance.
+
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |
 | `packages/api/src/index.ts`             | API server entry (Hono, port 3009)    |

@@ -1708,3 +1708,38 @@ See [MCP Sync Server](mcp-sync.md) for full documentation.
 - [Architecture](architecture.md) — system overview and data flow
 - [Configuration](configuration.md) — server port and environment settings
 - [MCP Sync Server](mcp-sync.md) — MCP tools and sync protocol
+
+## Personal LAN sync (M1)
+
+See [local device sync](local-device-sync.md) for setup and limitations. The browser
+API remains loopback; peers use a separate TLS 1.3 listener with mutually pinned
+certificates. Peer authentication never accepts browser/MCP tokens.
+
+| Local API                              | Purpose                                                               |
+| -------------------------------------- | --------------------------------------------------------------------- |
+| `GET /peers`                           | Local fingerprint, peer state, last contact and capped pending counts |
+| `POST /peers/invitations`              | `{expectedFingerprint, projectIds}` → five-minute invitation          |
+| `POST /peers/pair`                     | `{address, invitation, projectIds}` → explicit pinned pairing         |
+| `PUT /peers/:id/address`               | `{address}` → reconnect address (`https://host:port`)                 |
+| `POST /peers/:id/sync`                 | Bounded bidirectional checkpoint/delta exchange                       |
+| `POST /peers/:id/cancel`               | Cancel active exchange, retaining durable progress                    |
+| `POST /peers/:id/resync`               | Explicit fresh bootstrap after restore; retain local edits/tombstones |
+| `POST /peers/:id/revoke`               | Reject subsequent requests from that peer                             |
+| `GET /projects/:id/conflicts`          | Concurrent field versions and their causal dots                       |
+| `POST /projects/:id/conflicts/resolve` | `{entityType, entityId, field, value, parents}` → parent-set CAS      |
+
+Peer administration requires a local admin in participants mode. Foreign browser
+origins and non-loopback Host names are rejected. Project settings mutations retain
+their local admin authorization. Request schemas live in `packages/api/src/schemas.ts`.
+
+Personal task responses include `personalMode`, `syncRevisions` and
+`unresolvedAssignees`. Send `expectedSyncRevisions` in task PUT, events and handoff
+requests when changing plans/workflow. Missing/stale revisions produce HTTP 409 with
+`sync_revision_required` / `sync_revision_conflict`; unresolved variants produce
+`sync_conflict_requires_resolution`. Resolving stale parents returns `resolution_changed`.
+Personal task events are board-only; file deletion/import and fast-fix are blocked.
+
+`sync:board_updated` invalidates project/task/comment/history/personal queries. The
+web client also refetches on WebSocket reconnect. Peer transport exchanges contain
+only strict shared whitelists; attachment paths/bytes, roles, passwords, local roots,
+runtime sessions and usage never travel. See the ADR for protocol/schema 1 contracts.

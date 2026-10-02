@@ -2,7 +2,7 @@
 
 > [ТЗ](../specs/personal-lan-handoff.md) · [Запуск сессии](../specs/personal-lan-handoff-session.md) · [Проекты](../specs/personal-lan-handoff-projects.json)
 
-Статус: M1 в работе; P01 завершён, P02 реализуется, P03–P21 открыты. Исследованная база: `Two-Faces/aif-handoff`, `main@3d982ef344aaa2fb72f99d5603a1fea0051206ea`, 02.10.2026. Ветка реализации: `codex/personal-lan-handoff`, создана от `51df656` (относительно исследованной базы добавлены только четыре документа планирования). Не переключать текущие ветки подключаемых проектов. Существующий `.ai-factory/PLAN.md` и другие планы не заменять.
+Статус: код M1 P01–P09 подготовлен и проверен на Windows fixtures; общий gate M1 открыт. P02–P08 отмечены как реализованные; UI P09 готов, но приёмка на двух нативных устройствах не закрыта. Mac недоступен по подтверждению пользователя; есть baseline failures общего quality gate. M2–M4 не реализовывались. Исследованная база: `Two-Faces/aif-handoff`, `main@3d982ef344aaa2fb72f99d5603a1fea0051206ea`, 02.10.2026. Ветка: `codex/personal-lan-handoff` от `51df656`. Ветки/файлы подключаемых проектов не менялись; реальные checkout не регистрировались.
 
 Новые пути модулей ниже — предложение; существующие точки расширения проверены по исходной ревизии. Не создавать отдельный пакет только ради transport: начать с модулей в текущих workspaces. Если пакет окажется необходимым, выполнить Docker Sync Rule.
 
@@ -38,7 +38,7 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
   - Зафиксировать baseline существующих проверок и доступность второй машины. Спроектировать изолированный двухпроцессный test harness; не переключать singleton DB конкурентно.
   - Проверка: требования AC-01–16 сопоставлены с тестами/ручной приёмкой; неизвестные Mac paths/toolchain остаются явными prerequisites, не придуманными значениями.
 
-- [ ] **P02. Ввести personal mode и безопасное подключение проекта.**
+- [x] **P02. Ввести personal mode и безопасное подключение проекта.**
   - Зависимости: P01.
   - Файлы: `packages/api/src/repositories/projects.ts`, `packages/shared/src/projectInit.ts`, `packages/runtime/src/projectInit.ts`, `packages/shared/src/env.ts`, `packages/agent/src/{coordinator,githubWorkflow}.ts`, API `routes/{tasks,chat}.ts`, `services/{runtime,fastFix,qaRunner,qaCheckRunner,commitGeneration,roadmapGeneration}.ts`, data claim APIs и соответствующие request contracts.
   - Разделить `attach_existing` и init/install; определять Git checkout через Git, включая `.git`-файл. Регистрация только читает filesystem и пишет Handoff metadata.
@@ -47,7 +47,7 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
   - Проверка: Git fixtures с dirty tracked/untracked/index и worktree; ноль init/npm/npx/network/checkout вызовов при attach, точная сохранность состояния. Все personal-mode публикационные пути заблокированы, standalone-mode regressions зелёные.
   - Проверка запрета M1: отрицательные тесты каждой точки запуска, включая ручные/taskless вызовы, unpause/auto-queue и restart; ноль runtime-вызовов и подготовительных изменений checkout. Полный grant/fencing остаётся задачей P13, но запрет нельзя отложить до неё.
 
-- [ ] **P03. Добавить device/project/participant identity, локальные bindings и миграции.**
+- [x] **P03. Добавить device/project/participant identity, локальные bindings и миграции.**
   - Зависимости: P02.
   - Файлы: `packages/shared/src/schema.ts`, `db.ts`, `types.ts`; новые `packages/data/src/devices.ts`, `projectBindings.ts`, публичные exports.
   - Стабильный logical project ID и per-device checkout bindings. `.ai-factory` portable manifest создаётся отдельным действием; импорт inventory — read-only preview → явное сопоставление → registration.
@@ -57,14 +57,14 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
   - Проверка: миграция заполненной старой БД и новая БД; одна доска/разные пути; Windows+WSL bindings; неоднозначный remote match не объединяет проекты сам.
   - Проверка identity: два локальных UUID одного владельца, явное сопоставление, одинаковые имена разных аккаунтов, неизвестный автор/исполнитель и неактивный local account. Credentials не входят в общий DTO; backfill сохраняет авторство, назначения и локальную авторизацию.
 
-- [ ] **P04. Реализовать journal/outbox/inbox в data layer.**
+- [x] **P04. Реализовать journal/outbox/inbox в data layer.**
   - Зависимости: P03.
   - Предлагаемые модули: `packages/shared/src/sync/contracts.ts`, `packages/data/src/syncJournal.ts`, `syncApply.ts`.
   - Типизированные operation intents, stable operationId, causal context, per-field revision, contiguous ACK и dedup. Sequence/ACK scope — stream `(projectId, originDeviceId, deviceIncarnation)`: allowlist другого проекта не создаёт gaps. Доменные mutations и outbox в одной транзакции; apply/inbox/cursor тоже атомарно.
   - Локальные ephemeral поля исключены из DTO. Remote apply без outgoing echo, filesystem/runtime effects. Добавить tombstones и безопасный checkpoint bootstrap; compaction только с согласованными watermarks.
   - Проверка: crash до/после commit/ACK, duplicates, sequence gaps, replay, два проекта с разным allowlist, fresh peer bootstrap с параллельными правками; ни потерь, ни повторных событий.
 
-- [ ] **P05. Провести все общие записывающие пути через доменные операции.**
+- [x] **P05. Провести все общие записывающие пути через доменные операции.**
   - Зависимости: P04.
   - Файлы: `packages/data/src/index.ts`, `taskTransitions.ts`, `taskOwnership.ts`; REST task/project repositories; MCP `tools/pushPlan.ts`, `tools/syncStatus.ts`, `sync/conflictResolver.ts`.
   - Перечислить mutations: task create/edit/plan/status/reorder/delete, comments/attachments/history, shared project metadata. Все public writers используют transactional intents. Сохранить actor-aware переходы и совместимость локальных MCP tools.
@@ -73,20 +73,20 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
   - Проверка: mutation coverage matrix с REST/MCP/worker путями; reorder синхронизируется даже без изменения updatedAt, remote transition не обходит human ownership и terminal guards.
   - Проверка: bootstrap/delta комментариев, назначений и human/AI ownership между двумя БД с разными participant UUID; до mapping данные видимы, но права исполнителя не выдаются, после mapping действуют обычные локальные проверки доступа.
 
-- [ ] **P06. Реализовать детерминированные merge и явные конфликты.**
+- [x] **P06. Реализовать детерминированные merge и явные конфликты.**
   - Зависимости: P05.
   - Предлагаемые модули: `packages/data/src/syncConflicts.ts`, pure causal/ordering helpers в `packages/shared/src/sync/`.
   - Независимые поля merge; concurrent same-field variants сохраняются; resolution ссылается на оба parents. Status/grant не LWW; comments/run union stable IDs; tombstones; порядок карточек с детерминированным tie-break.
   - Проверка: перестановки доставки дают одинаковую проекцию; часы ±24 часа не выбирают победителя; conflict+resolution, delete/edit, reorder/reorder и старый bootstrap не приводят к silent overwrite.
 
-- [ ] **P07. Добавить защищённый peer listener и pairing.**
+- [x] **P07. Добавить защищённый peer listener и pairing.**
   - Зависимости: P04, P06.
   - Предлагаемые модули: `packages/api/src/services/peerIdentity.ts`, `peerTransport.ts`, `routes/peers.ts`, peer schemas; конфигурация env/local data.
   - Одноразовое pairing с fingerprints, mTLS/pinning либо эквивалентный проверяемый канал, device keys локально, project allowlist и revoke. Browser API остаётся loopback.
   - Negotiate protocol/schema, quotas/batches, structured error codes и downgrade protection; auth sessions/MCP bearer не выдавать как peer identity.
   - Проверка: неизвестный/revoked peer, неверный fingerprint, истёкший pairing, неподдерживаемый protocol и foreign project не читают/пишут данные.
 
-- [ ] **P08. Реализовать двусторонний bootstrap/delta/reconnect.**
+- [x] **P08. Реализовать двусторонний bootstrap/delta/reconnect.**
   - Зависимости: P07.
   - Предлагаемые модули: `packages/api/src/services/peerSync.ts`, data checkpoint/cursor API и integration harness.
   - Ручной peer address first; bounded push/pull batches, persisted progress/ACK, streaming bootstrap, retries/backoff, cancellation. Затем discovery paired peers и reconnect в LAN. Никаких sync command side effects.
@@ -221,6 +221,18 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
 - P04 foundation: append-only v32, строгий portable operation contract, per-field causal registers, transactional inbox/outbox, dedup/collision checks, contiguous ACK с проверкой sent watermark, tombstones. Checkpoint копируется атомарно внутри SQLite, передаётся bounded chunks, проверяет digest и устанавливается атомарно с сохранением конкурентных локальных правок. Отдельные writer incarnations исключают повторное использование sequence после рестарта writer process. Подключение всех REST/MCP/worker writers к этому ядру — следующий P05; сетевой транспорт и process-crash harness ещё не реализованы.
 - Проверки P04: shared coverage 245 passed (min 73.01%), data coverage 292 passed (min 79.62%); дополнительный SQLite backup/reopen test прошёл после coverage run. Перестановки, gaps, duplicate/collision, rollback до ACK, lost ACK, concurrent resolution, bootstrap tampering/partial install и replay старого checkpoint после delete проверены. Итоговый build и lint прошли. Обязательный root `ai:validate` запущен: data 293 passed, MCP 103 passed; остановка снова на известном 5s protocol-generator timeout под общей нагрузкой (runtime 900 passed, 1 failed, 1 skipped). M1 не объявлен готовым.
 - Пользователь подтвердил, что Mac пока недоступен. Mac paths/toolchain, native acceptance и M1 gate на двух устройствах остаются открытыми; Windows child-process harness не заменяет эту приёмку. Реальные пользовательские checkout не регистрировались и не изменялись.
+
+## Итог текущего среза M1
+
+- P07/P08: append-only v33; TLS 1.3 и взаимные certificate pins, одноразовое приглашение с ожидаемым fingerprint, allowlist/revoke, отдельный listener, проверка protocol/schema, quotas. Checkpoint/delta/reconnect, bounded ACK, persisted resume и явный resync после restore. Только manual peer addresses; mDNS discovery оставлен последующим улучшением согласно session prompt. Новых packages/dependencies нет.
+- Двухпроцессный harness: реальные отдельные Node-процессы и SQLite-файлы, pinned TLS, 40 задач, многокусковой bootstrap, обрыв/kill/restart, потерянный reply после commit, офлайн независимые и конфликтующие планы, resolution/delete/revoke. Отдельно проверены отмена repair при shutdown, неизвестный peer, неправильный pin, expired invitation, foreign scope и отсутствие HTTP body до проверки pin.
+- P09 UI реализован в существующих компонентах: attach_existing, устройства/pairing/адреса/прогресс/revoke/resync, local checkout/participant mappings, конфликты и editor plan CAS. Новых visual primitives нет; использованы существующие `.pen`-представленные controls. Select получил только `id`/`aria-label`. Chromium light/dark: 2 passed; полный perf/e2e на изолированной БД: 7 passed. Draft plan сохраняется при stale response; WS sync и reconnect инвалидируют React Query.
+- Общие writers сверены AST-инвентаризацией. Закрыт дополнительный прямой runtime-gate status writer; все attachment paths/bytes исключены из wire contract. Local uploads personal routes сохраняются в БД без записи в checkout. Добавлены фактические MCP-tool CAS tests, а не только вызовы data helpers.
+- Полные package runs: shared 245 passed (min coverage 72.57%); data 298 passed (74.51%); web 733 passed (74.49%); MCP 105 passed (86.27%); agent 399 passed (76.26%); runtime 901 passed / 1 skipped (73.22%, без унаследованного CODEX_CLI_PATH). Финальный API coverage run: 518 passed / 2 baseline failures (min 70.78%), включая cancellation/repair и protocol downgrade test. Все измеренные метрики выше 70%; API suite не зелёный.
+- Итоговые `npm run build` 7/7 и `npm run lint` 10/10 прошли. `npm run ai:validate` был запущен: format/lint прошли, остановка на неизменённом runtime protocol-generator test (5s timeout под общей нагрузкой; isolated suite прошёл). Assertions/timeouts не ослаблялись. API baseline: Windows POSIX file-mode expectation и `E:\\tmp` vs `\\tmp` в GitHub fixture. `ai:protocol` прошёл с bundled CLI 0.145.0; унаследованный внешний CLI 0.159.2 несовместим с SDK 0.145.0. `ai:load` сообщил отсутствие k6 и пропустил шаг; это не успешная нагрузочная приёмка.
+- Package CHECKLIST shared/data/api/agent/mcp/web просмотрены. DB boundary, browser-safe exports, миграции и их upgrade tests, shared consumers build, API/MCP/WS docs и UI theme checks выполнены. Runtime adapters/capabilities не менялись; Docker package/dependency sync неприменим. Документация: `docs/local-device-sync.md`, ADR, API/configuration/MCP и AGENTS map. Реальные Mac paths/toolchain/firewall и native Win↔Mac round trip остаются открытыми.
+- M1 не объявлен принятым: нужен доступный Mac, устранение/согласование baseline quality failures и реальная нагрузочная проверка с k6. Runtime guards сохраняются. Push/PR не выполнялись, M2–M4 не отмечены готовыми.
+- Дополнительный итоговый root run прошёл runtime (901 passed), но обнаружил пропущенный Turbo passthrough новых env-настроек; `turbo.json` и строгий env contract test исправлены. В этом же запуске новый `existingCheckout` Git-fixture превысил 5s под общей нагрузкой; это не помечено как baseline. Изолированные native fixtures проходят, assertions и timeout сохранены. Общий gate остаётся открытым до устойчивого полного запуска.
 
 ## See Also
 

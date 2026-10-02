@@ -164,7 +164,7 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
                   <Section
                     title="Plan"
                     actions={
-                      task.plan?.trim() ? (
+                      task.plan?.trim() && !task.personalMode ? (
                         <Button
                           type="button"
                           variant="outline"
@@ -177,7 +177,20 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
                       ) : undefined
                     }
                   >
-                    <TaskPlan plan={task.plan} />
+                    <TaskPlan
+                      key={task.id}
+                      plan={task.plan}
+                      revisions={task.syncRevisions}
+                      onSave={
+                        task.personalMode
+                          ? (plan, expectedSyncRevisions) =>
+                              actions.updateTask.mutateAsync({
+                                id: task.id,
+                                input: { plan, expectedSyncRevisions },
+                              })
+                          : undefined
+                      }
+                    />
                   </Section>
 
                   <div className="border-t border-border pt-4">
@@ -349,22 +362,26 @@ export function TaskDetail({ taskId, onClose }: TaskDetailProps) {
           <p className="text-sm text-muted-foreground">
             The task will move from <strong>Done</strong> to <strong>Verified</strong>.
           </p>
-          <label className="mt-4 flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={actions.deletePlanOnApprove}
-              onChange={(event) => actions.setDeletePlanOnApprove(event.target.checked)}
-              disabled={actions.commitPending}
-            />
-            Delete plan file ({task?.isFix ? "FIX_PLAN.md" : "PLAN.md"})
-          </label>
-          <label className="mt-2 flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={actions.commitOnApprove}
-              onChange={(event) => actions.setCommitOnApprove(event.target.checked)}
-              disabled={actions.commitPending}
-            />
-            Create commit (/aif-commit)
-          </label>
+          {!task?.personalMode && (
+            <>
+              <label className="mt-4 flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={actions.deletePlanOnApprove}
+                  onChange={(event) => actions.setDeletePlanOnApprove(event.target.checked)}
+                  disabled={actions.commitPending}
+                />
+                Delete plan file ({task?.isFix ? "FIX_PLAN.md" : "PLAN.md"})
+              </label>
+              <label className="mt-2 flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={actions.commitOnApprove}
+                  onChange={(event) => actions.setCommitOnApprove(event.target.checked)}
+                  disabled={actions.commitPending}
+                />
+                Create commit (/aif-commit)
+              </label>
+            </>
+          )}
           {actions.commitPending && (
             <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
               <Spinner size="sm" />

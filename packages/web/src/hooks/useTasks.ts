@@ -110,12 +110,20 @@ export function useTaskEvent() {
       event,
       deletePlanFile,
       commitOnApprove,
+      expectedSyncRevisions,
     }: {
       id: string;
       event: TaskEvent;
       deletePlanFile?: TaskEventInput["deletePlanFile"];
       commitOnApprove?: TaskEventInput["commitOnApprove"];
-    }) => api.taskEvent(id, event, { deletePlanFile, commitOnApprove }),
+      expectedSyncRevisions?: TaskEventInput["expectedSyncRevisions"];
+    }) =>
+      api.taskEvent(id, event, {
+        deletePlanFile,
+        commitOnApprove,
+        expectedSyncRevisions:
+          expectedSyncRevisions ?? queryClient.getQueryData<Task>(["task", id])?.syncRevisions,
+      }),
     onMutate: async ({ id }) => {
       await queryClient.cancelQueries({ queryKey: ["tasks"] });
       const previousTaskLists = queryClient.getQueriesData<TaskListItem[]>({
