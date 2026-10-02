@@ -8,3 +8,4 @@ Run through this list whenever you touch anything under `packages/data/`.
 - [ ] Add unit tests covering new query paths and edge cases (empty result, conflict, update of missing row).
 - [ ] `npm run lint`
 - [ ] `npm test`
+- [ ] Shared personal-board mutations journal the whitelist delta in the same transaction; remote apply never calls source writers or emits an outbox echo. Plans/workflow require field revisions.

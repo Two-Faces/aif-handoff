@@ -1,5 +1,38 @@
 import { z } from "zod";
-import { TASK_EVENTS, TASK_STATUSES, getEnv, syncRevisionsSchema } from "@aif/shared";
+import {
+  TASK_EVENTS,
+  TASK_STATUSES,
+  getEnv,
+  syncRevisionsSchema,
+  syncDotSchema,
+  peerAddressSchema,
+  peerFingerprintSchema,
+  peerInvitationSchema,
+} from "@aif/shared";
+
+export const peerInviteRequestSchema = z
+  .object({
+    expectedFingerprint: peerFingerprintSchema,
+    projectIds: z.array(z.uuid()).min(1).max(50),
+  })
+  .strict();
+export const peerPairRequestSchema = z
+  .object({
+    address: peerAddressSchema,
+    invitation: peerInvitationSchema,
+    projectIds: z.array(z.uuid()).min(1).max(50),
+  })
+  .strict();
+export const peerAddressRequestSchema = z.object({ address: peerAddressSchema }).strict();
+export const personalConflictResolutionSchema = z
+  .object({
+    entityType: z.enum(["project", "task", "comment", "participant"]),
+    entityId: z.uuid(),
+    field: z.string().min(1).max(100),
+    value: z.json(),
+    parents: z.array(syncDotSchema).min(1).max(100),
+  })
+  .strict();
 
 export const personalCheckoutSchema = z
   .object({

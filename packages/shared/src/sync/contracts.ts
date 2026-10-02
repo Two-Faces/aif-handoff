@@ -13,8 +13,7 @@ const attachment = z
     name: z.string().max(500),
     mimeType: z.string().max(200),
     size: z.number().int().nonnegative(),
-    content: text.nullable(),
-    path: z.string().max(1000).optional(),
+    content: z.null(),
   })
   .strict();
 

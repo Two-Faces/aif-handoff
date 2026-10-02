@@ -122,9 +122,20 @@ describe("shared domain writers and materialization", () => {
       participantId: owner,
       message: "Offline comment",
     })!;
+    data.updateTask(task.id, {
+      attachments: [
+        {
+          name: "local.txt",
+          mimeType: "text/plain",
+          size: 13,
+          content: "PRIVATE_BYTES",
+          path: ".ai-factory/private.txt",
+        },
+      ],
+    });
     const ops = transfer(project.id);
     expect(JSON.stringify(ops)).not.toMatch(
-      /PRIVATE_ROOT|LOCAL_SECRET|passwordHash|runtimeProfileId/,
+      /PRIVATE_ROOT|LOCAL_SECRET|PRIVATE_BYTES|private.txt|passwordHash|runtimeProfileId/,
     );
     expect(data.findProjectById(project.id)).toMatchObject({ rootPath: "", personalMode: true });
     expect(data.getTaskOwnership(task.id)?.assignees).toEqual([]);
@@ -133,6 +144,7 @@ describe("shared domain writers and materialization", () => {
       paused: true,
       autoMode: false,
       unresolvedAssignees: [{ displayName: "Owner" }],
+      attachments: [{ name: "local.txt", mimeType: "text/plain", size: 13, content: null }],
     });
     const logical = data.listLogicalParticipants(project.id)[0]!;
     expect(state.db.select().from(participants).all()).toEqual([]);
@@ -223,6 +235,17 @@ describe("shared domain writers and materialization", () => {
       .run();
     data.setAutoQueueMode(project.id, true);
     expect(data.listStaleInProgressTasks()).toEqual([]);
+    expect(
+      data.blockTaskForRuntimeGateIfEligible({
+        taskId: task.id,
+        expectedStatus: "planning",
+        blockedFromStatus: "planning",
+        blockedReason: "local limit",
+        retryAfter: null,
+        retryCount: 0,
+        snapshot: null,
+      }),
+    ).toBe(false);
     expect(data.listAutoQueueProjects()).toEqual([]);
     state.db
       .update(tasks)

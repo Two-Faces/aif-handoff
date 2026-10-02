@@ -10,3 +10,4 @@ Run through this list whenever you touch anything under `packages/api/`.
 - [ ] Add integration tests for new routes (happy path + one error path minimum).
 - [ ] `npm run lint`
 - [ ] `npm test`
+- [ ] Peer traffic uses the dedicated pinned TLS listener and project allowlists. Browser/MCP credentials never authenticate peers; personal runtime guards run before Git/filesystem preparation.

@@ -17,6 +17,9 @@ export {
   syncPeerCursors,
   syncCheckpoints,
   syncCheckpointRecords,
+  syncPeers,
+  syncPeerProjects,
+  syncInvitations,
   appSettings,
   participants,
   participantSessions,
@@ -328,3 +331,4 @@ export {
   type SafeRuntimeErrorCategory,
   type SafeRuntimeErrorReason,
 } from "./runtimeLimitUtils.js";
+export * from "./sync/peers.js";

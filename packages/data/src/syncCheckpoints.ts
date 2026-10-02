@@ -51,6 +51,10 @@ function manifestOf(row: ReturnType<typeof checkpoint>): CheckpointManifest {
   });
 }
 
+export function getSyncCheckpointManifest(checkpointId: string): CheckpointManifest {
+  return manifestOf(checkpoint(checkpointId));
+}
+
 function* records(id: string) {
   let from = 0;
   while (true) {

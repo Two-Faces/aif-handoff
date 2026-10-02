@@ -26,6 +26,7 @@ describe("Turbo environment passthrough", () => {
       "AIF_GITHUB_ISSUE_PR_ENABLED",
       "AIF_GITHUB_PROJECT_CLONE_ENABLED",
       "AIF_NOTIFICATIONS_PROJECT_NAMES_ENABLED",
+      "AIF_PEER_ENABLED",
       "AIF_QA_PIPELINE_ENABLED",
       "AIF_RUNTIME_CODEX_NATIVE_SUBAGENTS_ENABLED",
       "AIF_RUNTIME_MODEL_EFFORT_DISCOVERY_ENABLED",
@@ -40,6 +41,9 @@ describe("Turbo environment passthrough", () => {
     if (!hasAifWildcard) {
       for (const flag of documentedFeatureFlags) {
         expect(passThrough.has(flag), `${flag} is missing from turbo.json`).toBe(true);
+      }
+      for (const setting of ["AIF_PERSONAL_MODE", "AIF_PEER_PORT", "AIF_PEER_IDENTITY_DIR"]) {
+        expect(passThrough.has(setting), `${setting} is missing from turbo.json`).toBe(true);
       }
     }
   });

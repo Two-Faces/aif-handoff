@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { z } from "zod";
+import type { z } from "zod";
 import {
   bindLogicalParticipant,
   getLocalDevice,
@@ -13,12 +13,7 @@ import {
   ensureProjectSyncState,
   findTaskById,
 } from "@aif/data";
-import {
-  ExistingCheckoutError,
-  inspectExistingCheckout,
-  SyncError,
-  syncDotSchema,
-} from "@aif/shared";
+import { ExistingCheckoutError, inspectExistingCheckout, SyncError } from "@aif/shared";
 import { personalAdmin } from "../middleware/personalAdmin.js";
 import { getParticipantAuth, type ParticipantApiEnv } from "../middleware/participantAuth.js";
 import { broadcast } from "../ws.js";
@@ -32,6 +27,7 @@ import {
   personalCheckoutBindingSchema,
   personalParticipantBindingSchema,
   personalManifestSchema,
+  personalConflictResolutionSchema,
 } from "../schemas.js";
 
 export const personalProjectsRouter = new Hono<ParticipantApiEnv>();
@@ -98,40 +94,39 @@ personalProjectsRouter.get("/:id/conflicts", (c) => {
   ensureProjectSyncState(c.req.param("id"));
   return c.json(listSyncConflicts(c.req.param("id")));
 });
-const resolutionSchema = z
-  .object({
-    entityType: z.enum(["project", "task", "comment", "participant"]),
-    entityId: z.uuid(),
-    field: z.string().min(1).max(100),
-    value: z.json(),
-    parents: z.array(syncDotSchema).min(1).max(100),
-  })
-  .strict();
-personalProjectsRouter.post("/:id/conflicts/resolve", jsonValidator(resolutionSchema), (c) => {
-  const body = c.req.valid("json");
-  const participant = getParticipantAuth(c)?.session?.participant;
-  resolveSyncConflict({
-    ...body,
-    projectId: c.req.param("id"),
-    actor: participant
-      ? { kind: "participant", id: participant.id, displayNameSnapshot: participant.displayName }
-      : { kind: "anonymous", id: null, displayNameSnapshot: null },
-  });
-  if (body.entityType === "task") {
-    const task = findTaskById(body.entityId);
-    if (task)
-      broadcast({ type: "task:updated", payload: { id: task.id, projectId: task.projectId } });
-  }
-  return c.json({ resolved: true });
-});
+personalProjectsRouter.post(
+  "/:id/conflicts/resolve",
+  jsonValidator(personalConflictResolutionSchema),
+  (c) => {
+    const body = c.req.valid("json");
+    const participant = getParticipantAuth(c)?.session?.participant;
+    resolveSyncConflict({
+      ...body,
+      projectId: c.req.param("id"),
+      actor: participant
+        ? { kind: "participant", id: participant.id, displayNameSnapshot: participant.displayName }
+        : { kind: "anonymous", id: null, displayNameSnapshot: null },
+    });
+    if (body.entityType === "task") {
+      const task = findTaskById(body.entityId);
+      if (task)
+        broadcast({ type: "task:updated", payload: { id: task.id, projectId: task.projectId } });
+    }
+    return c.json({ resolved: true });
+  },
+);
 personalProjectsRouter.post(
   "/:id/identities/bind",
   jsonValidator(personalParticipantBindingSchema),
   (c) => {
     const { logicalParticipantId, participantId } = c.req.valid("json");
-    return c.json(
-      bindLogicalParticipant({ projectId: c.req.param("id"), logicalParticipantId, participantId }),
-    );
+    const binding = bindLogicalParticipant({
+      projectId: c.req.param("id"),
+      logicalParticipantId,
+      participantId,
+    });
+    broadcast({ type: "sync:board_updated", payload: { id: c.req.param("id") } });
+    return c.json(binding);
   },
 );
 

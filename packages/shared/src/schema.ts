@@ -731,6 +731,38 @@ export const syncCheckpoints = sqliteTable("handoff_sync_checkpoints", {
   receivedBytes: integer("received_bytes").notNull().default(0),
   complete: integer("complete", { mode: "boolean" }).notNull().default(false),
 });
+
+export const syncPeers = sqliteTable("handoff_sync_peers", {
+  deviceId: text("device_id").primaryKey(),
+  name: text("name").notNull(),
+  fingerprint: text("fingerprint").notNull().unique(),
+  address: text("address"),
+  revoked: integer("revoked", { mode: "boolean" }).notNull().default(false),
+  lastContactAt: text("last_contact_at"),
+  lastErrorCode: text("last_error_code"),
+});
+export const syncPeerProjects = sqliteTable(
+  "handoff_sync_peer_projects",
+  {
+    peerId: text("peer_id")
+      .notNull()
+      .references(() => syncPeers.deviceId, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull(),
+    outgoingCheckpointId: text("outgoing_checkpoint_id"),
+    incomingCheckpointId: text("incoming_checkpoint_id"),
+    bootstrapped: integer("bootstrapped", { mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [primaryKey({ columns: [table.peerId, table.projectId] })],
+);
+export const syncInvitations = sqliteTable("handoff_sync_invitations", {
+  id: text("id").primaryKey(),
+  tokenDigest: text("token_digest").notNull(),
+  expectedFingerprint: text("expected_fingerprint").notNull(),
+  projectIdsJson: text("project_ids_json").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  acceptedDeviceId: text("accepted_device_id"),
+  acceptedRequestJson: text("accepted_request_json"),
+});
 export const syncCheckpointRecords = sqliteTable(
   "handoff_sync_checkpoint_records",
   {

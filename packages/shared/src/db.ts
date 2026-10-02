@@ -1179,6 +1179,26 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 33,
+    description: "Pinned peers, single-use pairing and resumable board bootstrap",
+    sql: `
+      CREATE TABLE handoff_sync_peers (
+        device_id TEXT PRIMARY KEY, name TEXT NOT NULL, fingerprint TEXT NOT NULL UNIQUE,
+        address TEXT, revoked INTEGER NOT NULL DEFAULT 0, last_contact_at TEXT, last_error_code TEXT
+      );
+      CREATE TABLE handoff_sync_peer_projects (
+        peer_id TEXT NOT NULL REFERENCES handoff_sync_peers(device_id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL, outgoing_checkpoint_id TEXT, incoming_checkpoint_id TEXT,
+        bootstrapped INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (peer_id, project_id)
+      );
+      CREATE TABLE handoff_sync_invitations (
+        id TEXT PRIMARY KEY, token_digest TEXT NOT NULL, expected_fingerprint TEXT NOT NULL,
+        project_ids_json TEXT NOT NULL, expires_at INTEGER NOT NULL,
+        accepted_device_id TEXT, accepted_request_json TEXT
+      );
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {

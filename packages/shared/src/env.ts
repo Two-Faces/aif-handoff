@@ -80,6 +80,9 @@ const exactOriginSchema = z.string().transform((value, context) => {
 
 const envSchema = z.object({
   AIF_PERSONAL_MODE: booleanEnvSchema.default(false),
+  AIF_PEER_ENABLED: booleanEnvSchema.default(false),
+  AIF_PEER_PORT: z.coerce.number().int().min(1).max(65535).default(3010),
+  AIF_PEER_IDENTITY_DIR: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_AUTH_TOKEN: z.string().optional(),
   ANTHROPIC_BASE_URL: z.string().optional(),

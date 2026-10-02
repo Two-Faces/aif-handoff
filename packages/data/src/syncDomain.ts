@@ -37,6 +37,20 @@ function json(value: string): unknown {
   }
 }
 
+function portableAttachments(raw: string) {
+  const values = json(raw);
+  if (!Array.isArray(values)) throw new SyncError("invalid_operation");
+  return values.map((value: unknown) => {
+    if (!value || typeof value !== "object") throw new SyncError("invalid_operation");
+    return {
+      name: "name" in value ? value.name : undefined,
+      mimeType: "mimeType" in value ? value.mimeType : undefined,
+      size: "size" in value ? value.size : undefined,
+      content: null,
+    };
+  });
+}
+
 /** Legacy local attribution may be inactive; this never grants an active account. */
 function historicalIdentity(projectId: string, participantId: string, displayName: string) {
   const db = getDb();
@@ -202,7 +216,7 @@ export function captureSharedEntity(ref: SyncEntityRef): Record<string, unknown>
         manualReviewRequired: row.manualReviewRequired,
         reworkRequested: row.reworkRequested,
       },
-      attachments: json(row.attachments),
+      attachments: portableAttachments(row.attachments),
       tags: json(row.tags),
       isFix: row.isFix,
       plannerMode: row.plannerMode,
@@ -228,7 +242,7 @@ export function captureSharedEntity(ref: SyncEntityRef): Record<string, unknown>
       logicalAuthorId: row.logicalAuthorId,
       authorDisplayNameSnapshot: row.authorDisplayNameSnapshot,
       message: row.message,
-      attachments: json(row.attachments),
+      attachments: portableAttachments(row.attachments),
       createdAt: row.createdAt,
     });
   }
@@ -355,11 +369,17 @@ export function materializeSharedEntity(
   }
   if (ref.entityType === "task") {
     const { workflow, attachments, tags, ...value } = sharedTaskFields.parse(fields);
+    const previousTask = db.select().from(tasks).where(eq(tasks.id, ref.entityId)).get();
+    const localAttachments =
+      previousTask &&
+      JSON.stringify(portableAttachments(previousTask.attachments)) === JSON.stringify(attachments)
+        ? previousTask.attachments
+        : JSON.stringify(attachments);
     const { assignees, ...workflowFields } = workflow;
     const patch = {
       ...value,
       ...workflowFields,
-      attachments: JSON.stringify(attachments),
+      attachments: localAttachments,
       tags: JSON.stringify(tags),
     };
     db.insert(tasks)
@@ -424,7 +444,12 @@ export function materializeSharedEntity(
       participantId: value.logicalAuthorId
         ? resolveLocalParticipant(ref.projectId, value.logicalAuthorId)
         : null,
-      attachments: JSON.stringify(value.attachments),
+      attachments:
+        previous &&
+        JSON.stringify(portableAttachments(previous.attachments)) ===
+          JSON.stringify(value.attachments)
+          ? previous.attachments
+          : JSON.stringify(value.attachments),
     };
     db.insert(taskComments)
       .values({ id: ref.entityId, ...patch })

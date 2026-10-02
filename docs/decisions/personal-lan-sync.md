@@ -137,6 +137,18 @@ timeouts and retries. Cancellation stops transfer without acknowledging partial
 work. Reconnect resumes from durable cursors with capped exponential backoff.
 Diagnostics expose counts and structured codes, never private keys/tokens.
 
+The M1 implementation uses Node TLS 1.3 with local self-signed Ed25519 X.509
+identities. CA/hostname trust is replaced by SHA-256 certificate pins: the client
+checks the server pin before sending HTTP bytes, and the server requires the
+client certificate and checks its pin/device binding on every RPC. TLS verifies
+possession of the corresponding private keys. Pairing requires the expected client
+fingerprint plus a 256-bit token; only its digest is stored. Identical lost-reply
+retries do not undo revocation. Limits: 1 MiB/operation, 100 operations/batch,
+4 MiB/checkpoint chunk, 64 MiB/checkpoint, 8 active requests and 32 connections.
+Manual HTTPS addresses and reconnect are implemented; mDNS discovery remains the
+later improvement identified by the session prompt. Explicit resync resets transfer
+bookkeeping on both peers without deleting shared data or tombstones.
+
 ## Mutation inventory and verification
 
 P05 must enumerate and test these writer families, including indirect calls:

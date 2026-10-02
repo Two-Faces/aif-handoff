@@ -648,6 +648,7 @@ export type WsEventType =
   | "chat:session_created"
   | "chat:session_deleted"
   | "sync:task_created"
+  | "sync:board_updated"
   | "sync:task_updated"
   | "sync:status_changed"
   | "sync:plan_pushed"

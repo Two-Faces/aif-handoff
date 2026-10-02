@@ -114,6 +114,8 @@ export {
   type SharedMutationOptions,
 } from "./syncMutations.js";
 export { resolveSyncConflict } from "./syncConflicts.js";
+export * from "./peers.js";
+export * from "./peerSync.js";
 export { listSyncConflicts } from "./syncJournal.js";
 
 export * from "./normalizeBacklogPositions.js";
@@ -2430,6 +2432,7 @@ export function blockTaskForRuntimeGateIfEligible(input: {
   const nowIso = input.persistedAt ?? new Date().toISOString();
   const normalizedSnapshot = input.snapshot ? normalizeRuntimeLimitSnapshot(input.snapshot) : null;
   const conditions = [
+    executableTaskProjectFilter(),
     eq(tasks.id, input.taskId),
     eq(tasks.status, input.expectedStatus),
     eq(tasks.executionOwner, "ai"),

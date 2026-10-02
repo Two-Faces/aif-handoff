@@ -56,7 +56,7 @@ describe("personal identity migration", () => {
       getDb(path);
       closeDb();
       const migrated = new Database(path, { readonly: true });
-      expect(migrated.pragma("user_version", { simple: true })).toBe(32);
+      expect(migrated.pragma("user_version", { simple: true })).toBe(33);
       expect(
         migrated
           .prepare(

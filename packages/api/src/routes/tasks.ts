@@ -571,10 +571,12 @@ tasksRouter.post("/", jsonValidator(createTaskSchema), async (c) => {
   // Persist attachments to project files and update the task with path-based metadata
   if (body.attachments.length > 0) {
     if (project) {
-      const persisted = await persistAttachments(body.attachments, {
-        projectRoot: project.rootPath,
-        taskId: created.id,
-      });
+      const persisted = project.personalMode
+        ? body.attachments
+        : await persistAttachments(body.attachments, {
+            projectRoot: project.rootPath,
+            taskId: created.id,
+          });
       updateTask(created.id, { attachments: persisted });
     }
   }
@@ -852,11 +854,13 @@ tasksRouter.post("/:id/comments", jsonValidator(createTaskCommentSchema), async 
   if (body.attachments.length > 0) {
     const project = findProjectById(task.projectId);
     if (project) {
-      const persisted = await persistAttachments(body.attachments, {
-        projectRoot: project.rootPath,
-        taskId: id,
-        commentId: created.id,
-      });
+      const persisted = project.personalMode
+        ? body.attachments
+        : await persistAttachments(body.attachments, {
+            projectRoot: project.rootPath,
+            taskId: id,
+            commentId: created.id,
+          });
       const updated = updateComment(created.id, { attachments: persisted });
       finalComment = updated ?? created;
     }
