@@ -2,7 +2,7 @@
 
 > [ТЗ](../specs/personal-lan-handoff.md) · [Запуск сессии](../specs/personal-lan-handoff-session.md) · [Проекты](../specs/personal-lan-handoff-projects.json)
 
-Статус: код M1 P01–P09 подготовлен и проверен на Windows fixtures; общий gate M1 открыт. P02–P08 отмечены как реализованные; UI P09 готов, но приёмка на двух нативных устройствах не закрыта. Mac недоступен по подтверждению пользователя; есть baseline failures общего quality gate. M2–M4 не реализовывались. Исследованная база: `Two-Faces/aif-handoff`, `main@3d982ef344aaa2fb72f99d5603a1fea0051206ea`, 02.10.2026. Ветка: `codex/personal-lan-handoff` от `51df656`. Ветки/файлы подключаемых проектов не менялись; реальные checkout не регистрировались.
+Статус: код M1 P01–P09 реализован; локальный quality gate закрыт полным `ai:validate`, включая k6. Общий gate M1 и checkbox P09 остаются открытыми до нативной приёмки Windows ↔ Mac, перенесённой пользователем на следующий день. M2–M4 не реализовывались. Исследованная база: `Two-Faces/aif-handoff`, `main@3d982ef344aaa2fb72f99d5603a1fea0051206ea`, 02.10.2026. Ветка: `codex/personal-lan-handoff` от `51df656`. Ветки/файлы подключаемых проектов не менялись; реальные checkout не регистрировались.
 
 Новые пути модулей ниже — предложение; существующие точки расширения проверены по исходной ревизии. Не создавать отдельный пакет только ради transport: начать с модулей в текущих workspaces. Если пакет окажется необходимым, выполнить Docker Sync Rule.
 
@@ -222,7 +222,31 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
 - Проверки P04: shared coverage 245 passed (min 73.01%), data coverage 292 passed (min 79.62%); дополнительный SQLite backup/reopen test прошёл после coverage run. Перестановки, gaps, duplicate/collision, rollback до ACK, lost ACK, concurrent resolution, bootstrap tampering/partial install и replay старого checkpoint после delete проверены. Итоговый build и lint прошли. Обязательный root `ai:validate` запущен: data 293 passed, MCP 103 passed; остановка снова на известном 5s protocol-generator timeout под общей нагрузкой (runtime 900 passed, 1 failed, 1 skipped). M1 не объявлен готовым.
 - Пользователь подтвердил, что Mac пока недоступен. Mac paths/toolchain, native acceptance и M1 gate на двух устройствах остаются открытыми; Windows child-process harness не заменяет эту приёмку. Реальные пользовательские checkout не регистрировались и не изменялись.
 
-## Итог текущего среза M1
+## Актуальный результат стабилизации M1 — 02.10.2026
+
+- Код стабилизации сохранён локальным коммитом `77f30ed` (`fix: stabilize native Windows validation and peer identities`).
+- Исправлена проверка защищённого bootstrap password-файла на Windows: проверяется настоящий ACL, включая унаследованный и write-only доступ, с чтением через тот же открытый handle. POSIX сохраняет owner-only проверку. Ошибки fail closed без вывода пароля; лимит 64 KiB. Native ACL tests проходят.
+- GitHub/checkout fixtures используют абсолютные пути OS temp и очищаются после тестов. Установка MCP сохраняет абсолютные `DATABASE_URL` / `PROJECTS_DIR`, относительные пути разрешает от корня Handoff; оба случая покрыты тестами. Тесты явно задают свои переменные окружения.
+- Root `npm test` запускает workspace suites последовательно, сохраняя внутреннюю параллельность Vitest и двухпроцессные сценарии. Assertions, таймауты и пороги не ослаблены. CLI fallback tests изолированы от пользовательского `CODEX_CLI_PATH`; root `ai:protocol` выбирает локальный npm PATH CLI и сохраняет строгую проверку версии SDK.
+- Полный прогон выявил редкий дефект DER INTEGER в случайном serial сертификата: после очистки sign bit мог остаться избыточный нулевой префикс. Исправлено создание положительного serial без такого префикса. Детерминированная регрессия до исправления: 3 failed / 2 passed, после — 5 passed; реальный TLS и peer crash/restart также проходят. Существующие identities/pins автоматически не заменяются.
+- Итоговый `npm run ai:validate` завершился с кодом 0: format, lint 10/10, tests 10/10, coverage 10/10, build 7/7, Chromium perf/e2e 7 passed, k6 3/3, protocol check (CLI 0.145.0), checklist. Всего unit/integration: **3213 passed / 1 existing skipped**. Лог: локальный `.git/m1-final-validation.log`.
+
+| Пакет | Тесты passed | Минимальная метрика coverage |
+| --- | ---: | ---: |
+| shared | 245 | 72.57% |
+| data | 298 | 75.00% |
+| runtime | 902 (+1 skipped) | 73.25% |
+| api | 531 | 70.86% |
+| agent | 399 | 76.26% |
+| mcp | 105 | 86.27% |
+| web | 733 | 74.49% |
+
+- Браузерные и k6 проверки выполнены на отдельной БД `.git/m1-validation/fixture.sqlite` со 100 synthetic paused/manual задачами. Пользовательский `CODEX_CLI_PATH` сохранён; `DATABASE_URL`, `PROJECTS_DIR` и адреса тестового сервера переданы только дочернему процессу. k6 v2.3.0 скачан из официального release, SHA-256 сверена; бинарник локален в `.git/tools/k6`, системная установка/PATH не менялись. Драйвер: `.git/m1-validation-run.mjs`; исходные logs/reports остаются локальными.
+- k6: chat-sessions — 26 537 запросов, p95 9.17 ms; runtime-profiles — 107 336, p95 6.95 ms; tasks — 10 026, p95 46.54 ms. HTTP error rate 0 для всех трёх, исходные thresholds пройдены. Это проверка локальных API endpoints, а не измерение скорости LAN replication. Отчёты: `packages/api/perf/reports/`.
+- CHECKLIST root/api/runtime проверены; повторяющиеся правила переносимости fixtures и env isolation добавлены в package checklists. REST-схемы и WS-контракты не менялись, DB boundary сохранена. Adapter capabilities/контракты и зависимости не менялись, поэтому parity/docs registration/Docker sync неприменимы. Временные dev servers завершены.
+- Открыта только нативная часть M1: установка Mac, его checkout paths/toolchain/firewall, pairing и двусторонний сценарий на тестовом репозитории. Personal execution guards сохранены до M2. Push/PR не выполнялись; M2–M4 остаются следующими этапами.
+
+## Предыдущий срез M1 — до стабилизации quality gate
 
 - P07/P08: append-only v33; TLS 1.3 и взаимные certificate pins, одноразовое приглашение с ожидаемым fingerprint, allowlist/revoke, отдельный listener, проверка protocol/schema, quotas. Checkpoint/delta/reconnect, bounded ACK, persisted resume и явный resync после restore. Только manual peer addresses; mDNS discovery оставлен последующим улучшением согласно session prompt. Новых packages/dependencies нет.
 - Двухпроцессный harness: реальные отдельные Node-процессы и SQLite-файлы, pinned TLS, 40 задач, многокусковой bootstrap, обрыв/kill/restart, потерянный reply после commit, офлайн независимые и конфликтующие планы, resolution/delete/revoke. Отдельно проверены отмена repair при shutdown, неизвестный peer, неправильный pin, expired invitation, foreign scope и отсутствие HTTP body до проверки pin.

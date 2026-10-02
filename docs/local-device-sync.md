@@ -145,7 +145,7 @@ synthetic; none of the inventoried working copies is modified.
 
 Native Windows-to-Mac acceptance remains open: the user confirmed the Mac is currently
 unavailable. The Windows process harness does not substitute for that acceptance.
-Current command results and baseline failures are recorded in the
+Current validation results and the remaining native acceptance are recorded in the
 [implementation plan](../.ai-factory/plans/personal-lan-handoff.md).
 
 ## Implementation references
