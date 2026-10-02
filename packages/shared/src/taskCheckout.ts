@@ -178,11 +178,14 @@ function validateDestination(root: string, destination: string, commonDir: strin
   // Do not follow symlinks/junctions into a different managed location.
   let parent = destination;
   while (true) {
-    if (existsSync(parent) && lstatSync(parent).isSymbolicLink()) {
-      throw new TaskCheckoutError(
-        "invalid_path",
-        `Task checkout path contains a symlink or junction: ${parent}`,
-      );
+    try {
+      if (lstatSync(parent).isSymbolicLink())
+        throw new TaskCheckoutError(
+          "invalid_path",
+          `Task checkout path contains a symlink or junction: ${parent}`,
+        );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
     const next = dirname(parent);
     if (next === parent) break;
@@ -192,6 +195,27 @@ function validateDestination(root: string, destination: string, commonDir: strin
 
 function commonDirectory(root: string): string {
   return canonical(resolve(root, taskGitText(root, ["rev-parse", "--git-common-dir"])));
+}
+
+/** Read-only preflight before accepting a locally chosen transfer destination. */
+export function assertTaskCheckoutDestination(projectRoot: string, destination: string): void {
+  const root = canonical(projectRoot);
+  if (canonical(taskGitText(root, ["rev-parse", "--show-toplevel"])) !== root)
+    throw new TaskCheckoutError(
+      "invalid_path",
+      "A project binding must identify its repository root",
+    );
+  validateDestination(root, destination, commonDirectory(root));
+  for (const entry of taskGitText(root, ["worktree", "list", "--porcelain", "-z"]).split("\0")) {
+    if (!entry.startsWith("worktree ")) continue;
+    const other = resolve(entry.slice("worktree ".length));
+    if (relative(other, resolve(destination)) === "") continue;
+    if (contains(other, destination) || contains(destination, other))
+      throw new TaskCheckoutError(
+        "invalid_path",
+        "A task checkout cannot overlap another registered worktree",
+      );
+  }
 }
 
 function identityFile(worktreePath: string): string {

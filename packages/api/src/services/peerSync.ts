@@ -29,6 +29,7 @@ import {
 import { peerRequest, startPeerListener } from "./peerTransport.js";
 import { type PeerTlsIdentity } from "./peerIdentity.js";
 import { diagnosePeerError } from "./peerErrors.js";
+import { createGitSnapshotTransferService } from "./gitSnapshotTransfer.js";
 import {
   peerCheckpointChunkSchema,
   peerCheckpointProgressSchema,
@@ -42,6 +43,7 @@ export function createPeerSyncService(
   onChange: () => void = () => {},
   transport = peerRequest,
 ) {
+  const snapshots = createGitSnapshotTransferService(identity, transport);
   let listener: Awaited<ReturnType<typeof startPeerListener>> | null = null;
   let stopping = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -204,10 +206,12 @@ export function createPeerSyncService(
     timer.unref();
   }
   return {
+    snapshots,
     identity: () => ({ ...localIdentity(), fingerprint: identity.fingerprint }),
     async start(port: number, host?: string, reconnect = true) {
       if (listener) return listener;
       stopping = false;
+      snapshots.start();
       listener = await startPeerListener({ identity, port, host, onChange });
       if (reconnect) schedule();
       return listener;
@@ -216,6 +220,7 @@ export function createPeerSyncService(
       stopping = true;
       if (timer) clearTimeout(timer);
       for (const controller of controllers.values()) controller.abort();
+      await snapshots.stop();
       await Promise.allSettled([...running.values()]);
       if (listener) {
         listener.closeAllConnections();
@@ -304,6 +309,7 @@ export function createPeerSyncService(
     },
     cancel(peerId: string) {
       controllers.get(peerId)?.abort();
+      snapshots.cancel(peerId);
     },
   };
 }

@@ -8,6 +8,7 @@ import {
   peerAddressSchema,
   peerFingerprintSchema,
   peerInvitationSchema,
+  snapshotDigestSchema,
 } from "@aif/shared";
 
 export const peerInviteRequestSchema = z
@@ -24,6 +25,12 @@ export const peerPairRequestSchema = z
   })
   .strict();
 export const peerAddressRequestSchema = z.object({ address: peerAddressSchema }).strict();
+export const snapshotPublishRequestSchema = z
+  .object({ projectId: z.uuid(), snapshotId: snapshotDigestSchema })
+  .strict();
+export const snapshotPullRequestSchema = snapshotPublishRequestSchema
+  .extend({ checkoutId: z.uuid(), worktreePath: z.string().min(1).max(1000) })
+  .strict();
 export const personalConflictResolutionSchema = z
   .object({
     entityType: z.enum(["project", "task", "comment", "participant"]),

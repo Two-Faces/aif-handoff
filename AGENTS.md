@@ -116,8 +116,8 @@ Personal LAN M1 adds `packages/shared/src/sync/` (strict portable contracts/caus
 data `syncJournal.ts`, `syncCheckpoints.ts`, `syncMutations.ts`, `syncDomain.ts`,
 `syncConflicts.ts`, `peers.ts` and `peerSync.ts`. The API owns pinned TLS transport in
 `services/peerIdentity.ts`, `peerTransport.ts`, `peerProtocol.ts`, `peerSync.ts` and local
-administration in `routes/peers.ts` / `routes/personal.ts`. Personal projects are
-board-only: do not remove execution guards before the M2 grant/fencing gate. See
+administration in `routes/peers.ts` / `routes/personal.ts`. Personal execution stays
+disabled: do not remove execution guards before the M2 grant/fencing gate. See
 `docs/local-device-sync.md` for recovery, mutation inventory and native acceptance.
 
 M2 work in progress adds shared `taskCheckout.ts` / `taskCommit.ts` and data
@@ -129,6 +129,11 @@ Shared `handoff/` and data `codeSnapshots.ts` add immutable code/context package
 explicit portable-file manifests and verified blobs. Local migration v35 journals
 checkpoint continuation into a new checkout before atomic root/scope activation.
 Existing context is never overwritten and registered roots skip implicit AIF init.
+P12 adds shared `handoff/gitSnapshot.ts` / `transferContracts.ts`, data
+`snapshotTransfers.ts` and API `gitSnapshotTransfer.ts`: explicit pinned-TLS pulls,
+durable chunks in migration v36, quarantined Git verification and separate readiness.
+Peer requests only read published manifests/chunks; destination bindings/paths are
+chosen locally. No transfer, checkout preparation or board sync grants execution.
 Workspace registration is internal pending M2 onboarding/grants. Keep M1 personal
 execution guards until the grant and stop/fencing gates are complete.
 

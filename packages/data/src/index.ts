@@ -1,5 +1,6 @@
 export * from "./taskWorkspaces.js";
 export * from "./codeSnapshots.js";
+export * from "./snapshotTransfers.js";
 import { getTaskExecutionWorkspace, resolveRegisteredTaskRoot } from "./taskWorkspaces.js";
 
 import {

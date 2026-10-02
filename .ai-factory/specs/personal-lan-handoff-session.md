@@ -41,7 +41,11 @@ P10 остаётся открытой для onboarding/run gates; полный 
 network code/blob transfer и stop/fencing этими тестами ещё не проверены.
 Не восстанавливай принадлежность dirty files новым scope после restart и
 не подменяй grants/fencing журналом: он не останавливает уже запущенный процесс.
-Далее следуй зависимостям P12–P15. M3/M4 не отмечай готовыми после M2.
+P12 добавляет explicit Git/context transfer через pinned TLS, durable chunks v36
+и Git quarantine. Итоговый Windows ai:validate прошёл: 3296 passed, coverage ≥70%,
+build/Chromium/k6/protocol зелёные. Двухпроцессные TLS/crash tests прошли;
+native Mac smoke P12 и реальный Win↔Mac code transfer ещё открыты.
+Далее следуй зависимостям P13–P15. M3/M4 не отмечай готовыми после M2.
 Сохраняй прогресс в указанном плане, не заменяя другие планы.
 
 Существующие проекты подключай только attach_existing: без init/install,

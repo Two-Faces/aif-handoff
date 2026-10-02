@@ -313,6 +313,7 @@ export function captureCodeSnapshotPackage(
 export function installContextSnapshot(input: {
   checkout: TaskCheckoutInput;
   package: CodeSnapshotPackage;
+  verifyOnly?: boolean;
 }): void {
   const pack = verifyCodeSnapshotPackage(input.package);
   assertTaskCheckout(input.checkout);
@@ -383,6 +384,8 @@ export function installContextSnapshot(input: {
         );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (input.verifyOnly)
+        throw new CodeSnapshotError("context_changed", `Context file is missing: ${entry.path}`);
       writes.push({ path, relativePath: entry.path, bytes });
     }
   }

@@ -1,8 +1,13 @@
-import { PeerError, SyncError } from "@aif/shared";
+import { PeerError, SyncError, SnapshotTransferError } from "@aif/shared";
 
 /** Preserve structured storage failures without exposing SQL, paths or payloads. */
-export function diagnosePeerError(error: unknown): PeerError | SyncError {
-  if (error instanceof PeerError || error instanceof SyncError) return error;
+export function diagnosePeerError(error: unknown): PeerError | SyncError | SnapshotTransferError {
+  if (
+    error instanceof PeerError ||
+    error instanceof SyncError ||
+    error instanceof SnapshotTransferError
+  )
+    return error;
   const code = error && typeof error === "object" && "code" in error ? error.code : null;
   if (code === "SQLITE_FULL" || code === "ENOSPC") return new PeerError("peer_storage_full");
   if (

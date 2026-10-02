@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { createTestDb } from "@aif/shared/server";
-import { resetEnvCache } from "@aif/shared";
+import {
+  resetEnvCache,
+  SnapshotTransferError,
+  CodeSnapshotError,
+  TaskCheckoutError,
+} from "@aif/shared";
 import { createPeersRouter } from "../routes/peers.js";
 import { createPeerSyncService } from "../services/peerSync.js";
 import { generatePeerIdentity } from "../services/peerIdentity.js";
@@ -30,6 +35,108 @@ const send = (app: Hono, path: string, body: unknown = {}, method = "POST") =>
     body: JSON.stringify(body),
   });
 describe("local peer administration", () => {
+  it("validates explicit snapshot actions and exposes independent readiness without granting execution", async () => {
+    const service = createPeerSyncService(generatePeerIdentity(data.getLocalDevice().deviceId));
+    const app = new Hono().route(
+      "/peers",
+      createPeersRouter(() => service),
+    );
+    const projectId = crypto.randomUUID(),
+      peerId = crypto.randomUUID(),
+      checkoutId = crypto.randomUUID(),
+      id = crypto.randomUUID(),
+      snapshotId = "a".repeat(64);
+    const ready = {
+      id,
+      projectId,
+      peerId,
+      snapshotId,
+      status: "ready" as const,
+      errorCode: null,
+      codeReady: true,
+      contextReady: true,
+      checkoutReady: true,
+      executionReady: false,
+      receivedChunks: 2,
+      totalChunks: 2,
+    };
+    const pull = vi.spyOn(service.snapshots, "pull").mockResolvedValue(ready);
+    const publish = vi.spyOn(service.snapshots, "publish").mockImplementation(() => {
+      throw new SnapshotTransferError("snapshot_missing");
+    });
+    vi.spyOn(service.snapshots, "status").mockReturnValue(ready);
+    vi.spyOn(service.snapshots, "remove").mockImplementation(() => {});
+    vi.spyOn(service.snapshots, "removeExport").mockImplementation(() => {});
+    expect(
+      (
+        await send(app, `/peers/${peerId}/snapshots/pull`, {
+          projectId,
+          snapshotId,
+          checkoutId,
+          worktreePath: "/chosen-by-local-user",
+        })
+      ).status,
+    ).toBe(200);
+    expect(pull).toHaveBeenCalledWith({
+      peerId,
+      projectId,
+      snapshotId,
+      checkoutId,
+      worktreePath: "/chosen-by-local-user",
+    });
+    expect(await (await app.request(`/peers/snapshots/transfers/${id}`)).json()).toEqual(ready);
+    expect(
+      await (await app.request(`/peers/snapshots/projects/${projectId}/transfers`)).json(),
+    ).toEqual([]);
+    expect((await send(app, "/peers/snapshots/publish", { projectId, snapshotId })).status).toBe(
+      409,
+    );
+    expect(publish).toHaveBeenCalledOnce();
+    expect(
+      (
+        await send(app, "/peers/snapshots/publish", {
+          projectId,
+          snapshotId,
+          projectRoot: "/peer-path",
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (await send(app, `/peers/${peerId}/snapshots/pull`, { projectId, snapshotId })).status,
+    ).toBe(400);
+    expect(
+      (await app.request(`/peers/snapshots/transfers/${id}`, { method: "DELETE" })).status,
+    ).toBe(200);
+    expect((await send(app, "/peers/snapshots/unpublish", { projectId, snapshotId })).status).toBe(
+      200,
+    );
+    for (const error of [
+      new CodeSnapshotError("context_changed", "Local context changed"),
+      new TaskCheckoutError("head_drift", "Local HEAD changed"),
+    ]) {
+      vi.mocked(service.snapshots.status).mockImplementation(() => {
+        throw error;
+      });
+      const blocked = await app.request(`/peers/snapshots/transfers/${id}`);
+      expect(blocked.status).toBe(409);
+      expect(await blocked.json()).toMatchObject({ code: error.code });
+    }
+    vi.stubEnv("PARTICIPANTS_MODE_ENABLED", "true");
+    resetEnvCache();
+    expect(
+      (
+        await send(app, `/peers/${peerId}/snapshots/pull`, {
+          projectId,
+          snapshotId,
+          checkoutId,
+          worktreePath: "/chosen-by-local-user",
+        })
+      ).status,
+    ).toBe(403);
+    expect(pull).toHaveBeenCalledOnce();
+    await service.stop();
+  });
+
   it("shows disabled state and refuses start operations or foreign browser origins", async () => {
     const app = new Hono().route(
       "/peers",

@@ -274,9 +274,10 @@ selection carries forward to the next snapshot unless replaced by the caller.
 Registered snapshot execution skips implicit AI Factory initialization, preserving
 existing AIF 2.19 project context. Resuming uses a new local session.
 
-These are internal host APIs, not new REST endpoints or a runnable handoff UI.
-Board replication does not carry these packages yet. Git/blob LAN transfer and
-target readiness are P12; execution grants and confirmed process stop are P13/P14.
+Capture and execution-workspace registration remain internal host APIs. P12 adds
+explicit REST publish/pull operations for already captured packages, described
+below; the full handoff UI remains P15. Board replication does not carry file bytes.
+Execution grants and confirmed process stop are P13/P14.
 Process-restart tests cover interruption after filesystem materialization but
 before activation, with later source-context changes, and passed on Windows and
 native macOS. The Mac evidence is the user's targeted Vitest output, not a full
@@ -290,6 +291,67 @@ npm test --workspace @aif/data -- taskWorkspaces.test.ts
 
 Require actual `Test Files` / `Tests` passed summaries. `No test files found` is
 not acceptance, even if a workspace's `--passWithNoTests` setting returns exit 0.
+
+## Explicit Git and context transfer (P12)
+
+Local administration can publish an existing snapshot and pull it from a paired
+peer over the pinned TLS listener. The source builds a full [Git bundle](https://git-scm.com/docs/git-bundle)
+and, when supported by its history, a bundle with one verified base prerequisite.
+The receiver selects the smaller incremental form only when the base commit is
+available. Missing prerequisite objects trigger a full-bundle fallback. Neither
+side needs GitHub/GitLab SSH or invokes fetch, pull, push, package installation,
+hooks, custom filters, LFS download, submodule update or runtime execution.
+
+Bundle headers must advertise exactly the expected immutable snapshot ref and
+object format. Incoming packs are first unbundled in an isolated temporary bare
+repository, checked with Git fsck, and inspected for portable paths, case/Unicode
+collisions, symlinks, submodules and external filters. An incremental quarantine
+may read the explicitly selected local repository's object database as an alternate;
+the alternate is never taken from peer metadata. Only after these checks are objects
+imported and `refs/aif/snapshots/<id>` pinned. User branches, `origin/*`, HEAD,
+FETCH_HEAD, index and working files remain unchanged. Unsupported content or a
+SHA-1/SHA-256 mismatch produces a blocker; it is not silently rewritten.
+
+Each resource and 256 KiB chunk has a SHA-256 digest. Migration v36 persists outgoing
+bytes, incoming manifests, verified chunks and local destination reservations.
+Repeated chunks are idempotent; corruption/mismatched replies fail before staging.
+Process restart uses the same manifest and continues at missing chunks. The durable
+completion flag prevents a later retry from filling deleted context in an already
+completed checkout. A crash after Git import/checkout creation but before completion
+can safely finish the reserved checkout from frozen context bytes.
+
+Limits: 64 MiB per Git bundle, up to a full and an incremental bundle plus the P11
+8 MiB context limit per snapshot, 2 MiB transfer manifest, 512 MiB declared resource
+bytes for each local outgoing/incoming store, 100 retained incoming transfers and
+two active pulls per API process. SQLite/base64 overhead is additional. Withdraw
+exports or remove inactive transfer records through local administration to free
+transfer storage; those actions never delete repository objects or user checkout
+files. Published bytes remain immutable until explicitly withdrawn; a receiver
+rejects a changed manifest under the same pending reservation.
+
+Readiness is separate from board synchronization. Local status reports code,
+context, checkout and chunk progress; `executionReady` remains false. A native
+local checkout binding and a fresh destination are mandatory. WSL/container or
+another device's path is not used by the native host. The task stays paused/manual
+with its prior execution root/session until the later grant/onboarding workflow.
+
+Windows tests cover independent databases/processes over real pinned TLS, partial
+downloads and process death, full fallback for incomplete base objects, altered
+chunks, import into divergent dirty repositories, bidirectional re-export,
+revocation and a process crash after checkout identity creation but before the
+SQLite completion write. Native Windows↔Mac acceptance of this new transfer layer
+remains pending, separately from the accepted local P10/P11 tests and M1 board sync.
+
+For a native fixture smoke of P12 after updating Handoff, run:
+
+```sh
+npm test --workspace @aif/shared -- gitSnapshot.test.ts
+npm test --workspace @aif/data -- snapshotTransfers.test.ts
+npm test --workspace @aif/api -- gitSnapshotTransfer.test.ts peerProcesses.test.ts
+```
+
+The API suite runs two local child processes with private databases and loopback
+TLS ports; it exercises real transport but does not replace Windows↔Mac acceptance.
 
 ## Implementation references
 

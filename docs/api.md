@@ -1753,4 +1753,56 @@ Personal task events are board-only; file deletion/import and fast-fix are block
 `sync:board_updated` invalidates project/task/comment/history/personal queries. The
 web client also refetches on WebSocket reconnect. Peer transport exchanges contain
 only strict shared whitelists; attachment paths/bytes, roles, passwords, local roots,
-runtime sessions and usage never travel. See the ADR for protocol/schema 1 contracts.
+runtime sessions and usage never travel in board messages. See the ADR for
+protocol/schema 1 contracts. Explicit snapshot transfer uses the separate message
+kinds below and never adds file bytes to board checkpoint/delta records.
+
+## Explicit code/context transfer (P12)
+
+These local routes share peer administration's loopback, Origin and local-admin
+authorization. Mutations also use the existing participant session/CSRF middleware.
+There is no execution grant, runtime launch or automatic transfer on board sync.
+
+| Local API                                            | Input / result                                                                            |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `POST /peers/snapshots/publish`                      | `{projectId, snapshotId}` → immutable transfer manifest, HTTP 201                         |
+| `POST /peers/:id/snapshots/pull`                     | `{projectId, snapshotId, checkoutId, worktreePath}` → readiness/progress after completion |
+| `GET /peers/snapshots/projects/:projectId/transfers` | Local transfer IDs and project/peer/snapshot identities, including interrupted requests   |
+| `GET /peers/snapshots/transfers/:id`                 | Fresh readiness check for a completed checkout, plus durable progress                     |
+| `DELETE /peers/snapshots/transfers/:id`              | Remove inactive transfer records/chunks only; Git objects and checkout files remain       |
+| `POST /peers/snapshots/unpublish`                    | `{projectId, snapshotId}` → remove published transfer bytes; snapshot records/refs remain |
+
+Publish requires a previously captured and verified snapshot with a local Git
+location. Capture/onboarding for personal execution remains behind P13–P15; this
+endpoint does not turn a mutable user checkout into a snapshot. Pull uses an
+explicit checkout binding for the local native OS and a separate absolute path
+chosen by the local caller. Peers never supply destination paths. The project/task
+must already exist on the board. The operation creates an exact detached checkout
+and portable context, but does not change the task's execution root or session.
+
+Progress contains `id`, `snapshotId`, `projectId`, `peerId`, `status`
+(`downloading`, `blocked`, `ready`), `errorCode`, `receivedChunks`, `totalChunks`,
+`codeReady`, `contextReady`, `checkoutReady`, and `executionReady: false`.
+Code/context readiness is published only after verification and checkout preparation.
+Received chunks describe selected bundle plus context resources, not board sync.
+If a request fails, list transfers and inspect its ID; repeating the same pull
+arguments resumes durable chunks. A different path for the same reserved transfer
+is a conflict. A completed checkout is verified on retry, never repaired by replaying
+context over user edits or deleted files. Removal does not delete that checkout;
+a new transfer must choose a fresh destination.
+
+The existing cancel/revoke routes also abort active code transfers. Requests and
+each incoming chunk recheck peer/project permission. Snapshot errors use HTTP 409
+and structured codes such as `snapshot_incomplete`, `snapshot_invalid`,
+`snapshot_base_missing`, `snapshot_format_mismatch`, `snapshot_unsupported_code`,
+`snapshot_checkout_changed`, `snapshot_binding_missing`, `snapshot_conflict`, and
+`snapshot_quota`. Schema errors return 400. Remote peer errors retain a structured
+`remoteCode` internally; no error-message parsing is used.
+
+On the pinned TLS listener, `snapshotManifest` takes `{projectId, snapshotId}` and
+`snapshotChunk` additionally takes `{digest, ordinal}`. Both are read-only and
+require a paired, non-revoked peer with the project in its allowlist. Chunk bytes
+are inaccessible unless their digest is in that published manifest. Manifest
+version is 1; the envelope remains protocol/schema 1 and existing M1 hello/board
+messages are unchanged. Older peers reject these new request kinds explicitly.
+Bounds and native acceptance status are in [local device sync](local-device-sync.md).

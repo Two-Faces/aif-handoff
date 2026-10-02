@@ -7,7 +7,64 @@ import { eq } from "drizzle-orm";
 import { chatSessions } from "../schema.js";
 import { closeDb, createTestDb, getDb } from "../db.js";
 
-const CURRENT_SCHEMA_VERSION = 35;
+const CURRENT_SCHEMA_VERSION = 36;
+
+it("upgrades v35 without rewriting immutable code/context records", () => {
+  closeDb();
+  const path = join(tmpdir(), `aif-transfer-upgrade-${crypto.randomUUID()}.sqlite`);
+  const connections: Database.Database[] = [];
+  try {
+    getDb(path);
+    closeDb();
+    const old = new Database(path);
+    connections.push(old);
+    old.exec("DROP TABLE handoff_snapshot_chunks");
+    old.exec("DROP TABLE handoff_snapshot_transfers");
+    old.exec("DROP TABLE handoff_snapshot_exports");
+    old
+      .prepare(
+        "INSERT INTO handoff_code_snapshots (id, project_id, task_id, descriptor_json, context_json) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run("existing", "project", "task", '{"immutable":"descriptor"}', '{"immutable":"context"}');
+    old
+      .prepare("INSERT INTO handoff_context_blobs (digest, base64) VALUES (?, ?)")
+      .run("saved", "Y29udGV4dA==");
+    old.pragma("user_version = 35");
+    old.close();
+    getDb(path);
+    closeDb();
+    const upgraded = new Database(path, { readonly: true });
+    connections.push(upgraded);
+    expect(upgraded.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
+    expect(
+      upgraded
+        .prepare(
+          "SELECT descriptor_json, context_json FROM handoff_code_snapshots WHERE id = 'existing'",
+        )
+        .get(),
+    ).toEqual({
+      descriptor_json: '{"immutable":"descriptor"}',
+      context_json: '{"immutable":"context"}',
+    });
+    expect(
+      upgraded.prepare("SELECT base64 FROM handoff_context_blobs WHERE digest = 'saved'").get(),
+    ).toEqual({ base64: "Y29udGV4dA==" });
+    expect(
+      upgraded.prepare("SELECT count(*) AS count FROM handoff_snapshot_transfers").get(),
+    ).toEqual({ count: 0 });
+    expect(
+      upgraded
+        .prepare(
+          "SELECT name FROM pragma_table_info('handoff_snapshot_transfers') WHERE name = 'completed'",
+        )
+        .get(),
+    ).toEqual({ name: "completed" });
+  } finally {
+    closeDb();
+    for (const connection of connections) if (connection.open) connection.close();
+    removeSqliteArtifacts(path);
+  }
+});
 
 it("upgrades a v34 journal without changing its saved scope or revision", () => {
   closeDb();

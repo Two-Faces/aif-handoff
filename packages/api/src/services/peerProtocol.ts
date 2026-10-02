@@ -5,6 +5,7 @@ import {
   checkpointRecordSchema,
   peerIdentitySchema,
   syncOperationSchema,
+  snapshotDigestSchema,
 } from "@aif/shared";
 
 const scope = { projectId: z.uuid() };
@@ -15,6 +16,18 @@ export const checkpointEntriesSchema = z
   )
   .max(100);
 export const peerRequestSchema = z.discriminatedUnion("kind", [
+  z
+    .object({ kind: z.literal("snapshotManifest"), ...scope, snapshotId: snapshotDigestSchema })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("snapshotChunk"),
+      ...scope,
+      snapshotId: snapshotDigestSchema,
+      digest: snapshotDigestSchema,
+      ordinal: z.number().int().min(0).max(255),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("pair"),

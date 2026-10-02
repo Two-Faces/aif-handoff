@@ -12,3 +12,4 @@ Run through this list whenever you touch anything under `packages/api/`.
 - [ ] `npm run lint`
 - [ ] `npm test`
 - [ ] Peer traffic uses the dedicated pinned TLS listener and project allowlists. Browser/MCP credentials never authenticate peers; personal runtime guards run before Git/filesystem preparation.
+- [ ] Code transfer is an explicit local-admin action, uses local checkout bindings, and rechecks peer revocation across awaits. Interrupted/cancelled transfers retain verified chunks; process-death tests cover filesystem preparation before durable completion. Readiness never grants execution.

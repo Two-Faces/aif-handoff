@@ -155,3 +155,17 @@ export function verifyLocalCodeSnapshot(
   pinCodeSnapshot(projectRoot, pack);
   return pack;
 }
+
+/** Host-only registration after verified import; never accepts a peer-provided path. */
+export function recordLocalCodeSnapshot(
+  projectId: string,
+  snapshotId: string,
+  projectRoot: string,
+): void {
+  verifyLocalCodeSnapshot(snapshotId, projectId, projectRoot);
+  getDb()
+    .insert(codeSnapshotLocations)
+    .values({ snapshotId, projectRoot })
+    .onConflictDoNothing()
+    .run();
+}

@@ -25,6 +25,9 @@ export {
   contextSnapshotBlobs,
   codeSnapshotLocations,
   taskWorkspaceContinuations,
+  snapshotExports,
+  snapshotTransfers,
+  snapshotChunks,
   appSettings,
   participants,
   participantSessions,
@@ -271,9 +274,12 @@ export {
 export { buildCommitPrompt } from "./commitWorkflow.js";
 export * from "./handoff/contracts.js";
 export * from "./handoff/contextSnapshot.js";
+export * from "./handoff/transferContracts.js";
+export * from "./handoff/gitSnapshot.js";
 
 export {
   assertTaskCheckout,
+  assertTaskCheckoutDestination,
   prepareTaskCheckout,
   taskCheckpointRef,
   taskCheckoutFilePath,

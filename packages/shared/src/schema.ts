@@ -832,3 +832,42 @@ export const taskWorkspaceContinuations = sqliteTable(
     uniqueIndex("task_workspace_continuation_revision").on(table.taskId, table.fromRevision),
   ],
 );
+
+export const snapshotExports = sqliteTable("handoff_snapshot_exports", {
+  snapshotId: text("snapshot_id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  manifestJson: text("manifest_json").notNull(),
+  byteSize: integer("byte_size").notNull(),
+});
+export const snapshotTransfers = sqliteTable(
+  "handoff_snapshot_transfers",
+  {
+    id: text("id").primaryKey(),
+    peerId: text("peer_id").notNull(),
+    projectId: text("project_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    checkoutId: text("checkout_id").notNull(),
+    projectRoot: text("project_root").notNull(),
+    worktreePath: text("worktree_path").notNull().unique(),
+    manifestJson: text("manifest_json").notNull(),
+    status: text("status", { enum: ["downloading", "ready", "blocked"] }).notNull(),
+    errorCode: text("error_code"),
+    codeReady: integer("code_ready", { mode: "boolean" }).notNull().default(false),
+    contextReady: integer("context_ready", { mode: "boolean" }).notNull().default(false),
+    selectedBundleDigest: text("selected_bundle_digest"),
+    completed: integer("completed", { mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [
+    uniqueIndex("snapshot_transfer_target").on(table.peerId, table.snapshotId, table.checkoutId),
+  ],
+);
+export const snapshotChunks = sqliteTable(
+  "handoff_snapshot_chunks",
+  {
+    ownerId: text("owner_id").notNull(),
+    digest: text("digest").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    base64: text("base64").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.ownerId, table.digest, table.ordinal] })],
+);

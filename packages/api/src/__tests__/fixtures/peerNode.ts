@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { PeerError, peerInvitationSchema } from "@aif/shared";
+import { PeerError, peerInvitationSchema, snapshotChunkReplySchema } from "@aif/shared";
+import { snapshotNodeAction } from "./snapshotNodeActions.js";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import {
   createProject,
   createTask,
@@ -25,12 +28,29 @@ const root = process.env.PEER_FIXTURE_DIRECTORY!;
 const release = acquireLocalDeviceLock(readDeviceInstallationId(root), "Fixture");
 const identity = loadPeerIdentity(getLocalDevice().deviceId, root);
 let drop: string | null = null;
+let dropAfter = 0;
+let tamperChunk = false;
+const chunkReads: { digest: string; ordinal: number }[] = [];
 const service = createPeerSyncService(
   identity,
   () => {},
   async (input) => {
     const result = await peerRequest(input);
+    if (input.request.kind === "snapshotChunk") {
+      chunkReads.push({ digest: input.request.digest, ordinal: input.request.ordinal });
+      if (tamperChunk) {
+        tamperChunk = false;
+        const reply = snapshotChunkReplySchema.parse(result);
+        const bytes = Buffer.from(reply.base64, "base64");
+        bytes[0] ^= 1;
+        return { ...reply, base64: bytes.toString("base64") };
+      }
+    }
     if (input.request.kind === drop) {
+      if (dropAfter > 0) {
+        dropAfter--;
+        return result;
+      }
       drop = null;
       throw new PeerError("peer_unavailable");
     }
@@ -83,7 +103,25 @@ process.on("message", (raw) => {
       else if (action === "address")
         setSyncPeerAddress(z.string().parse(args.peerId), z.string().parse(args.address));
       else if (action === "sync") await service.sync(z.string().parse(args.peerId));
-      else if (action === "drop") drop = z.string().parse(args.kind);
+      else if (action === "drop") {
+        drop = z.string().parse(args.kind);
+        dropAfter = z
+          .number()
+          .int()
+          .min(0)
+          .parse(args.after ?? 0);
+      } else if (action === "code:tamper") tamperChunk = true;
+      else if (action === "code:crash-on-checkout") {
+        const original = fs.writeFileSync;
+        fs.writeFileSync = (...parameters: Parameters<typeof fs.writeFileSync>) => {
+          original(...parameters);
+          if (typeof parameters[0] === "string" && parameters[0].endsWith("aif-task-checkout.json"))
+            process.exit(23);
+        };
+        syncBuiltinESMExports();
+      } else if (action === "code:reads") result = chunkReads.splice(0);
+      else if (action.startsWith("code:"))
+        result = await snapshotNodeAction(action, args, service, root);
       else if (action === "edit") {
         const taskId = z.string().parse(args.taskId),
           projectId = z.string().parse(args.projectId);

@@ -1235,6 +1235,29 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 36,
+    description: "Resumable explicit code snapshot exports and incoming transfers",
+    sql: `
+      CREATE TABLE handoff_snapshot_exports (
+        snapshot_id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
+        manifest_json TEXT NOT NULL, byte_size INTEGER NOT NULL
+      );
+      CREATE TABLE handoff_snapshot_transfers (
+        id TEXT PRIMARY KEY, peer_id TEXT NOT NULL, project_id TEXT NOT NULL,
+        snapshot_id TEXT NOT NULL, checkout_id TEXT NOT NULL, project_root TEXT NOT NULL,
+        worktree_path TEXT NOT NULL UNIQUE, manifest_json TEXT NOT NULL,
+        status TEXT NOT NULL, error_code TEXT, code_ready INTEGER NOT NULL DEFAULT 0,
+        context_ready INTEGER NOT NULL DEFAULT 0, selected_bundle_digest TEXT,
+        completed INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (peer_id, snapshot_id, checkout_id)
+      );
+      CREATE TABLE handoff_snapshot_chunks (
+        owner_id TEXT NOT NULL, digest TEXT NOT NULL, ordinal INTEGER NOT NULL,
+        base64 TEXT NOT NULL, PRIMARY KEY (owner_id, digest, ordinal)
+      );
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {
