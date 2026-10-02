@@ -31,24 +31,46 @@ afterEach(() => {
   resetEnvCache();
 });
 
-function personal() {
+function personal(managed = false) {
   const project = data.createProject({
     name: "personal",
     rootPath: "missing-checkout",
-    personalMode: true,
+    personalMode: !managed,
   })!;
   const task = data.createTask({
     projectId: project.id,
     title: "task",
     description: "",
+    paused: true,
     scheduledAt: "2020-01-01T00:00:00.000Z",
   })!;
+  if (managed) data.initializeTaskDeviceGrant(task.id);
   data.updateTask(task.id, { paused: false, autoMode: true });
   data.setAutoQueueMode(project.id, true);
   return { project, task };
 }
 
 describe("personal worker execution denial", () => {
+  it.each([runPlanner, runImplementer, runImprover, runPlanChecker, runReviewer, runVerifier])(
+    "requires a managed run scope before a direct stage touches the checkout (%#)",
+    async (runner) => {
+      const { task, project } = personal(true);
+      await expect(runner(task.id, project.rootPath)).rejects.toMatchObject({
+        code: "run_scope_required",
+      });
+      expect(data.getTaskDeviceGrant(task.id)?.activeRunId).toBeNull();
+      expect(data.findTaskById(task.id)?.status).toBe("backlog");
+    },
+  );
+  it("does not advance or commit managed tasks through legacy automation", async () => {
+    const { task, project } = personal(true);
+    expect(processAutoQueueAdvance()).toBe(0);
+    expect(processDueScheduledTasks()).toBe(0);
+    await expect(
+      ensureAutoQueueTaskCommit({ taskId: task.id, projectRoot: project.rootPath }),
+    ).rejects.toMatchObject({ code: "run_scope_required" });
+    expect(data.findTaskById(task.id)?.status).toBe("backlog");
+  });
   it.each([runPlanner, runImplementer, runImprover, runPlanChecker, runReviewer, runVerifier])(
     "blocks a direct stage entry before checkout preparation (%#)",
     async (runner) => {

@@ -360,6 +360,67 @@ npm test --workspace @aif/api -- gitSnapshotTransfer.test.ts peerProcesses.test.
 The API suite runs two local child processes with private databases and loopback
 TLS ports; it exercises real transport but does not replace Windows↔Mac acceptance.
 
+## Device execution authority foundation (P13, in progress)
+
+Migration v37 records device grants, their current heads and local runs separately
+from board status, human/AI ownership and temporary coordinator locks. These tables
+are never included in ordinary board synchronization or bootstrap, and survive
+task deletion so an old authority chain cannot silently be recreated.
+
+Host-only enrollment derives a replicated task's first owner from its single
+creation dot. A receiving device cannot elect itself. Standalone enrollment is
+limited to paused, never-started backlog tasks. Successors bind the predecessor,
+next epoch, issuer, destination, transfer ID and immutable snapshot. The issuer
+must own the predecessor; SQLite permits one successor per epoch/predecessor.
+Issuance requires a durable release record that only the future P14 verified-stop
+transaction will write. No abort/TTL/force shortcut or public proof writer exists.
+
+The receiving host checks a directly authenticated, currently authorized issuer
+and known ancestry. Identical deliveries are idempotent; a conflicting successor
+quarantines the task. A received grant is **pending**, never execution-ready.
+There are no release/accept/enrollment HTTP or MCP endpoints in this increment.
+
+The internal `withTaskDeviceExecution` scope reserves a durable run before work.
+It checks device/epoch/grant/run, exact registered checkout, human/AI ownership
+revision and an execution-input digest. Result mutations validate and write in
+the same SQLite transaction. Human board edits remain available and invalidate
+an old run's inputs. Completed-run callbacks cannot overwrite a later run.
+Nested unfinished or failed work leaves an **uncertain** reservation, as does an
+exception; a new process cannot steal it after restart. Do not clear these rows
+or use lock expiry as a recovery method: P14 must establish that writing stopped.
+
+This is the **foundation, not completion of P13**. Production coordinator/API/chat
+lifecycles still need their positive host-scope integration around the complete
+run, streamed callbacks, timeout/abort and result finalization. Until then, managed
+tasks are excluded from legacy scheduling, claims, watchdog and QA recovery, and
+direct stage/helper/chat execution is denied. Taskless execution is also denied
+for projects with managed tasks. Personal projects retain the stronger M1 ban.
+No autonomous cross-device execution has been enabled or accepted.
+
+Fixture checks (require actual passed test summaries):
+
+```sh
+npm test --workspace @aif/shared -- deviceExecution.test.ts
+npm test --workspace @aif/data -- deviceExecution.test.ts
+npm test --workspace @aif/api -- personalMode.test.ts
+npm test --workspace @aif/agent -- personalMode.test.ts
+```
+
+These cover local DB/Git fixtures, process death/restart, late results, fork
+quarantine and closed entry points. They do not establish native process-tree
+stop or physical Windows-to-Mac grant handoff; those remain P14/M2 acceptance.
+
+On 2026-10-02 the Windows `npm run ai:validate` gate passed for this increment
+using the isolated M2 validation database and ports 3309/5480: 3336 tests passed
+with one existing skip, all seven workspace builds passed, Chromium 8/8, k6 3/3,
+and protocol artifacts matched CLI 0.145.0. Minimum coverage across the four
+metrics per package: shared 75.03%, data 77.66%, API 70.15%, agent 76.31%, runtime
+73.25%, web 74.49%, MCP 86.27%. Coverage thresholds/exclusions were unchanged.
+The targeted P13 fixture commands above comprise 53 tests; native Mac results
+for this increment are still pending. Package checklists were reviewed: no new
+request bodies/events, dependencies/packages, UI components or adapter capability
+changes; Docker/Pencil/adapter synchronization does not apply to this increment.
+
 ## Implementation references
 
 - [ADR](decisions/personal-lan-sync.md)

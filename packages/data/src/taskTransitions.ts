@@ -171,7 +171,11 @@ function statusConflict(task: TaskRow): TaskTransitionResult {
 
 export function transitionTaskStatus(input: TransitionTaskStatusInput): TaskTransitionResult {
   return withSharedMutation(
-    { entityType: "task", entityId: input.taskId },
+    {
+      entityType: "task",
+      entityId: input.taskId,
+      execution: input.actor.kind === "agent" || input.actor.kind === "system",
+    },
     () => {
       const nowIso = (input.now ?? new Date()).toISOString();
       log.debug(
@@ -284,7 +288,11 @@ export function transitionTaskStatus(input: TransitionTaskStatusInput): TaskTran
 
 export function applyTaskAction(input: ApplyTaskActionInput): TaskTransitionResult {
   return withSharedMutation(
-    { entityType: "task", entityId: input.taskId },
+    {
+      entityType: "task",
+      entityId: input.taskId,
+      execution: input.actor.kind === "agent" || input.actor.kind === "system",
+    },
     () => {
       const nowIso = (input.now ?? new Date()).toISOString();
       log.debug(

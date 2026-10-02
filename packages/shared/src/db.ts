@@ -1258,6 +1258,34 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 37,
+    description: "Durable device execution grants and fenced local runs",
+    sql: `
+      CREATE TABLE task_device_grants (
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL, project_id TEXT NOT NULL,
+        execution_epoch INTEGER NOT NULL CHECK (execution_epoch >= 0),
+        predecessor_id TEXT, grant_json TEXT NOT NULL,
+        UNIQUE (task_id, execution_epoch), UNIQUE (predecessor_id)
+      );
+      CREATE TABLE task_device_grant_heads (
+        task_id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
+        grant_id TEXT NOT NULL REFERENCES task_device_grants(id),
+        owner_device_id TEXT NOT NULL, execution_epoch INTEGER NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('owned', 'observed', 'released', 'pending', 'conflicted')),
+        active_run_id TEXT, released_transfer_id TEXT, released_snapshot_id TEXT
+      );
+      CREATE TABLE task_device_runs (
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
+        grant_id TEXT NOT NULL REFERENCES task_device_grants(id),
+        owner_device_id TEXT NOT NULL, execution_epoch INTEGER NOT NULL,
+        worktree_path TEXT NOT NULL, snapshot_commit TEXT NOT NULL,
+        ownership_revision INTEGER NOT NULL, input_digest TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('running', 'settled', 'uncertain')),
+        started_at TEXT NOT NULL, settled_at TEXT
+      );
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {

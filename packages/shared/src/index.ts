@@ -1,4 +1,5 @@
 export * from "./personalMode.js";
+export * from "./deviceExecution.js";
 export * from "./existingCheckout.js";
 export * from "./sync/contracts.js";
 export * from "./sync/causality.js";
@@ -21,6 +22,9 @@ export {
   syncPeerProjects,
   syncInvitations,
   taskExecutionWorkspaces,
+  taskDeviceGrants,
+  taskDeviceGrantHeads,
+  taskDeviceRuns,
   codeSnapshots,
   contextSnapshotBlobs,
   codeSnapshotLocations,

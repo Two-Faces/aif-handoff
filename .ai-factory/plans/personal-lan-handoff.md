@@ -132,6 +132,8 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
   - Проверка: transfer без GitHub/GitLab SSH, interrupted/missing base/tampered blob, dirty destination, mismatched object format; bootstrap не запускает hooks/runtime произвольно.
 
 - [ ] **P13. Добавить устойчивое право исполнения и fencing во все runners.**
+  - Windows `ai:validate` для ядра пройден: **3336 passed / 1 existing skip**, все coverage ≥70%, build 7/7, Chromium 8/8, k6 3/3. Native Mac smoke этого изменения (53 targeted tests) ещё не принят; полный P13 остаётся открытым.
+  - **В работе: ядро и закрытые входы.** Migration v37, отдельный журнал grants/runs, genesis по создателю задачи, один successor/epoch, pending/quarantine на приёмнике, durable run reservation и проверки результата по grant/epoch/run/root/input. TTL/watchdog/QA recovery исключают managed tasks; QA/commit/chat/helper/stage обходы закрыты. Personal AI остаётся запрещён. **Ещё не завершено:** положительное подключение host scope ко всему lifecycle coordinator/API/chat, включая callbacks, timeout/abort и финализацию; P14 проверяет реальную остановку перед release/accept. В этой части нет публичного enrollment/release/accept endpoint.
   - Зависимости: P02, P03, P06, P10.
   - Файлы: schema/data task ownership/transitions/claim APIs; `packages/agent/src/{coordinator,subagentQuery,taskWatchdog,autoQueueCommit}.ts`; API `fastFix`, `qaRunner`, `qaCheckRunner`, `commitGeneration`, `services/runtime.ts::runApiRuntimeOneShot`, `routes/chat.ts` и taskless roadmap/commit paths.
   - `ownerDeviceId + executionEpoch` отдельно от local claim/TTL и human/AI ownership. Все start/completion/status paths проверяют ожидаемый grant и runId; remote tasks исключены из watchdog/auto-queue.

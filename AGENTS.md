@@ -137,6 +137,14 @@ chosen locally. No transfer, checkout preparation or board sync grants execution
 Workspace registration is internal pending M2 onboarding/grants. Keep M1 personal
 execution guards until the grant and stop/fencing gates are complete.
 
+P13 foundation adds shared/data `deviceExecution.ts` and migration v37. Device
+grants are separate from board workflow and TTL claims; `withTaskDeviceExecution`
+reserves a durable run and fences result writes by grant/epoch/run/root/input.
+Managed tasks are excluded from legacy automation. Public runners still deny
+managed execution without a host scope; lifecycle integration and confirmed
+process-stop recovery remain open. Do not expose enrollment/release/accept as
+REST/MCP actions or enable personal AI before those gates are complete.
+
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |
 | `packages/api/src/index.ts`             | API server entry (Hono, port 3009)    |

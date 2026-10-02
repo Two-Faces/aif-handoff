@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { getProjectConfig, logger } from "@aif/shared";
+import { type DeviceExecutionError } from "@aif/shared";
+import { getDeviceExecutionBlock } from "@aif/data";
 import {
   findTaskById,
   updateTask,
@@ -18,7 +20,7 @@ const log = logger("qa-runner");
 export interface RunQaQueryResult {
   ok: boolean;
   error?: string;
-  code?: "ai_handoff_required" | "personal_execution_disabled";
+  code?: "ai_handoff_required" | "personal_execution_disabled" | DeviceExecutionError["code"];
 }
 
 export interface RunQaQueryInput {
@@ -167,7 +169,8 @@ function persistQaError(taskId: string, error: string): RunQaQueryResult {
 export async function runQaQuery(input: RunQaQueryInput): Promise<RunQaQueryResult> {
   const { projectId, taskId } = input;
   let executionRoot = input.executionRoot;
-  const blocked = getPersonalExecutionBlock(projectId, taskId);
+  const blocked =
+    getPersonalExecutionBlock(projectId, taskId) ?? getDeviceExecutionBlock(projectId, taskId);
   if (blocked) return { ok: false, ...blocked };
 
   const task = findTaskById(taskId);

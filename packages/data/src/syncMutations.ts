@@ -14,6 +14,7 @@ import {
   type SyncRevisions,
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
+import { withTaskDeviceMutation } from "./deviceExecution.js";
 import {
   captureSharedEntity,
   portableActor,
@@ -39,6 +40,7 @@ interface MutationRef {
   projectId?: string;
   createPersonalProject?: boolean;
   deleting?: boolean;
+  execution?: boolean;
 }
 const seeding = new Set<string>();
 const active = new Set<string>();
@@ -214,6 +216,16 @@ export function withSharedMutation<T>(
   mutate: () => T,
   options: SharedMutationOptions = {},
 ): T {
+  return input.entityType === "task" && input.entityId
+    ? withTaskDeviceMutation(
+        input.entityId,
+        () => sharedMutation(input, mutate, options),
+        input.execution,
+      )
+    : sharedMutation(input, mutate, options);
+}
+
+function sharedMutation<T>(input: MutationRef, mutate: () => T, options: SharedMutationOptions): T {
   const knownProjectId =
     input.projectId ??
     (input.entityId ? projectIdForEntity(input.entityType, input.entityId) : null);

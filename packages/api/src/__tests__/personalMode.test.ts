@@ -50,18 +50,111 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function personal() {
+function personal(managed = false) {
   const project = data.createProject({
     name: "personal",
     rootPath: "nonexistent-root",
-    personalMode: true,
+    personalMode: !managed,
   })!;
-  const task = data.createTask({ projectId: project.id, title: "task", description: "" })!;
+  const task = data.createTask({
+    projectId: project.id,
+    title: "task",
+    description: "",
+    paused: true,
+  })!;
+  if (managed) data.initializeTaskDeviceGrant(task.id);
   data.updateTask(task.id, { paused: false, autoMode: true });
   return { projectId: project.id, taskId: task.id, executionRoot: project.rootPath };
 }
 
 describe("personal project API", () => {
+  it("blocks managed task helpers before Git, artifacts, runtime setup or unfenced error writes", async () => {
+    const input = personal(true);
+    for (const run of [runQaQuery, runQaCheckQuery, runCommitQuery]) {
+      expect(await run(input)).toMatchObject({ ok: false, code: "run_scope_required" });
+    }
+    expect(await runCommitQuery({ projectId: input.projectId })).toMatchObject({
+      ok: false,
+      code: "taskless_execution_denied",
+    });
+    await expect(generateRoadmapFile(input)).rejects.toMatchObject({
+      code: "taskless_execution_denied",
+    });
+    await expect(
+      generateRoadmapTasks({ ...input, roadmapAlias: "example", trackingTaskId: input.taskId }),
+    ).rejects.toMatchObject({ code: "run_scope_required" });
+    await expect(
+      runApiRuntimeOneShot({
+        ...input,
+        projectRoot: input.executionRoot,
+        prompt: "edit",
+        usageContext: { source: UsageSource.COMMIT },
+      }),
+    ).rejects.toMatchObject({ code: "run_scope_required" });
+    await expect(
+      runFastFixQuery({
+        taskId: input.taskId,
+        taskTitle: "task",
+        taskDescription: "",
+        latestComment: {
+          author: "human",
+          message: "fix",
+          attachments: null,
+          createdAt: "2026-10-02",
+        },
+        projectRoot: input.executionRoot,
+        planPath: "PLAN.md",
+        previousPlan: "",
+      }),
+    ).rejects.toMatchObject({ code: "run_scope_required" });
+    expect(data.findTaskById(input.taskId)).toMatchObject({
+      qaStatus: "idle",
+      qaCheckStatus: "idle",
+      lockedBy: null,
+      sessionId: null,
+    });
+    expect(initProject).not.toHaveBeenCalled();
+  });
+  it("rejects mismatched or fabricated task IDs as a bypass for a managed project", async () => {
+    const input = personal(true);
+    const other = data.createProject({ name: "other", rootPath: "also-missing" })!;
+    const task = data.createTask({ projectId: other.id, title: "other", description: "" })!;
+    for (const taskId of [task.id, "not-a-task"]) {
+      expect(await runCommitQuery({ projectId: input.projectId, taskId })).toMatchObject({
+        code: "grant_missing",
+      });
+      await expect(
+        runApiRuntimeOneShot({
+          projectId: input.projectId,
+          taskId,
+          projectRoot: input.executionRoot,
+          prompt: "edit",
+          usageContext: { source: UsageSource.COMMIT },
+        }),
+      ).rejects.toMatchObject({ code: "grant_missing" });
+    }
+    expect(await runCommitQuery({ projectId: other.id, taskId: input.taskId })).toMatchObject({
+      code: "run_fenced",
+    });
+  });
+  it("rejects both task-bound and taskless managed chat before creating a session", async () => {
+    const { projectId, taskId } = personal(true);
+    const app = new Hono().route("/chat", chatRouter);
+    for (const [body, code] of [
+      [{ projectId, taskId, message: "resume" }, "run_scope_required"],
+      [{ projectId, message: "edit files", explore: true }, "taskless_execution_denied"],
+    ] as const) {
+      const response = await app.request("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ code });
+    }
+    expect(data.listChatSessions(projectId)).toEqual([]);
+    expect(data.getTaskDeviceGrant(taskId)?.activeRunId).toBeNull();
+  });
   it("uses plan revisions through REST and handles board transitions without touching checkout", async () => {
     const { taskId } = personal();
     const app = new Hono().route("/tasks", tasksRouter);

@@ -23,6 +23,7 @@ import {
 import { getDb } from "@aif/shared/server";
 import { getPersonalExecutionBlock } from "./personalMode.js";
 import { verifyLocalCodeSnapshot } from "./codeSnapshots.js";
+import { assertTaskDeviceExecution } from "./deviceExecution.js";
 
 export class TaskWorkspaceError extends Error {
   constructor(
@@ -220,6 +221,7 @@ export function prepareTaskExecutionWorkspace(input: TaskCheckoutInput): Workspa
 }
 
 export function prepareTaskWorkspaceCheckpoint(taskId: string, message: string): Workspace {
+  assertTaskDeviceExecution(taskId);
   const row = requireWorkspace(taskId);
   if (row.state === "checkpoint_prepared" || row.state === "checkpointed") return row;
   if (row.state !== "active" || !row.scopeJson)
@@ -253,6 +255,7 @@ export function prepareTaskWorkspaceCheckpoint(taskId: string, message: string):
 }
 
 export function publishTaskWorkspaceCheckpoint(taskId: string): TaskCommitResult {
+  assertTaskDeviceExecution(taskId);
   const row = requireWorkspace(taskId);
   if ((row.state !== "checkpoint_prepared" && row.state !== "checkpointed") || !row.intentJson)
     throw new TaskWorkspaceError(

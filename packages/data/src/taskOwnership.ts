@@ -215,7 +215,11 @@ export function listTaskExecutorHistory(taskId: string): TaskExecutorHistoryEntr
 
 export function handoffTaskExecution(input: HandoffTaskExecutionInput): HandoffTaskExecutionResult {
   return withSharedMutation(
-    { entityType: "task", entityId: input.taskId },
+    {
+      entityType: "task",
+      entityId: input.taskId,
+      execution: input.actor.kind === "agent" || input.actor.kind === "system",
+    },
     () => {
       const db = getDb();
       const now = input.now ?? new Date();

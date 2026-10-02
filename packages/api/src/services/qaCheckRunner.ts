@@ -1,4 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { type DeviceExecutionError } from "@aif/shared";
+import { getDeviceExecutionBlock } from "@aif/data";
 import { join } from "node:path";
 import {
   findTaskById,
@@ -25,7 +27,11 @@ export interface RunQaCheckQueryInput {
 export interface RunQaCheckQueryResult {
   ok: boolean;
   error?: string;
-  code?: "ai_handoff_required" | "qa_test_cases_required" | "personal_execution_disabled";
+  code?:
+    | "ai_handoff_required"
+    | "qa_test_cases_required"
+    | "personal_execution_disabled"
+    | DeviceExecutionError["code"];
 }
 
 export interface PlaywrightMcpPreflight {
@@ -140,7 +146,8 @@ export function buildQaCheckPrompt(input: {
 export async function runQaCheckQuery(input: RunQaCheckQueryInput): Promise<RunQaCheckQueryResult> {
   const { projectId, taskId } = input;
   let executionRoot = input.executionRoot;
-  const blocked = getPersonalExecutionBlock(projectId, taskId);
+  const blocked =
+    getPersonalExecutionBlock(projectId, taskId) ?? getDeviceExecutionBlock(projectId, taskId);
   if (blocked) return { ok: false, ...blocked };
   const task = findTaskById(taskId);
   if (!task) {

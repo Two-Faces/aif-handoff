@@ -796,6 +796,56 @@ export const taskExecutionWorkspaces = sqliteTable("task_execution_workspaces", 
   sourceSnapshotId: text("source_snapshot_id"),
 });
 
+// Device authority is host-owned protocol state, never a board-sync field.
+// Deliberately retain the journal after task deletion (no cascading foreign keys).
+export const taskDeviceGrants = sqliteTable(
+  "task_device_grants",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id").notNull(),
+    projectId: text("project_id").notNull(),
+    executionEpoch: integer("execution_epoch").notNull(),
+    predecessorId: text("predecessor_id"),
+    grantJson: text("grant_json").notNull(),
+  },
+  (table) => [
+    uniqueIndex("task_device_grant_epoch").on(table.taskId, table.executionEpoch),
+    uniqueIndex("task_device_grant_successor").on(table.predecessorId),
+  ],
+);
+export const taskDeviceGrantHeads = sqliteTable("task_device_grant_heads", {
+  taskId: text("task_id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  grantId: text("grant_id")
+    .notNull()
+    .references(() => taskDeviceGrants.id),
+  ownerDeviceId: text("owner_device_id").notNull(),
+  executionEpoch: integer("execution_epoch").notNull(),
+  state: text("state", {
+    enum: ["owned", "observed", "released", "pending", "conflicted"],
+  }).notNull(),
+  activeRunId: text("active_run_id"),
+  // Only P14's verified stop/checkpoint transaction may populate these fields.
+  releasedTransferId: text("released_transfer_id"),
+  releasedSnapshotId: text("released_snapshot_id"),
+});
+export const taskDeviceRuns = sqliteTable("task_device_runs", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id").notNull(),
+  grantId: text("grant_id")
+    .notNull()
+    .references(() => taskDeviceGrants.id),
+  ownerDeviceId: text("owner_device_id").notNull(),
+  executionEpoch: integer("execution_epoch").notNull(),
+  worktreePath: text("worktree_path").notNull(),
+  snapshotCommit: text("snapshot_commit").notNull(),
+  ownershipRevision: integer("ownership_revision").notNull(),
+  inputDigest: text("input_digest").notNull(),
+  state: text("state", { enum: ["running", "settled", "uncertain"] }).notNull(),
+  startedAt: text("started_at").notNull(),
+  settledAt: text("settled_at"),
+});
+
 export const codeSnapshots = sqliteTable("handoff_code_snapshots", {
   id: text("id").primaryKey(),
   projectId: text("project_id").notNull(),

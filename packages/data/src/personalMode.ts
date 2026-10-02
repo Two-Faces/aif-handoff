@@ -8,6 +8,7 @@ import {
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
 import { resolveRegisteredTaskRoot } from "./taskWorkspaces.js";
+import { assertTaskDeviceExecution, assertProjectDeviceExecution } from "./deviceExecution.js";
 
 /** Persisted policy survives disabling the onboarding environment switch. */
 export function isPersonalProject(projectId: string): boolean {
@@ -38,9 +39,11 @@ export function assertProjectExecutionAllowed(
   if (getPersonalExecutionBlock(projectId, taskId)) {
     throw new PersonalExecutionDisabledError();
   }
-  return taskId && projectRoot
-    ? resolveRegisteredTaskRoot(taskId, projectRoot, projectId)
-    : projectRoot;
+  assertProjectDeviceExecution(projectId, taskId);
+  const root =
+    taskId && projectRoot ? resolveRegisteredTaskRoot(taskId, projectRoot, projectId) : projectRoot;
+  assertProjectDeviceExecution(projectId, taskId, root);
+  return root;
 }
 
 export function getPersonalExecutionBlock(projectId: string, taskId?: string | null) {
@@ -54,7 +57,9 @@ export function assertTaskExecutionAllowed(
   projectRoot?: string,
 ): string | undefined {
   if (isPersonalTask(taskId)) throw new PersonalExecutionDisabledError();
-  return projectRoot ? resolveRegisteredTaskRoot(taskId, projectRoot) : undefined;
+  const root = projectRoot ? resolveRegisteredTaskRoot(taskId, projectRoot) : undefined;
+  assertTaskDeviceExecution(taskId, root);
+  return root;
 }
 
 export function isProjectPublicationAllowed(projectId: string): boolean {

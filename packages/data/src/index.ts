@@ -1,7 +1,21 @@
 export * from "./taskWorkspaces.js";
+export {
+  getTaskDeviceGrant,
+  getTaskDeviceRun,
+  initializeTaskDeviceGrant,
+  issueTaskDeviceSuccessor,
+  receiveTaskDeviceSuccessor,
+  assertTaskDeviceExecution,
+  assertProjectDeviceExecution,
+  assertTasklessDeviceExecution,
+  getDeviceExecutionBlock,
+  withTaskDeviceExecution,
+  bindTaskDeviceExecution,
+} from "./deviceExecution.js";
 export * from "./codeSnapshots.js";
 export * from "./snapshotTransfers.js";
 import { getTaskExecutionWorkspace, resolveRegisteredTaskRoot } from "./taskWorkspaces.js";
+import { unmanagedTaskExecutionFilter, withTaskDeviceMutation } from "./deviceExecution.js";
 
 import {
   and,
@@ -1444,13 +1458,48 @@ export function createTask(input: {
   );
 }
 
+// Runtime outputs are fenced even if an error handler lost its async scope.
+// Human board/config edits remain possible and invalidate an in-flight run's input digest.
+const BOARD_EDITABLE_TASK_FIELDS = new Set([
+  "title",
+  "description",
+  "plan",
+  "priority",
+  "position",
+  "attachments",
+  "tags",
+  "paused",
+  "autoMode",
+  "scheduledAt",
+  "isFix",
+  "useSubagents",
+  "plannerMode",
+  "planDocs",
+  "planTests",
+  "skipReview",
+  "runPlanImprove",
+  "runPostVerify",
+  "runtimeProfileId",
+  "modelOverride",
+  "runtimeOptions",
+  "autoQa",
+  "roadmapAlias",
+  "executionOwner",
+  "ownershipRevision",
+  "assigneeIds",
+]);
+
 export function updateTask(
   id: string,
   fields: TaskFieldsUpdate,
   syncOptions: SharedMutationOptions = {},
 ): TaskRow | undefined {
   return withSharedMutation(
-    { entityType: "task", entityId: id },
+    {
+      entityType: "task",
+      entityId: id,
+      execution: Object.keys(fields).some((key) => !BOARD_EDITABLE_TASK_FIELDS.has(key)),
+    },
     () => {
       const {
         attachments,
@@ -1510,7 +1559,14 @@ export function tryStartQaRun(id: string): boolean {
   const result = getDb()
     .update(tasks)
     .set({ qaStatus: "running", updatedAt: new Date().toISOString() })
-    .where(and(eq(tasks.id, id), eq(tasks.executionOwner, "ai"), ne(tasks.qaStatus, "running")))
+    .where(
+      and(
+        unmanagedTaskExecutionFilter(),
+        eq(tasks.id, id),
+        eq(tasks.executionOwner, "ai"),
+        ne(tasks.qaStatus, "running"),
+      ),
+    )
     .run();
   return result.changes > 0;
 }
@@ -1527,7 +1583,12 @@ export function tryStartQaCheckRun(id: string): boolean {
       updatedAt: new Date().toISOString(),
     })
     .where(
-      and(eq(tasks.id, id), eq(tasks.executionOwner, "ai"), ne(tasks.qaCheckStatus, "running")),
+      and(
+        unmanagedTaskExecutionFilter(),
+        eq(tasks.id, id),
+        eq(tasks.executionOwner, "ai"),
+        ne(tasks.qaCheckStatus, "running"),
+      ),
     )
     .run();
   const started = result.changes > 0;
@@ -1546,7 +1607,7 @@ export function resetStaleQaRuns(): number {
   const result = getDb()
     .update(tasks)
     .set({ qaStatus: "error", updatedAt: new Date().toISOString() })
-    .where(eq(tasks.qaStatus, "running"))
+    .where(and(unmanagedTaskExecutionFilter(), eq(tasks.qaStatus, "running")))
     .run();
   return result.changes;
 }
@@ -1556,7 +1617,7 @@ export function resetStaleQaCheckRuns(): number {
   const result = getDb()
     .update(tasks)
     .set({ qaCheckStatus: "error", updatedAt: new Date().toISOString() })
-    .where(eq(tasks.qaCheckStatus, "running"))
+    .where(and(unmanagedTaskExecutionFilter(), eq(tasks.qaCheckStatus, "running")))
     .run();
   if (result.changes > 0) {
     log.warn({ recoveredRuns: result.changes }, "Recovered stale QA Check runs");
@@ -1580,7 +1641,7 @@ export function setTaskFields(
   syncOptions: SharedMutationOptions = {},
 ): void {
   return withSharedMutation(
-    { entityType: "task", entityId: id },
+    { entityType: "task", entityId: id, execution: true },
     () => {
       const {
         autoReviewState,
@@ -1625,15 +1686,21 @@ export function persistTaskRuntimeLimitSnapshot(
     },
     "Persisting task runtime limit snapshot",
   );
-  getDb()
-    .update(tasks)
-    .set({
-      runtimeLimitSnapshotJson: serializeRuntimeLimitSnapshot(normalizedSnapshot),
-      runtimeLimitUpdatedAt: persistedAt,
-    })
-    .where(eq(tasks.id, taskId))
-    .run();
-  return findTaskById(taskId);
+  return withTaskDeviceMutation(
+    taskId,
+    () => {
+      getDb()
+        .update(tasks)
+        .set({
+          runtimeLimitSnapshotJson: serializeRuntimeLimitSnapshot(normalizedSnapshot),
+          runtimeLimitUpdatedAt: persistedAt,
+        })
+        .where(eq(tasks.id, taskId))
+        .run();
+      return findTaskById(taskId);
+    },
+    true,
+  );
 }
 
 export function clearTaskRuntimeLimitSnapshot(
@@ -1641,15 +1708,21 @@ export function clearTaskRuntimeLimitSnapshot(
   persistedAt = new Date().toISOString(),
 ): TaskRow | undefined {
   log.debug({ taskId, persistedAt }, "Clearing task runtime limit snapshot");
-  getDb()
-    .update(tasks)
-    .set({
-      runtimeLimitSnapshotJson: null,
-      runtimeLimitUpdatedAt: persistedAt,
-    })
-    .where(eq(tasks.id, taskId))
-    .run();
-  return findTaskById(taskId);
+  return withTaskDeviceMutation(
+    taskId,
+    () => {
+      getDb()
+        .update(tasks)
+        .set({
+          runtimeLimitSnapshotJson: null,
+          runtimeLimitUpdatedAt: persistedAt,
+        })
+        .where(eq(tasks.id, taskId))
+        .run();
+      return findTaskById(taskId);
+    },
+    true,
+  );
 }
 
 export function deleteTask(id: string): void {
@@ -1679,25 +1752,30 @@ export function createTaskComment(input: {
   attachments?: unknown[];
   createdAt?: string;
 }): HydratedCommentRow | undefined {
-  return withSharedMutation(
-    { entityType: "comment", projectId: projectIdForEntity("task", input.taskId) ?? undefined },
-    () => {
-      const id = crypto.randomUUID();
-      const createdAt = input.createdAt ?? new Date().toISOString();
-      getDb()
-        .insert(taskComments)
-        .values({
-          id,
-          taskId: input.taskId,
-          author: input.author,
-          participantId: input.participantId ?? null,
-          message: input.message,
-          attachments: JSON.stringify(input.attachments ?? []),
-          createdAt,
-        })
-        .run();
-      return findHydratedTaskComment(id);
-    },
+  return withTaskDeviceMutation(
+    input.taskId,
+    () =>
+      withSharedMutation(
+        { entityType: "comment", projectId: projectIdForEntity("task", input.taskId) ?? undefined },
+        () => {
+          const id = crypto.randomUUID();
+          const createdAt = input.createdAt ?? new Date().toISOString();
+          getDb()
+            .insert(taskComments)
+            .values({
+              id,
+              taskId: input.taskId,
+              author: input.author,
+              participantId: input.participantId ?? null,
+              message: input.message,
+              attachments: JSON.stringify(input.attachments ?? []),
+              createdAt,
+            })
+            .run();
+          return findHydratedTaskComment(id);
+        },
+      ),
+    input.author === "agent",
   );
 }
 
@@ -2221,7 +2299,7 @@ export function persistTaskPlanForTask(input: {
   actor?: AuditActor;
 }): { updatedAt: string } {
   return withSharedMutation(
-    { entityType: "task", entityId: input.taskId },
+    { entityType: "task", entityId: input.taskId, execution: !isPersonalTask(input.taskId) },
     () => {
       if (isPersonalTask(input.taskId)) {
         const updatedAt = input.updatedAt ?? new Date().toISOString();
@@ -2294,9 +2372,12 @@ function coordinatorAnyStageFilter() {
 function executableTaskProjectFilter() {
   return getEnv().AIF_PERSONAL_MODE
     ? sql`0`
-    : notInArray(
-        tasks.projectId,
-        getDb().select({ id: projects.id }).from(projects).where(eq(projects.personalMode, true)),
+    : and(
+        unmanagedTaskExecutionFilter(),
+        notInArray(
+          tasks.projectId,
+          getDb().select({ id: projects.id }).from(projects).where(eq(projects.personalMode, true)),
+        ),
       );
 }
 function unlockedCoordinatorTaskFilter(nowIso: string) {
@@ -2395,6 +2476,7 @@ export function claimTask(taskId: string, coordinatorId: string, lockDurationMs:
     .set({ lockedBy: coordinatorId, lockedUntil })
     .where(
       and(
+        unmanagedTaskExecutionFilter(),
         eq(tasks.id, taskId),
         eq(tasks.executionOwner, "ai"),
         or(sql`${tasks.lockedBy} IS NULL`, lte(tasks.lockedUntil, nowIso)),
@@ -2416,6 +2498,7 @@ export function claimCoordinatorTaskIfEligible(
   const nowIso = new Date().toISOString();
   const lockedUntil = new Date(Date.now() + input.lockDurationMs).toISOString();
   const conditions = [
+    unmanagedTaskExecutionFilter(),
     eq(tasks.id, input.taskId),
     eq(tasks.projectId, input.expectedProjectId),
     eq(tasks.status, input.expectedStatus),
@@ -2569,6 +2652,7 @@ export function claimBacklogTaskForAdvance(
       })
       .where(
         and(
+          unmanagedTaskExecutionFilter(),
           eq(tasks.id, taskId),
           eq(tasks.status, "backlog"),
           eq(tasks.paused, false),
@@ -2720,13 +2804,15 @@ export function renewTaskClaim(
   getDb()
     .update(tasks)
     .set({ lockedUntil })
-    .where(and(eq(tasks.id, taskId), eq(tasks.lockedBy, coordinatorId)))
+    .where(
+      and(unmanagedTaskExecutionFilter(), eq(tasks.id, taskId), eq(tasks.lockedBy, coordinatorId)),
+    )
     .run();
 }
 
 /** Release a task claim after processing completes. */
 export function releaseTaskClaim(taskId: string, coordinatorId?: string): void {
-  const conditions = [eq(tasks.id, taskId)];
+  const conditions = [unmanagedTaskExecutionFilter(), eq(tasks.id, taskId)];
   if (coordinatorId != null) {
     conditions.push(eq(tasks.lockedBy, coordinatorId));
   }
@@ -2740,7 +2826,7 @@ export function releaseTaskClaim(taskId: string, coordinatorId?: string): void {
 /** Release expired or abandoned task claims. Returns count of released claims. */
 export function releaseStaleTaskClaims(): number {
   const nowIso = new Date().toISOString();
-  // Heartbeat older than 5 minutes means the process is dead
+  // Legacy recovery only. A stale heartbeat is never proof of a managed run's exit.
   const heartbeatDeadline = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
   const result = getDb()
@@ -2748,6 +2834,7 @@ export function releaseStaleTaskClaims(): number {
     .set({ lockedBy: null, lockedUntil: null })
     .where(
       and(
+        unmanagedTaskExecutionFilter(),
         isNotNull(tasks.lockedBy),
         or(
           // Lock TTL expired
@@ -3007,18 +3094,24 @@ export function incrementTaskTokenUsage(
   const delta = parseTaskTokenUsage(usage);
   if (delta.total === 0 && delta.costUsd === 0) return delta;
 
-  getDb()
-    .update(tasks)
-    .set({
-      tokenInput: sql<number>`coalesce(${tasks.tokenInput}, 0) + ${delta.input}`,
-      tokenOutput: sql<number>`coalesce(${tasks.tokenOutput}, 0) + ${delta.output}`,
-      tokenTotal: sql<number>`coalesce(${tasks.tokenTotal}, 0) + ${delta.total}`,
-      costUsd: sql<number>`coalesce(${tasks.costUsd}, 0) + ${delta.costUsd}`,
-    })
-    .where(eq(tasks.id, taskId))
-    .run();
+  return withTaskDeviceMutation(
+    taskId,
+    () => {
+      getDb()
+        .update(tasks)
+        .set({
+          tokenInput: sql<number>`coalesce(${tasks.tokenInput}, 0) + ${delta.input}`,
+          tokenOutput: sql<number>`coalesce(${tasks.tokenOutput}, 0) + ${delta.output}`,
+          tokenTotal: sql<number>`coalesce(${tasks.tokenTotal}, 0) + ${delta.total}`,
+          costUsd: sql<number>`coalesce(${tasks.costUsd}, 0) + ${delta.costUsd}`,
+        })
+        .where(eq(tasks.id, taskId))
+        .run();
 
-  return delta;
+      return delta;
+    },
+    true,
+  );
 }
 
 export function incrementProjectTokenUsage(

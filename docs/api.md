@@ -1548,11 +1548,22 @@ POST /chat
 
 **Errors:**
 
+- `403` — Execution preflight denied. Personal projects return `personal_execution_disabled`.
+  A task enrolled in device execution currently requires an internal host run scope
+  (`run_scope_required`); taskless chat in such a project returns `taskless_execution_denied`,
+  including `explore: true`. A missing enrolled grant returns `grant_missing` and a
+  mismatched task/project returns `run_fenced`. These denials occur before session
+  creation, runtime resolution or filesystem work. P13 lifecycle integration and
+  P14 stop/readiness acceptance must complete before managed chat can be enabled.
 - `404` — Project not found
 - `429` — Runtime usage limit reached (`code: "CHAT_USAGE_LIMIT"`, response may include `runtimeLimitSnapshot`)
 - `500` — Chat request failed (`code: "CHAT_REQUEST_FAILED"`)
 
-On error, a `chat:error` event is sent via WebSocket before the HTTP response. Both HTTP and WebSocket chat payloads normalize `runtimeLimitSnapshot` before emission, so client-visible snapshots follow the same sanitized contract as runtime-profile and task payloads.
+On runtime error, a `chat:error` event is sent via WebSocket before the HTTP response.
+Preflight denials return HTTP directly, before a chat run exists. Both HTTP and
+WebSocket chat payloads normalize `runtimeLimitSnapshot` before emission, so
+client-visible snapshots follow the same sanitized contract as runtime-profile
+and task payloads.
 
 **Timeout:** Requests may take up to 120 seconds due to agent processing.
 

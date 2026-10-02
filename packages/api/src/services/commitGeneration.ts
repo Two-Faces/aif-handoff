@@ -5,12 +5,14 @@ import {
   isBranchIsolationError,
   logger,
   restorePersistedBranch,
+  type DeviceExecutionError,
 } from "@aif/shared";
 import {
   findProjectById,
   findTaskById,
   getTaskExecutionWorkspace,
   checkpointTaskExecutionWorkspace,
+  getDeviceExecutionBlock,
 } from "@aif/data";
 import { UsageSource } from "@aif/runtime";
 import { runApiRuntimeOneShot } from "./runtime.js";
@@ -26,7 +28,7 @@ const PROJECT_SCOPE_APPEND =
 export interface RunCommitQueryResult {
   ok: boolean;
   error?: string;
-  code?: "ai_handoff_required" | "personal_execution_disabled";
+  code?: "ai_handoff_required" | "personal_execution_disabled" | DeviceExecutionError["code"];
 }
 
 export interface RunCommitQueryInput {
@@ -54,7 +56,8 @@ export { buildCommitPrompt } from "@aif/shared";
  */
 export async function runCommitQuery(input: RunCommitQueryInput): Promise<RunCommitQueryResult> {
   const { projectId, taskId = null } = input;
-  const blocked = getPersonalExecutionBlock(projectId, taskId);
+  const blocked =
+    getPersonalExecutionBlock(projectId, taskId) ?? getDeviceExecutionBlock(projectId, taskId);
   if (blocked) return { ok: false, ...blocked };
   const project = findProjectById(projectId);
   if (!project) {

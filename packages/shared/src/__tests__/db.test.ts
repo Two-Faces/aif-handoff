@@ -7,7 +7,80 @@ import { eq } from "drizzle-orm";
 import { chatSessions } from "../schema.js";
 import { closeDb, createTestDb, getDb } from "../db.js";
 
-const CURRENT_SCHEMA_VERSION = 36;
+const CURRENT_SCHEMA_VERSION = 37;
+
+it("upgrades v36 without enrolling existing tasks or changing their locks and transfer readiness", () => {
+  closeDb();
+  const path = join(tmpdir(), `aif-grant-upgrade-${crypto.randomUUID()}.sqlite`);
+  const connections: Database.Database[] = [];
+  try {
+    getDb(path);
+    closeDb();
+    const old = new Database(path);
+    connections.push(old);
+    old.exec("DROP TABLE task_device_runs");
+    old.exec("DROP TABLE task_device_grant_heads");
+    old.exec("DROP TABLE task_device_grants");
+    old
+      .prepare("INSERT INTO projects (id, name, root_path) VALUES (?, ?, ?)")
+      .run("project", "Existing", "keep-root");
+    old
+      .prepare(
+        "INSERT INTO tasks (id, project_id, title, locked_by, locked_until, session_id) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run("task", "project", "Existing task", "coordinator", "2000-01-01", "saved-session");
+    old
+      .prepare(
+        "INSERT INTO handoff_snapshot_transfers (id, peer_id, project_id, snapshot_id, checkout_id, project_root, worktree_path, manifest_json, status, code_ready, context_ready, completed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        "transfer",
+        "peer",
+        "project",
+        "snapshot",
+        "checkout",
+        "keep-root",
+        "keep-worktree",
+        "{}",
+        "ready",
+        1,
+        1,
+        1,
+      );
+    old.pragma("user_version = 36");
+    old.close();
+    getDb(path);
+    closeDb();
+    const upgraded = new Database(path, { readonly: true });
+    connections.push(upgraded);
+    expect(upgraded.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
+    expect(
+      upgraded
+        .prepare("SELECT locked_by, locked_until, session_id FROM tasks WHERE id = 'task'")
+        .get(),
+    ).toEqual({
+      locked_by: "coordinator",
+      locked_until: "2000-01-01",
+      session_id: "saved-session",
+    });
+    expect(
+      upgraded
+        .prepare(
+          "SELECT code_ready, context_ready, completed, worktree_path FROM handoff_snapshot_transfers WHERE id = 'transfer'",
+        )
+        .get(),
+    ).toEqual({ code_ready: 1, context_ready: 1, completed: 1, worktree_path: "keep-worktree" });
+    for (const table of ["task_device_grants", "task_device_grant_heads", "task_device_runs"]) {
+      expect(upgraded.prepare(`SELECT count(*) AS count FROM ${table}`).get()).toEqual({
+        count: 0,
+      });
+    }
+  } finally {
+    closeDb();
+    for (const connection of connections) if (connection.open) connection.close();
+    removeSqliteArtifacts(path);
+  }
+});
 
 it("upgrades v35 without rewriting immutable code/context records", () => {
   closeDb();

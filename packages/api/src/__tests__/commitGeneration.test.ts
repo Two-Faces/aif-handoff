@@ -15,6 +15,7 @@ vi.mock("../services/runtime.js", () => ({
 
 vi.mock("@aif/data", () => ({
   getPersonalExecutionBlock: vi.fn(() => null),
+  getDeviceExecutionBlock: vi.fn(() => null),
   isProjectPublicationAllowed: vi.fn(() => true),
   getTaskExecutionWorkspace: (...args: unknown[]) => mockGetWorkspace(...args),
   checkpointTaskExecutionWorkspace: (...args: unknown[]) => mockCheckpoint(...args),
