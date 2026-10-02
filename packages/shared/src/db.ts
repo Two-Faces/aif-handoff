@@ -1143,6 +1143,42 @@ const MIGRATIONS: Migration[] = [
       return {};
     },
   },
+  {
+    version: 32,
+    description: "Durable per-project sync journal, registers and ACK cursors",
+    sql: `
+      CREATE TABLE handoff_sync_streams (
+        stream_key TEXT PRIMARY KEY, project_id TEXT NOT NULL, origin_device_id TEXT NOT NULL,
+        incarnation TEXT NOT NULL, next_sequence INTEGER NOT NULL DEFAULT 1, applied_sequence INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE handoff_sync_operations (
+        operation_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, stream_key TEXT NOT NULL,
+        sequence INTEGER NOT NULL, json TEXT NOT NULL, digest TEXT NOT NULL,
+        outgoing INTEGER NOT NULL, applied INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE UNIQUE INDEX handoff_sync_sequence ON handoff_sync_operations (stream_key, sequence);
+      CREATE INDEX handoff_sync_pending ON handoff_sync_operations (project_id, applied, stream_key, sequence);
+      CREATE TABLE handoff_sync_fields (
+        project_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
+        field TEXT NOT NULL, versions_json TEXT NOT NULL, PRIMARY KEY (project_id, entity_type, entity_id, field)
+      );
+      CREATE TABLE handoff_sync_peer_cursors (
+        peer_id TEXT NOT NULL, stream_key TEXT NOT NULL,
+        sent_sequence INTEGER NOT NULL DEFAULT 0, ack_sequence INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (peer_id, stream_key)
+      );
+      CREATE TABLE handoff_sync_checkpoints (
+        checkpoint_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, producer_device_id TEXT NOT NULL,
+        watermarks_json TEXT NOT NULL, record_count INTEGER NOT NULL, digest TEXT,
+        received INTEGER NOT NULL, next_ordinal INTEGER NOT NULL DEFAULT 0,
+        received_bytes INTEGER NOT NULL DEFAULT 0, complete INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE handoff_sync_checkpoint_records (
+        checkpoint_id TEXT NOT NULL REFERENCES handoff_sync_checkpoints(checkpoint_id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL, json TEXT NOT NULL, PRIMARY KEY (checkpoint_id, ordinal)
+      );
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {

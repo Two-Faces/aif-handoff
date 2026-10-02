@@ -1,5 +1,7 @@
 export * from "./personalMode.js";
 export * from "./existingCheckout.js";
+export * from "./sync/contracts.js";
+export * from "./sync/causality.js";
 
 // Schema
 export {
@@ -9,6 +11,12 @@ export {
   logicalParticipants,
   participantBindings,
   logicalTaskAssignments,
+  syncStreams,
+  syncOperations,
+  syncFields,
+  syncPeerCursors,
+  syncCheckpoints,
+  syncCheckpointRecords,
   appSettings,
   participants,
   participantSessions,

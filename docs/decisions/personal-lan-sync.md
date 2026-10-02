@@ -46,6 +46,13 @@ manifest or rewrite context. Portable manifests are a separate explicit action.
 
 ## Operations and causality
 
+API, MCP and worker writers can share the same local database. Each writer
+process allocates a fresh operation incarnation; persisted journal rows retain
+old incarnations for retransmission. A restarted writer cannot reuse an old
+stream sequence after restoring a backup. Peer authentication binds the device
+key, not an ephemeral writer incarnation. This is separate from the local
+installation identity and API-process lock.
+
 An operation contains protocol/schema versions (both 1), operation UUID, stream
 identity, positive safe-integer sequence, project/entity IDs, typed intent,
 causal context and a bounded payload. Reject unknown fields/intents and invalid

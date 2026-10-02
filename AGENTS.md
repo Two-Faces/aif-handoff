@@ -64,6 +64,8 @@ packages/
 │       ├── devices.ts       # Local device identity and API process ownership
 │       ├── projectBindings.ts # Explicit local checkout registration
 │       ├── participantBindings.ts # Logical attribution vs local account bindings
+│       ├── syncJournal.ts   # Transactional causal registers, inbox/outbox and ACK
+│       ├── syncCheckpoints.ts # Immutable checkpoint staging and atomic bootstrap
 │       └── index.ts         # Public repository API
 ├── api/                 # @aif/api — Hono REST + WebSocket server (port 3009)
 │   └── src/
