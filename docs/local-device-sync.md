@@ -145,9 +145,11 @@ synthetic; none of the inventoried working copies is modified.
 
 The native Windows/macOS pilot has verified pinned pairing, automatic board exchange,
 offline edits across a Windows API restart, conflict retention, and resolution through
-the Windows UI with a peer ACK. Native acceptance remains open for the remaining checks,
-including the Mac checkout binding and participant mapping on both devices. The Windows
-process harness does not substitute for those checks.
+the Windows UI with a peer ACK and user confirmation of the updated Mac UI. The user
+also confirmed the Mac checkout binding and a clean working tree after attach; its
+pre-attach commit hash was not captured for a strict before/after comparison. Native
+acceptance remains open, including participant mapping and local authorization on both
+devices. The Windows process harness does not substitute for those checks.
 Current validation results and the remaining native acceptance are recorded in the
 [implementation plan](../.ai-factory/plans/personal-lan-handoff.md).
 
