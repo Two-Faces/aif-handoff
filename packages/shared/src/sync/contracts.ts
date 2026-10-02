@@ -38,7 +38,10 @@ export const sharedTaskFields = z
         status: z.enum(TASK_STATUSES),
         executionOwner: z.enum(["ai", "human"]),
         ownershipRevision: z.number().int().nonnegative(),
-        assignees: z.array(attribution).max(100),
+        assignees: z.array(attribution.extend({ id })).max(100),
+        blockedFromStatus: z.enum(TASK_STATUSES).nullable().default(null),
+        manualReviewRequired: z.boolean().default(false),
+        reworkRequested: z.boolean().default(false),
       })
       .strict(),
     attachments: z.array(attachment).max(100),
@@ -131,6 +134,7 @@ const envelope = z.object({
   intent: z.enum(["create", "update", "delete", "resolve"]),
   causalContext: causalContextSchema,
   actorKind: z.enum(["participant", "agent", "system", "anonymous"]),
+  actor: attribution.nullable().optional(),
   parents: z.record(z.string().max(100), z.array(syncDotSchema).max(100)).optional(),
 });
 export const syncOperationSchema = z
@@ -193,6 +197,10 @@ export const syncOperationSchema = z
 export type SyncOperation = z.infer<typeof syncOperationSchema>;
 export type SyncDot = z.infer<typeof syncDotSchema>;
 export type CausalContext = z.infer<typeof causalContextSchema>;
+export type SyncRevisions = Record<string, SyncDot[]>;
+export const syncRevisionsSchema = z
+  .record(z.string().max(100), z.array(syncDotSchema).max(100))
+  .refine((value) => Object.keys(value).length <= 64, "Too many revision fields");
 
 export const checkpointRecordSchema = z
   .object({
@@ -231,7 +239,9 @@ export class SyncError extends Error {
       | "entity_not_ready"
       | "invalid_checkpoint"
       | "invalid_ack"
-      | "checkpoint_incomplete",
+      | "checkpoint_incomplete"
+      | "sync_revision_required"
+      | "sync_revision_conflict",
   ) {
     super(code);
     this.name = "SyncError";

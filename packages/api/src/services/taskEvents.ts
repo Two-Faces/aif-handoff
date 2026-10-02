@@ -11,6 +11,9 @@ import {
   type AuditActor,
   type ParticipantRole,
   type TaskEvent,
+  type SyncRevisions,
+  SyncError,
+  PERSONAL_EXECUTION_BLOCK,
 } from "@aif/shared";
 import {
   applyTaskAction,
@@ -19,6 +22,7 @@ import {
   getLatestHumanComment,
   persistTaskPlanForTask,
   setTaskFields,
+  isPersonalProject,
   type TaskRow,
 } from "@aif/data";
 import { AiHandoffRequiredError, runFastFixQuery, withTimeout } from "./fastFix.js";
@@ -31,6 +35,7 @@ interface EventHandlerInput {
   actor?: AuditActor;
   participantRole?: ParticipantRole | null;
   participantActive?: boolean;
+  expectedSyncRevisions?: SyncRevisions;
 }
 
 export type EventHandlerResult =
@@ -205,7 +210,11 @@ function handleRegularTransition(input: EventHandlerInput): EventHandlerResult {
   if (!task) {
     return { ok: false, status: 404, error: "Task not found" };
   }
-  if ((input.event === "approve_done" || input.event === "start_ai") && input.deletePlanFile) {
+  if (
+    !isPersonalProject(task.projectId) &&
+    (input.event === "approve_done" || input.event === "start_ai") &&
+    input.deletePlanFile
+  ) {
     const project = findProjectById(task.projectId);
     if (!project) {
       return { ok: false, status: 404, error: "Project not found for task" };
@@ -239,6 +248,7 @@ function handleRegularTransition(input: EventHandlerInput): EventHandlerResult {
     participantRole: input.participantRole,
     participantActive: input.participantActive,
     expectedStatus: task.status,
+    expectedSyncRevisions: input.expectedSyncRevisions,
   });
   if (!transition.ok) {
     const authorizationDenied =
@@ -406,6 +416,21 @@ export async function handleTaskEvent(input: EventHandlerInput): Promise<EventHa
         };
       }
     }
+    const task = findTaskById(input.taskId);
+    if (task && isPersonalProject(task.projectId)) {
+      if (input.event === "fast_fix" || input.deletePlanFile) {
+        return { ok: false, status: 403, ...PERSONAL_EXECUTION_BLOCK };
+      }
+      if (input.event === "accept_existing_plan" && !task.plan?.trim()) {
+        return {
+          ok: false,
+          status: 409,
+          code: "plan_required",
+          error: "Save a board plan before accepting it",
+        };
+      }
+      return handleRegularTransition(input);
+    }
     if (input.event === "fast_fix") {
       return await handleFastFix(input);
     }
@@ -414,6 +439,9 @@ export async function handleTaskEvent(input: EventHandlerInput): Promise<EventHa
     }
     return handleRegularTransition(input);
   } catch (error) {
+    if (error instanceof SyncError) {
+      return { ok: false, status: 409, code: error.code, error: error.message };
+    }
     if (error instanceof AiHandoffRequiredError) {
       return {
         ok: false,

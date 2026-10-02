@@ -1,4 +1,5 @@
 import { and, asc, count, eq, isNull, ne, sql } from "drizzle-orm";
+import { isReplicatedProject } from "./syncMutations.js";
 import {
   auditEvents,
   logger,
@@ -63,9 +64,7 @@ function toParticipant(row: typeof participants.$inferSelect): Participant {
   };
 }
 
-function countActiveAdmins(
-  database: ReturnType<typeof getDb>,
-): number {
+function countActiveAdmins(database: ReturnType<typeof getDb>): number {
   const result = database
     .select({ value: count() })
     .from(participants)
@@ -99,7 +98,11 @@ export function countParticipants(): number {
 
 export function listParticipants(options: { includeInactive?: boolean } = {}): Participant[] {
   const rows = options.includeInactive
-    ? getDb().select().from(participants).orderBy(asc(participants.displayName), asc(participants.id)).all()
+    ? getDb()
+        .select()
+        .from(participants)
+        .orderBy(asc(participants.displayName), asc(participants.id))
+        .all()
     : getDb()
         .select()
         .from(participants)
@@ -114,11 +117,7 @@ export function listParticipants(options: { includeInactive?: boolean } = {}): P
 }
 
 export function findParticipantById(participantId: string): Participant | null {
-  const row = getDb()
-    .select()
-    .from(participants)
-    .where(eq(participants.id, participantId))
-    .get();
+  const row = getDb().select().from(participants).where(eq(participants.id, participantId)).get();
   log.debug({ participantId, found: Boolean(row) }, "Looked up participant by ID");
   return row ? toParticipant(row) : null;
 }
@@ -239,8 +238,7 @@ export function updateParticipant(
       if (!current) return { ok: false, code: "not_found" } as const;
       if (!current.active) return { ok: false, code: "inactive_participant" } as const;
 
-      const isDemotingActiveAdmin =
-        current.role === "admin" && input.role === "member";
+      const isDemotingActiveAdmin = current.role === "admin" && input.role === "member";
       if (isDemotingActiveAdmin && countActiveAdmins(tx) <= 1) {
         log.warn({ participantId }, "Rejected final active admin demotion");
         return { ok: false, code: "final_active_admin" } as const;
@@ -338,6 +336,7 @@ export function deactivateParticipant(
         .select({
           id: tasks.id,
           title: tasks.title,
+          projectId: tasks.projectId,
           status: tasks.status,
           executionOwner: tasks.executionOwner,
           ownershipRevision: tasks.ownershipRevision,
@@ -346,11 +345,11 @@ export function deactivateParticipant(
         .innerJoin(tasks, eq(taskAssignments.taskId, tasks.id))
         .where(eq(taskAssignments.participantId, participantId))
         .all();
-      tx.delete(taskAssignments)
-        .where(eq(taskAssignments.participantId, participantId))
-        .run();
+      tx.delete(taskAssignments).where(eq(taskAssignments.participantId, participantId)).run();
 
       for (const task of affectedTasks) {
+        // Account activation is local; shared assignments retain their logical identity.
+        if (isReplicatedProject(task.projectId)) continue;
         const revisionRow = tx
           .update(tasks)
           .set({

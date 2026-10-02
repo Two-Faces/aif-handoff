@@ -62,6 +62,41 @@ function personal() {
 }
 
 describe("personal project API", () => {
+  it("uses plan revisions through REST and handles board transitions without touching checkout", async () => {
+    const { taskId } = personal();
+    const app = new Hono().route("/tasks", tasksRouter);
+    const send = (method: string, suffix: string, body: unknown) =>
+      app.request(`/tasks/${taskId}${suffix}`, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const fetched = await app.request(`/tasks/${taskId}`);
+    const task = await fetched.json();
+    expect(task.syncRevisions.plan).toHaveLength(1);
+    expect((await send("PUT", "", { plan: "Missing revision" })).status).toBe(409);
+    const saved = await send("PUT", "", {
+      plan: "Saved on board",
+      expectedSyncRevisions: task.syncRevisions,
+    });
+    expect(saved.status).toBe(200);
+    expect(
+      (await send("PUT", "", { plan: "Stale", expectedSyncRevisions: task.syncRevisions })).status,
+    ).toBe(409);
+    const current = await saved.json();
+    const accepted = await send("POST", "/events", {
+      event: "accept_existing_plan",
+      expectedSyncRevisions: current.syncRevisions,
+    });
+    expect(accepted.status).toBe(200);
+    expect(data.findTaskById(taskId)?.status).toBe("plan_ready");
+    for (const body of [{ event: "fast_fix" }, { event: "start_ai", deletePlanFile: true }]) {
+      const result = await send("POST", "/events", body);
+      expect(result.status).toBe(403);
+      expect(await result.json()).toMatchObject({ code: "personal_execution_disabled" });
+    }
+    expect((await send("POST", "/sync-plan", {})).status).toBe(403);
+  });
   it("attaches a dirty checkout without init or changing HEAD/index/context", async () => {
     const root = mkdtempSync(join(tmpdir(), "aif-personal-api-"));
     roots.push(root);

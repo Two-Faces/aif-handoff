@@ -16,6 +16,10 @@ import {
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
 import { createAuditEventValues } from "./audit.js";
+import { withSharedMutation } from "./syncMutations.js";
+import { readSyncEntity } from "./syncJournal.js";
+import { projectIdForEntity } from "./syncDomain.js";
+import { sharedHistoryFields } from "@aif/shared";
 
 const log = logger("data:task-ownership");
 
@@ -27,6 +31,7 @@ export interface TaskOwnershipFilters {
 }
 
 export interface HandoffTaskExecutionInput {
+  expectedSyncRevisions?: import("@aif/shared").SyncRevisions;
   taskId: string;
   executionOwner: ExecutionOwner;
   assigneeIds?: string[];
@@ -80,10 +85,11 @@ function parseHistoryAssignees(raw: string): TaskAssigneeSummary[] {
   }
 }
 
-function toHistoryEntry(
-  row: typeof taskExecutorHistory.$inferSelect,
-): TaskExecutorHistoryEntry {
+function toHistoryEntry(row: typeof taskExecutorHistory.$inferSelect): TaskExecutorHistoryEntry {
+  const projectId = projectIdForEntity("task", row.taskId);
+  const portable = projectId ? readSyncEntity(projectId, "history", row.id) : null;
   return {
+    ...(portable ? { logicalAssignees: sharedHistoryFields.parse(portable).assignees } : {}),
     id: row.id,
     taskId: row.taskId,
     taskTitleSnapshot: row.taskTitleSnapshot,
@@ -123,9 +129,7 @@ function hasLiveTaskLock(
 export function buildTaskOwnershipConditions(filters: TaskOwnershipFilters) {
   const participantId = filters.currentParticipantId ?? filters.assigneeId;
   return [
-    filters.executionOwner
-      ? eq(tasks.executionOwner, filters.executionOwner)
-      : undefined,
+    filters.executionOwner ? eq(tasks.executionOwner, filters.executionOwner) : undefined,
     participantId
       ? sql`exists (
           select 1
@@ -160,11 +164,7 @@ export function listTaskAssigneesByTaskIds(taskIds: string[]): AssigneeMap {
     .from(taskAssignments)
     .innerJoin(participants, eq(taskAssignments.participantId, participants.id))
     .where(inArray(taskAssignments.taskId, uniqueTaskIds))
-    .orderBy(
-      asc(taskAssignments.taskId),
-      asc(participants.displayName),
-      asc(participants.id),
-    )
+    .orderBy(asc(taskAssignments.taskId), asc(participants.displayName), asc(participants.id))
     .all();
 
   for (const row of rows) {
@@ -213,361 +213,365 @@ export function listTaskExecutorHistory(taskId: string): TaskExecutorHistoryEntr
   return rows.map(toHistoryEntry);
 }
 
-export function handoffTaskExecution(
-  input: HandoffTaskExecutionInput,
-): HandoffTaskExecutionResult {
-  const db = getDb();
-  const now = input.now ?? new Date();
-  const nowIso = now.toISOString();
-  const requestedAssigneeIds = [...new Set(input.assigneeIds ?? [])];
-  log.debug(
-    {
-      taskId: input.taskId,
-      executionOwner: input.executionOwner,
-      assigneeCount: requestedAssigneeIds.length,
-      expectedOwnershipRevision: input.expectedOwnershipRevision,
-      expectedExecutionOwner: input.expectedExecutionOwner ?? null,
-      expectedStatus: input.expectedStatus ?? null,
-      actorKind: input.actor.kind,
-      actorId: input.actor.id,
-    },
-    "Evaluating task execution handoff",
-  );
-
-  try {
-    return db.transaction((tx) => {
-      const task = tx.select().from(tasks).where(eq(tasks.id, input.taskId)).get();
-      if (!task) {
-        log.warn({ taskId: input.taskId, code: "not_found" }, "Task handoff rejected");
-        return { ok: false, code: "not_found" } as const;
-      }
-
-      const currentAssignees = tx
-        .select({
-          participantId: participants.id,
-          displayName: participants.displayName,
-          role: participants.role,
-          active: participants.active,
-        })
-        .from(taskAssignments)
-        .innerJoin(participants, eq(taskAssignments.participantId, participants.id))
-        .where(eq(taskAssignments.taskId, task.id))
-        .orderBy(asc(participants.displayName), asc(participants.id))
-        .all();
-      const currentOwnership: TaskOwnership = {
-        executionOwner: task.executionOwner,
-        ownershipRevision: task.ownershipRevision,
-        assignees: currentAssignees,
-      };
-      const hasLiveLock = hasLiveTaskLock(task, nowIso, input.allowLockedBy);
-      if (hasLiveLock) {
-        log.warn(
-          {
-            taskId: task.id,
-            code: "locked",
-            lockedBy: task.lockedBy,
-            lockedUntil: task.lockedUntil,
-          },
-          "Task handoff rejected",
-        );
-        return { ok: false, code: "locked", ownership: currentOwnership } as const;
-      }
-
-      const revisionMismatch =
-        task.ownershipRevision !== input.expectedOwnershipRevision;
-      const ownerMismatch =
-        input.expectedExecutionOwner !== undefined &&
-        task.executionOwner !== input.expectedExecutionOwner;
-      const statusMismatch =
-        input.expectedStatus !== undefined && task.status !== input.expectedStatus;
-      if (revisionMismatch || ownerMismatch || statusMismatch) {
-        log.warn(
-          {
-            taskId: task.id,
-            code: "revision_conflict",
-            expectedOwnershipRevision: input.expectedOwnershipRevision,
-            actualOwnershipRevision: task.ownershipRevision,
-            expectedExecutionOwner: input.expectedExecutionOwner ?? null,
-            actualExecutionOwner: task.executionOwner,
-            expectedStatus: input.expectedStatus ?? null,
-            actualStatus: task.status,
-          },
-          "Task handoff rejected",
-        );
-        return {
-          ok: false,
-          code: "revision_conflict",
-          ownership: currentOwnership,
-        } as const;
-      }
-
-      if (
-        task.status === "verified" ||
-        (input.executionOwner === "ai" && requestedAssigneeIds.length > 0) ||
-        (task.executionOwner === "human" &&
-          input.executionOwner === "ai" &&
-          task.status === "plan_ready" &&
-          !task.autoMode &&
-          input.resumeAction !== "start_implementation") ||
-        (task.executionOwner === "human" &&
-          input.executionOwner === "ai" &&
-          task.status === "blocked_external" &&
-          (input.resumeAction !== "retry_from_blocked" || !task.blockedFromStatus))
-      ) {
-        log.warn(
-          { taskId: task.id, code: "invalid_transition", status: task.status },
-          "Task handoff rejected",
-        );
-        return {
-          ok: false,
-          code: "invalid_transition",
-          ownership: currentOwnership,
-        } as const;
-      }
-
-      const requestedAssignees =
-        requestedAssigneeIds.length === 0
-          ? []
-          : tx
-              .select({
-                participantId: participants.id,
-                displayName: participants.displayName,
-                role: participants.role,
-                active: participants.active,
-              })
-              .from(participants)
-              .where(inArray(participants.id, requestedAssigneeIds))
-              .orderBy(asc(participants.displayName), asc(participants.id))
-              .all();
-      const hasInactiveOrMissingAssignee =
-        requestedAssignees.length !== requestedAssigneeIds.length ||
-        requestedAssignees.some((participant) => !participant.active);
-      if (hasInactiveOrMissingAssignee) {
-        log.warn(
-          {
-            taskId: task.id,
-            code: "inactive_assignee",
-            requestedAssigneeCount: requestedAssigneeIds.length,
-            activeAssigneeCount: requestedAssignees.filter((assignee) => assignee.active).length,
-          },
-          "Task handoff rejected",
-        );
-        return {
-          ok: false,
-          code: "inactive_assignee",
-          ownership: currentOwnership,
-        } as const;
-      }
-
-      if (
-        task.executionOwner === input.executionOwner &&
-        sameAssignees(currentAssignees, requestedAssignees)
-      ) {
-        log.warn(
-          { taskId: task.id, code: "invalid_transition" },
-          "Task handoff would not change ownership",
-        );
-        return {
-          ok: false,
-          code: "invalid_transition",
-          ownership: currentOwnership,
-        } as const;
-      }
-
-      const lockAvailable = input.allowLockedBy
-        ? or(
-            isNull(tasks.lockedBy),
-            lte(tasks.lockedUntil, nowIso),
-            eq(tasks.lockedBy, input.allowLockedBy),
-          )
-        : or(isNull(tasks.lockedBy), lte(tasks.lockedUntil, nowIso));
-      const updated = tx
-        .update(tasks)
-        .set({
+export function handoffTaskExecution(input: HandoffTaskExecutionInput): HandoffTaskExecutionResult {
+  return withSharedMutation(
+    { entityType: "task", entityId: input.taskId },
+    () => {
+      const db = getDb();
+      const now = input.now ?? new Date();
+      const nowIso = now.toISOString();
+      const requestedAssigneeIds = [...new Set(input.assigneeIds ?? [])];
+      log.debug(
+        {
+          taskId: input.taskId,
           executionOwner: input.executionOwner,
-          ownershipRevision: sql`${tasks.ownershipRevision} + 1`,
-          ...(task.executionOwner === "human" &&
-          input.executionOwner === "ai" &&
-          task.status === "backlog"
-            ? {
-                status: "planning" as const,
-                blockedReason: null,
-                blockedFromStatus: null,
-                retryAfter: null,
-                retryCount: 0,
-                reworkRequested: false,
-                reviewIterationCount: 0,
-                manualReviewRequired: false,
-                autoReviewStateJson: null,
-                scheduledAt: null,
-              }
-            : {}),
-          ...(task.executionOwner === "human" &&
-          input.executionOwner === "ai" &&
-          task.status === "plan_ready" &&
-          !task.autoMode &&
-          input.resumeAction === "start_implementation"
-            ? {
-                status: "implementing" as const,
-                blockedReason: null,
-                blockedFromStatus: null,
-                retryAfter: null,
-                retryCount: 0,
-                reworkRequested: false,
-                reviewIterationCount: 0,
-                manualReviewRequired: false,
-                autoReviewStateJson: null,
-                scheduledAt: null,
-              }
-            : {}),
-          ...(task.executionOwner === "human" &&
-          input.executionOwner === "ai" &&
-          task.status === "blocked_external" &&
-          input.resumeAction === "retry_from_blocked" &&
-          task.blockedFromStatus
-            ? {
-                status: task.blockedFromStatus,
-                blockedReason: null,
-                blockedFromStatus: null,
-                retryAfter: null,
-                retryCount: 0,
-                reworkRequested: false,
-                reviewIterationCount: 0,
-                manualReviewRequired: false,
-                autoReviewStateJson: null,
-                scheduledAt: null,
-              }
-            : {}),
-          updatedAt: nowIso,
-        })
-        .where(
-          and(
-            eq(tasks.id, task.id),
-            eq(tasks.ownershipRevision, input.expectedOwnershipRevision),
-            input.expectedExecutionOwner === undefined
-              ? undefined
-              : eq(tasks.executionOwner, input.expectedExecutionOwner),
-            input.expectedStatus === undefined
-              ? undefined
-              : eq(tasks.status, input.expectedStatus),
-            lockAvailable,
-          ),
-        )
-        .returning({
-          executionOwner: tasks.executionOwner,
-          ownershipRevision: tasks.ownershipRevision,
-          status: tasks.status,
-        })
-        .get();
-      if (!updated) {
-        const racedTask = tx
-          .select({ lockedBy: tasks.lockedBy, lockedUntil: tasks.lockedUntil })
-          .from(tasks)
-          .where(eq(tasks.id, task.id))
-          .get();
-        const code =
-          racedTask && hasLiveTaskLock(racedTask, nowIso, input.allowLockedBy)
-            ? "locked"
-            : "revision_conflict";
-        log.warn(
-          { taskId: task.id, code, lockedBy: racedTask?.lockedBy ?? null },
-          "Task handoff lost atomic update race",
-        );
-        return {
-          ok: false,
-          code,
-          ownership: currentOwnership,
-        } as const;
-      }
-
-      tx.delete(taskAssignments).where(eq(taskAssignments.taskId, task.id)).run();
-      if (input.executionOwner === "human" && requestedAssignees.length > 0) {
-        tx.insert(taskAssignments)
-          .values(
-            requestedAssignees.map((assignee) => ({
-              taskId: task.id,
-              participantId: assignee.participantId,
-              assignedByKind: input.actor.kind,
-              assignedById: input.actor.id,
-              assignedByDisplayNameSnapshot: input.actor.displayNameSnapshot,
-              createdAt: nowIso,
-            })),
-          )
-          .run();
-      }
-
-      const ownership: TaskOwnership = {
-        executionOwner: updated.executionOwner,
-        ownershipRevision: updated.ownershipRevision,
-        assignees: input.executionOwner === "human" ? requestedAssignees : [],
-      };
-      const historyRow = tx
-        .insert(taskExecutorHistory)
-        .values({
-          id: crypto.randomUUID(),
-          taskId: task.id,
-          taskTitleSnapshot: task.title,
-          ownershipRevision: ownership.ownershipRevision,
-          executionOwner: ownership.executionOwner,
-          assigneesSnapshotJson: JSON.stringify(ownership.assignees),
-          statusSnapshot: updated.status,
+          assigneeCount: requestedAssigneeIds.length,
+          expectedOwnershipRevision: input.expectedOwnershipRevision,
+          expectedExecutionOwner: input.expectedExecutionOwner ?? null,
+          expectedStatus: input.expectedStatus ?? null,
           actorKind: input.actor.kind,
           actorId: input.actor.id,
-          actorDisplayNameSnapshot: input.actor.displayNameSnapshot,
-          reason: input.reason ?? null,
-          createdAt: nowIso,
-        })
-        .returning()
-        .get();
-      tx.insert(auditEvents)
-        .values(
-          createAuditEventValues({
-            action: "task.execution_handoff",
-            entityType: "task",
-            entityId: task.id,
-            taskId: task.id,
-            taskTitleSnapshot: task.title,
-            executionOwnerSnapshot: ownership.executionOwner,
-            assigneesSnapshot: ownership.assignees,
-            statusSnapshot: updated.status,
-            actor: input.actor,
-            reason: input.reason ?? null,
-            metadata: {
-              previousExecutionOwner: task.executionOwner,
-              previousOwnershipRevision: task.ownershipRevision,
-              previousStatus: task.status,
+        },
+        "Evaluating task execution handoff",
+      );
+
+      try {
+        return db.transaction((tx) => {
+          const task = tx.select().from(tasks).where(eq(tasks.id, input.taskId)).get();
+          if (!task) {
+            log.warn({ taskId: input.taskId, code: "not_found" }, "Task handoff rejected");
+            return { ok: false, code: "not_found" } as const;
+          }
+
+          const currentAssignees = tx
+            .select({
+              participantId: participants.id,
+              displayName: participants.displayName,
+              role: participants.role,
+              active: participants.active,
+            })
+            .from(taskAssignments)
+            .innerJoin(participants, eq(taskAssignments.participantId, participants.id))
+            .where(eq(taskAssignments.taskId, task.id))
+            .orderBy(asc(participants.displayName), asc(participants.id))
+            .all();
+          const currentOwnership: TaskOwnership = {
+            executionOwner: task.executionOwner,
+            ownershipRevision: task.ownershipRevision,
+            assignees: currentAssignees,
+          };
+          const hasLiveLock = hasLiveTaskLock(task, nowIso, input.allowLockedBy);
+          if (hasLiveLock) {
+            log.warn(
+              {
+                taskId: task.id,
+                code: "locked",
+                lockedBy: task.lockedBy,
+                lockedUntil: task.lockedUntil,
+              },
+              "Task handoff rejected",
+            );
+            return { ok: false, code: "locked", ownership: currentOwnership } as const;
+          }
+
+          const revisionMismatch = task.ownershipRevision !== input.expectedOwnershipRevision;
+          const ownerMismatch =
+            input.expectedExecutionOwner !== undefined &&
+            task.executionOwner !== input.expectedExecutionOwner;
+          const statusMismatch =
+            input.expectedStatus !== undefined && task.status !== input.expectedStatus;
+          if (revisionMismatch || ownerMismatch || statusMismatch) {
+            log.warn(
+              {
+                taskId: task.id,
+                code: "revision_conflict",
+                expectedOwnershipRevision: input.expectedOwnershipRevision,
+                actualOwnershipRevision: task.ownershipRevision,
+                expectedExecutionOwner: input.expectedExecutionOwner ?? null,
+                actualExecutionOwner: task.executionOwner,
+                expectedStatus: input.expectedStatus ?? null,
+                actualStatus: task.status,
+              },
+              "Task handoff rejected",
+            );
+            return {
+              ok: false,
+              code: "revision_conflict",
+              ownership: currentOwnership,
+            } as const;
+          }
+
+          if (
+            task.status === "verified" ||
+            (input.executionOwner === "ai" && requestedAssigneeIds.length > 0) ||
+            (task.executionOwner === "human" &&
+              input.executionOwner === "ai" &&
+              task.status === "plan_ready" &&
+              !task.autoMode &&
+              input.resumeAction !== "start_implementation") ||
+            (task.executionOwner === "human" &&
+              input.executionOwner === "ai" &&
+              task.status === "blocked_external" &&
+              (input.resumeAction !== "retry_from_blocked" || !task.blockedFromStatus))
+          ) {
+            log.warn(
+              { taskId: task.id, code: "invalid_transition", status: task.status },
+              "Task handoff rejected",
+            );
+            return {
+              ok: false,
+              code: "invalid_transition",
+              ownership: currentOwnership,
+            } as const;
+          }
+
+          const requestedAssignees =
+            requestedAssigneeIds.length === 0
+              ? []
+              : tx
+                  .select({
+                    participantId: participants.id,
+                    displayName: participants.displayName,
+                    role: participants.role,
+                    active: participants.active,
+                  })
+                  .from(participants)
+                  .where(inArray(participants.id, requestedAssigneeIds))
+                  .orderBy(asc(participants.displayName), asc(participants.id))
+                  .all();
+          const hasInactiveOrMissingAssignee =
+            requestedAssignees.length !== requestedAssigneeIds.length ||
+            requestedAssignees.some((participant) => !participant.active);
+          if (hasInactiveOrMissingAssignee) {
+            log.warn(
+              {
+                taskId: task.id,
+                code: "inactive_assignee",
+                requestedAssigneeCount: requestedAssigneeIds.length,
+                activeAssigneeCount: requestedAssignees.filter((assignee) => assignee.active)
+                  .length,
+              },
+              "Task handoff rejected",
+            );
+            return {
+              ok: false,
+              code: "inactive_assignee",
+              ownership: currentOwnership,
+            } as const;
+          }
+
+          if (
+            task.executionOwner === input.executionOwner &&
+            sameAssignees(currentAssignees, requestedAssignees)
+          ) {
+            log.warn(
+              { taskId: task.id, code: "invalid_transition" },
+              "Task handoff would not change ownership",
+            );
+            return {
+              ok: false,
+              code: "invalid_transition",
+              ownership: currentOwnership,
+            } as const;
+          }
+
+          const lockAvailable = input.allowLockedBy
+            ? or(
+                isNull(tasks.lockedBy),
+                lte(tasks.lockedUntil, nowIso),
+                eq(tasks.lockedBy, input.allowLockedBy),
+              )
+            : or(isNull(tasks.lockedBy), lte(tasks.lockedUntil, nowIso));
+          const updated = tx
+            .update(tasks)
+            .set({
+              executionOwner: input.executionOwner,
+              ownershipRevision: sql`${tasks.ownershipRevision} + 1`,
+              ...(task.executionOwner === "human" &&
+              input.executionOwner === "ai" &&
+              task.status === "backlog"
+                ? {
+                    status: "planning" as const,
+                    blockedReason: null,
+                    blockedFromStatus: null,
+                    retryAfter: null,
+                    retryCount: 0,
+                    reworkRequested: false,
+                    reviewIterationCount: 0,
+                    manualReviewRequired: false,
+                    autoReviewStateJson: null,
+                    scheduledAt: null,
+                  }
+                : {}),
+              ...(task.executionOwner === "human" &&
+              input.executionOwner === "ai" &&
+              task.status === "plan_ready" &&
+              !task.autoMode &&
+              input.resumeAction === "start_implementation"
+                ? {
+                    status: "implementing" as const,
+                    blockedReason: null,
+                    blockedFromStatus: null,
+                    retryAfter: null,
+                    retryCount: 0,
+                    reworkRequested: false,
+                    reviewIterationCount: 0,
+                    manualReviewRequired: false,
+                    autoReviewStateJson: null,
+                    scheduledAt: null,
+                  }
+                : {}),
+              ...(task.executionOwner === "human" &&
+              input.executionOwner === "ai" &&
+              task.status === "blocked_external" &&
+              input.resumeAction === "retry_from_blocked" &&
+              task.blockedFromStatus
+                ? {
+                    status: task.blockedFromStatus,
+                    blockedReason: null,
+                    blockedFromStatus: null,
+                    retryAfter: null,
+                    retryCount: 0,
+                    reworkRequested: false,
+                    reviewIterationCount: 0,
+                    manualReviewRequired: false,
+                    autoReviewStateJson: null,
+                    scheduledAt: null,
+                  }
+                : {}),
+              updatedAt: nowIso,
+            })
+            .where(
+              and(
+                eq(tasks.id, task.id),
+                eq(tasks.ownershipRevision, input.expectedOwnershipRevision),
+                input.expectedExecutionOwner === undefined
+                  ? undefined
+                  : eq(tasks.executionOwner, input.expectedExecutionOwner),
+                input.expectedStatus === undefined
+                  ? undefined
+                  : eq(tasks.status, input.expectedStatus),
+                lockAvailable,
+              ),
+            )
+            .returning({
+              executionOwner: tasks.executionOwner,
+              ownershipRevision: tasks.ownershipRevision,
+              status: tasks.status,
+            })
+            .get();
+          if (!updated) {
+            const racedTask = tx
+              .select({ lockedBy: tasks.lockedBy, lockedUntil: tasks.lockedUntil })
+              .from(tasks)
+              .where(eq(tasks.id, task.id))
+              .get();
+            const code =
+              racedTask && hasLiveTaskLock(racedTask, nowIso, input.allowLockedBy)
+                ? "locked"
+                : "revision_conflict";
+            log.warn(
+              { taskId: task.id, code, lockedBy: racedTask?.lockedBy ?? null },
+              "Task handoff lost atomic update race",
+            );
+            return {
+              ok: false,
+              code,
+              ownership: currentOwnership,
+            } as const;
+          }
+
+          tx.delete(taskAssignments).where(eq(taskAssignments.taskId, task.id)).run();
+          if (input.executionOwner === "human" && requestedAssignees.length > 0) {
+            tx.insert(taskAssignments)
+              .values(
+                requestedAssignees.map((assignee) => ({
+                  taskId: task.id,
+                  participantId: assignee.participantId,
+                  assignedByKind: input.actor.kind,
+                  assignedById: input.actor.id,
+                  assignedByDisplayNameSnapshot: input.actor.displayNameSnapshot,
+                  createdAt: nowIso,
+                })),
+              )
+              .run();
+          }
+
+          const ownership: TaskOwnership = {
+            executionOwner: updated.executionOwner,
+            ownershipRevision: updated.ownershipRevision,
+            assignees: input.executionOwner === "human" ? requestedAssignees : [],
+          };
+          const historyRow = tx
+            .insert(taskExecutorHistory)
+            .values({
+              id: crypto.randomUUID(),
+              taskId: task.id,
+              taskTitleSnapshot: task.title,
               ownershipRevision: ownership.ownershipRevision,
+              executionOwner: ownership.executionOwner,
+              assigneesSnapshotJson: JSON.stringify(ownership.assignees),
+              statusSnapshot: updated.status,
+              actorKind: input.actor.kind,
+              actorId: input.actor.id,
+              actorDisplayNameSnapshot: input.actor.displayNameSnapshot,
+              reason: input.reason ?? null,
+              createdAt: nowIso,
+            })
+            .returning()
+            .get();
+          tx.insert(auditEvents)
+            .values(
+              createAuditEventValues({
+                action: "task.execution_handoff",
+                entityType: "task",
+                entityId: task.id,
+                taskId: task.id,
+                taskTitleSnapshot: task.title,
+                executionOwnerSnapshot: ownership.executionOwner,
+                assigneesSnapshot: ownership.assignees,
+                statusSnapshot: updated.status,
+                actor: input.actor,
+                reason: input.reason ?? null,
+                metadata: {
+                  previousExecutionOwner: task.executionOwner,
+                  previousOwnershipRevision: task.ownershipRevision,
+                  previousStatus: task.status,
+                  ownershipRevision: ownership.ownershipRevision,
+                  status: updated.status,
+                },
+                createdAt: nowIso,
+              }),
+            )
+            .run();
+          log.info(
+            {
+              taskId: task.id,
+              executionOwner: ownership.executionOwner,
+              ownershipRevision: ownership.ownershipRevision,
+              assigneeCount: ownership.assignees.length,
               status: updated.status,
             },
-            createdAt: nowIso,
-          }),
-        )
-        .run();
-      log.info(
-        {
-          taskId: task.id,
-          executionOwner: ownership.executionOwner,
-          ownershipRevision: ownership.ownershipRevision,
-          assigneeCount: ownership.assignees.length,
-          status: updated.status,
-        },
-        "Task execution handoff completed",
-      );
-      return {
-        ok: true,
-        ownership,
-        history: toHistoryEntry(historyRow),
-      } as const;
-    });
-  } catch (error) {
-    log.error(
-      {
-        error,
-        taskId: input.taskId,
-        expectedOwnershipRevision: input.expectedOwnershipRevision,
-      },
-      "Task execution handoff transaction failed",
-    );
-    throw error;
-  }
+            "Task execution handoff completed",
+          );
+          return {
+            ok: true,
+            ownership,
+            history: toHistoryEntry(historyRow),
+          } as const;
+        });
+      } catch (error) {
+        log.error(
+          {
+            error,
+            taskId: input.taskId,
+            expectedOwnershipRevision: input.expectedOwnershipRevision,
+          },
+          "Task execution handoff transaction failed",
+        );
+        throw error;
+      }
+    },
+    { expected: input.expectedSyncRevisions, actor: input.actor },
+  );
 }

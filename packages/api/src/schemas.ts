@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { TASK_EVENTS, TASK_STATUSES, getEnv } from "@aif/shared";
+import { TASK_EVENTS, TASK_STATUSES, getEnv, syncRevisionsSchema } from "@aif/shared";
 
 export const personalCheckoutSchema = z
   .object({
@@ -215,6 +215,7 @@ export const createTaskSchema = z.object({
 });
 
 export const updateTaskSchema = z.object({
+  expectedSyncRevisions: syncRevisionsSchema.optional(),
   title: z.string().min(1).max(500).optional(),
   description: z.string().optional(),
   attachments: z.array(taskAttachmentSchema).max(100).optional(),
@@ -252,12 +253,14 @@ export const updateTaskSchema = z.object({
 });
 
 export const taskEventSchema = z.object({
+  expectedSyncRevisions: syncRevisionsSchema.optional(),
   event: z.enum(TASK_EVENTS),
   deletePlanFile: z.boolean().optional(),
   commitOnApprove: z.boolean().optional(),
 });
 
 export const handoffTaskSchema = z.object({
+  expectedSyncRevisions: syncRevisionsSchema.optional(),
   executionOwner: z.enum(["ai", "human"]),
   assigneeIds: z.array(z.string().min(1)).max(100).default([]),
   expectedOwnershipRevision: z.number().int().min(0),

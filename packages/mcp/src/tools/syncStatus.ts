@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { logger, TASK_STATUSES } from "@aif/shared";
+import { logger, TASK_STATUSES, type SyncRevisions } from "@aif/shared";
+import { mcpSyncRevisionsSchema as syncRevisionsSchema } from "../sync/revisions.js";
 import { findTaskById, transitionTaskStatus, toTaskResponse } from "@aif/data";
 import { registerMcpTool, type ToolContext } from "./index.js";
 import { rateLimitError, toMcpError, validationError } from "../middleware/errorHandler.js";
@@ -10,6 +11,11 @@ import { broadcastTaskChange } from "../utils/broadcast.js";
 
 const log = logger("mcp:tool:sync-status");
 const syncStatusInputSchema: Record<string, z.ZodTypeAny> = {
+  expectedSyncRevisions: syncRevisionsSchema
+    .optional()
+    .describe(
+      "For personal projects, pass syncRevisions from handoff_get_task; workflow changes use revisions, not timestamps",
+    ),
   taskId: z.string().uuid().describe("Task ID to sync status for"),
   newStatus: z.enum(TASK_STATUSES).describe("New status to set"),
   sourceTimestamp: z
@@ -23,6 +29,7 @@ const syncStatusInputSchema: Record<string, z.ZodTypeAny> = {
 };
 
 type SyncStatusArgs = {
+  expectedSyncRevisions?: SyncRevisions;
   direction: "aif_to_handoff" | "handoff_to_aif";
   newStatus: (typeof TASK_STATUSES)[number];
   paused?: boolean;
@@ -109,11 +116,13 @@ export function register(server: McpServer, context: ToolContext): void {
       }
 
       // Resolve conflict using last-write-wins
-      const resolution = resolveConflict({
-        sourceTimestamp: args.sourceTimestamp,
-        targetTimestamp: row.updatedAt,
-        field: "status",
-      });
+      const resolution = row.personalMode
+        ? { conflict: false }
+        : resolveConflict({
+            sourceTimestamp: args.sourceTimestamp,
+            targetTimestamp: row.updatedAt,
+            field: "status",
+          });
 
       if (resolution.conflict) {
         // Target is newer — return conflict info without modifying
@@ -148,6 +157,7 @@ export function register(server: McpServer, context: ToolContext): void {
         // Source is newer — apply the status change
         const nowIso = new Date().toISOString();
         const transition = transitionTaskStatus({
+          expectedSyncRevisions: args.expectedSyncRevisions,
           taskId: args.taskId,
           status: args.newStatus,
           expectedStatus: row.status,

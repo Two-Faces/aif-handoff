@@ -224,6 +224,9 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
 
 ## See Also
 
+- P05/P06: доменные writers для projects/tasks/plans/comments/handoff/history, GitHub import и reorder теперь записывают whitelist delta в общей SQL-транзакции; REST/MCP принимают field revisions. Remote materializer не вызывает Git/runtime/files и не создаёт echo. Явное participant binding обновляет локальные назначения; deactivation не удаляет общую идентичность. Добавлены conflict list/resolve API с parent-set CAS и детерминированный порядок карточек. Дополнительно закрыта Git-подготовка в personal task events до runtime gate.
+- Проверки P05/P06: data sync suites 23 passed, API personal suites 10 passed, MCP full suite 103 passed; build 7/7, lint 10/10. Проверены две БД с разными participant UUID, отсутствие credentials/roots на wire, plan CAS rollback, независимые edits, concurrent plans/resolution, tombstones и maintenance exclusions. Полные quality gates и транспортные проверки ещё открыты.
+
 - [Требования и архитектурные инварианты](../specs/personal-lan-handoff.md)
 - [Готовый запуск следующей сессии](../specs/personal-lan-handoff-session.md)
 - [Существующие package rules](../../AGENTS.md)

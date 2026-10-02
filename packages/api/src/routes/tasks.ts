@@ -9,6 +9,7 @@ import {
   getProjectConfig,
   defaultsForMode,
   getEnv,
+  SyncError,
   type TaskActionContext,
 } from "@aif/shared";
 import {
@@ -70,6 +71,10 @@ const QA_LOCK_DURATION_MS =
   Math.max(getEnv().AGENT_STAGE_RUN_TIMEOUT_MS, 60_000) * 2 + 5 * 60 * 1000;
 
 export const tasksRouter = new Hono<ParticipantApiEnv>();
+tasksRouter.onError((error, c) => {
+  if (error instanceof SyncError) return c.json({ error: error.message, code: error.code }, 409);
+  throw error;
+});
 
 const LEGACY_ACTION_CONTEXT: TaskActionContext = {
   participantsModeEnabled: false,
@@ -652,6 +657,7 @@ tasksRouter.post("/:id/handoff", jsonValidator(handoffTaskSchema), (c) => {
     expectedOwnershipRevision: body.expectedOwnershipRevision,
     expectedExecutionOwner: body.expectedExecutionOwner,
     expectedStatus: body.expectedStatus,
+    expectedSyncRevisions: body.expectedSyncRevisions,
     actor: actionContext.actor,
     reason: body.reason,
     resumeAction: body.resumeAction,
@@ -911,7 +917,7 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
     }
   }
 
-  const { plan, attachments: incomingAttachments, ...updatePayload } = body;
+  const { plan, expectedSyncRevisions, attachments: incomingAttachments, ...updatePayload } = body;
   const effectiveUseSubagents = updatePayload.useSubagents ?? existing.useSubagents;
   if (effectiveUseSubagents) {
     updatePayload.runPlanImprove = false;
@@ -938,7 +944,7 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
   }
 
   const hasPlanUpdate = Object.prototype.hasOwnProperty.call(body, "plan");
-  if (hasPlanUpdate) {
+  if (hasPlanUpdate && !existing.personalMode) {
     try {
       updateTaskPlan(id, plan ?? null, existing.isFix, existing.planPath);
     } catch {
@@ -949,7 +955,9 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
   // Persist new attachments to project files and clean up replaced ones
   if (incomingAttachments !== undefined) {
     const project = findProjectById(existing.projectId);
-    if (project) {
+    if (project?.personalMode) {
+      (updatePayload as Record<string, unknown>).attachments = incomingAttachments;
+    } else if (project) {
       const oldAttachments = parseAttachments(existing.attachments);
       cleanupReplacedAttachments(project.rootPath, oldAttachments, incomingAttachments);
       (updatePayload as Record<string, unknown>).attachments = await persistAttachments(
@@ -959,7 +967,14 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
     }
   }
 
-  const updated = updateTask(id, updatePayload);
+  const updated = updateTask(
+    id,
+    {
+      ...updatePayload,
+      ...(hasPlanUpdate && existing.personalMode ? { plan: plan ?? null } : {}),
+    },
+    { expected: expectedSyncRevisions, actor: requestActionContext(c).actor },
+  );
   if (!updated) return c.json({ error: "Task not found after update" }, 500);
   log.debug({ taskId: id, fields: Object.keys(body) }, "Task updated");
 
@@ -968,7 +983,7 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
 });
 
 // POST /tasks/:id/sync-plan — sync DB plan with physical plan file
-tasksRouter.post("/:id/sync-plan", (c) => {
+tasksRouter.post("/:id/sync-plan", personalTaskExecutionGate, (c) => {
   const { id } = c.req.param();
   const existing = findTaskById(id);
   if (!existing) {
@@ -1011,7 +1026,7 @@ tasksRouter.delete("/:id", (c) => {
 // POST /tasks/:id/events — apply a human action through state machine
 tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
   const { id } = c.req.param();
-  const { event, deletePlanFile, commitOnApprove } = c.req.valid("json");
+  const { event, deletePlanFile, commitOnApprove, expectedSyncRevisions } = c.req.valid("json");
   const actionContext = requestActionContext(c);
   const existing = findTaskById(id);
   if (!existing) {
@@ -1022,6 +1037,7 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
       taskId: id,
       event,
       deletePlanFile,
+      expectedSyncRevisions,
       participantsModeEnabled: actionContext.participantsModeEnabled,
       actor: actionContext.actor,
       participantRole: actionContext.participantRole,
@@ -1046,14 +1062,14 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
       payload: toTaskBroadcastPayload(handled.task),
     });
     // Wake coordinator when task transitions may require agent processing
-    if (handled.broadcastType === "task:moved") {
+    if (handled.broadcastType === "task:moved" && !existing.personalMode) {
       broadcast({ type: "agent:wake", payload: { id: handled.task.id } });
     }
 
     // Fire-and-forget: run /aif-commit when approved with commit checkbox.
     // Broadcast lifecycle over WS so the UI can show a spinner/toast and the
     // approve modal does not close without feedback.
-    if (event === "approve_done" && commitOnApprove) {
+    if (!existing.personalMode && event === "approve_done" && commitOnApprove) {
       const taskId = handled.task.id;
       const projectId = handled.task.projectId;
       log.info({ taskId, projectId }, "Approve-done commit flow started");
@@ -1088,7 +1104,7 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
         { taskId: handled.task.id },
         "Auto QA skipped — AIF_QA_PIPELINE_ENABLED is disabled",
       );
-    } else if (event === "approve_done" && handled.task.autoQa) {
+    } else if (!existing.personalMode && event === "approve_done" && handled.task.autoQa) {
       // Branchless (fast-mode) tasks are allowed: the runner resolves the branch
       // via `git branch --show-current`, mirroring the aif-qa skill.
       const { id: taskId, projectId, worktreePath } = handled.task;

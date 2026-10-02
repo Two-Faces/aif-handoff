@@ -18,18 +18,14 @@ import {
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
 import { createAuditEventValues } from "./audit.js";
+import { withSharedMutation } from "./syncMutations.js";
 
 const log = logger("data:task-transitions");
 
 export type TaskTransitionExtra = Partial<
   Omit<
     TaskRow,
-    | "id"
-    | "projectId"
-    | "status"
-    | "executionOwner"
-    | "ownershipRevision"
-    | "createdAt"
+    "id" | "projectId" | "status" | "executionOwner" | "ownershipRevision" | "createdAt"
   >
 > & {
   autoReviewState?: AutoReviewState | null;
@@ -54,6 +50,7 @@ export type TaskTransitionResult =
     };
 
 export interface TransitionTaskStatusInput {
+  expectedSyncRevisions?: import("@aif/shared").SyncRevisions;
   taskId: string;
   status: TaskStatus;
   expectedStatus?: TaskStatus;
@@ -65,6 +62,7 @@ export interface TransitionTaskStatusInput {
 }
 
 export interface ApplyTaskActionInput {
+  expectedSyncRevisions?: import("@aif/shared").SyncRevisions;
   taskId: string;
   event: TaskEvent;
   participantsModeEnabled: boolean;
@@ -102,8 +100,7 @@ function normalizeExtra(
     ...(autoReviewState === undefined
       ? {}
       : {
-          autoReviewStateJson:
-            autoReviewState === null ? null : JSON.stringify(autoReviewState),
+          autoReviewStateJson: autoReviewState === null ? null : JSON.stringify(autoReviewState),
         }),
   };
 }
@@ -172,238 +169,245 @@ function statusConflict(task: TaskRow): TaskTransitionResult {
   };
 }
 
-export function transitionTaskStatus(
-  input: TransitionTaskStatusInput,
-): TaskTransitionResult {
-  const nowIso = (input.now ?? new Date()).toISOString();
-  log.debug(
-    {
-      taskId: input.taskId,
-      expectedStatus: input.expectedStatus ?? null,
-      targetStatus: input.status,
-      actorKind: input.actor.kind,
-      actorId: input.actor.id,
-      action: input.action ?? "task.status_changed",
-    },
-    "Evaluating atomic task status transition",
-  );
-
-  try {
-    return getDb().transaction((tx) => {
-      const task = tx.select().from(tasks).where(eq(tasks.id, input.taskId)).get();
-      if (!task) {
-        return { ok: false, code: "not_found", message: "Task not found" } as const;
-      }
-      if (input.expectedStatus !== undefined && task.status !== input.expectedStatus) {
-        log.warn(
-          {
-            taskId: task.id,
-            expectedStatus: input.expectedStatus,
-            actualStatus: task.status,
-            code: "status_conflict",
-          },
-          "Task status transition rejected",
-        );
-        return statusConflict(task);
-      }
-      if (input.actor.kind === "participant") {
-        return {
-          ok: false,
-          code: "actor_not_authorized",
-          message: "Participant transitions must use an explicit task action",
-          currentStatus: task.status,
-        } as const;
-      }
-      if (input.actor.kind === "agent" && task.executionOwner !== "ai") {
-        return {
-          ok: false,
-          code: "ai_handoff_required",
-          message: "The task must be handed to AI before an agent can change its status",
-          currentStatus: task.status,
-        } as const;
-      }
-
-      const assignees = listAssigneesInTransaction(tx, task.id);
-      const updated = tx
-        .update(tasks)
-        .set({
-          ...normalizeExtra(input.extra ?? {}),
-          status: input.status,
-          sessionId: null,
-          lastHeartbeatAt: nowIso,
-          updatedAt: nowIso,
-        })
-        .where(
-          and(
-            eq(tasks.id, task.id),
-            eq(tasks.status, input.expectedStatus ?? task.status),
-          ),
-        )
-        .returning()
-        .get();
-      if (!updated) return statusConflict(task);
-
-      appendTransitionAudit(tx, {
-        task,
-        assignees,
-        fromStatus: task.status,
-        toStatus: updated.status,
-        actor: input.actor,
-        action: input.action ?? "task.status_changed",
-        reason: input.reason ?? null,
-        createdAt: nowIso,
-      });
-      log.info(
+export function transitionTaskStatus(input: TransitionTaskStatusInput): TaskTransitionResult {
+  return withSharedMutation(
+    { entityType: "task", entityId: input.taskId },
+    () => {
+      const nowIso = (input.now ?? new Date()).toISOString();
+      log.debug(
         {
-          taskId: task.id,
-          fromStatus: task.status,
-          toStatus: updated.status,
+          taskId: input.taskId,
+          expectedStatus: input.expectedStatus ?? null,
+          targetStatus: input.status,
           actorKind: input.actor.kind,
           actorId: input.actor.id,
+          action: input.action ?? "task.status_changed",
         },
-        "Task status transition committed",
+        "Evaluating atomic task status transition",
       );
-      return {
-        ok: true,
-        task: updated,
-        fromStatus: task.status,
-        toStatus: updated.status,
-      } as const;
-    });
-  } catch (error) {
-    log.error(
-      {
-        error,
-        taskId: input.taskId,
-        expectedStatus: input.expectedStatus ?? null,
-        targetStatus: input.status,
-      },
-      "Task status transition transaction failed",
-    );
-    throw error;
-  }
+
+      try {
+        return getDb().transaction((tx) => {
+          const task = tx.select().from(tasks).where(eq(tasks.id, input.taskId)).get();
+          if (!task) {
+            return { ok: false, code: "not_found", message: "Task not found" } as const;
+          }
+          if (input.expectedStatus !== undefined && task.status !== input.expectedStatus) {
+            log.warn(
+              {
+                taskId: task.id,
+                expectedStatus: input.expectedStatus,
+                actualStatus: task.status,
+                code: "status_conflict",
+              },
+              "Task status transition rejected",
+            );
+            return statusConflict(task);
+          }
+          if (input.actor.kind === "participant") {
+            return {
+              ok: false,
+              code: "actor_not_authorized",
+              message: "Participant transitions must use an explicit task action",
+              currentStatus: task.status,
+            } as const;
+          }
+          if (input.actor.kind === "agent" && task.executionOwner !== "ai") {
+            return {
+              ok: false,
+              code: "ai_handoff_required",
+              message: "The task must be handed to AI before an agent can change its status",
+              currentStatus: task.status,
+            } as const;
+          }
+
+          const assignees = listAssigneesInTransaction(tx, task.id);
+          const updated = tx
+            .update(tasks)
+            .set({
+              ...normalizeExtra(input.extra ?? {}),
+              status: input.status,
+              sessionId: null,
+              lastHeartbeatAt: nowIso,
+              updatedAt: nowIso,
+            })
+            .where(
+              and(eq(tasks.id, task.id), eq(tasks.status, input.expectedStatus ?? task.status)),
+            )
+            .returning()
+            .get();
+          if (!updated) return statusConflict(task);
+
+          appendTransitionAudit(tx, {
+            task,
+            assignees,
+            fromStatus: task.status,
+            toStatus: updated.status,
+            actor: input.actor,
+            action: input.action ?? "task.status_changed",
+            reason: input.reason ?? null,
+            createdAt: nowIso,
+          });
+          log.info(
+            {
+              taskId: task.id,
+              fromStatus: task.status,
+              toStatus: updated.status,
+              actorKind: input.actor.kind,
+              actorId: input.actor.id,
+            },
+            "Task status transition committed",
+          );
+          return {
+            ok: true,
+            task: updated,
+            fromStatus: task.status,
+            toStatus: updated.status,
+          } as const;
+        });
+      } catch (error) {
+        log.error(
+          {
+            error,
+            taskId: input.taskId,
+            expectedStatus: input.expectedStatus ?? null,
+            targetStatus: input.status,
+          },
+          "Task status transition transaction failed",
+        );
+        throw error;
+      }
+    },
+    { expected: input.expectedSyncRevisions, actor: input.actor },
+  );
 }
 
 export function applyTaskAction(input: ApplyTaskActionInput): TaskTransitionResult {
-  const nowIso = (input.now ?? new Date()).toISOString();
-  log.debug(
-    {
-      taskId: input.taskId,
-      event: input.event,
-      expectedStatus: input.expectedStatus ?? null,
-      participantsModeEnabled: input.participantsModeEnabled,
-      actorKind: input.actor.kind,
-      actorId: input.actor.id,
-      participantRole: input.participantRole ?? null,
-    },
-    "Evaluating atomic task action",
-  );
-
-  try {
-    return getDb().transaction((tx) => {
-      const task = tx.select().from(tasks).where(eq(tasks.id, input.taskId)).get();
-      if (!task) {
-        return { ok: false, code: "not_found", message: "Task not found" } as const;
-      }
-      if (input.expectedStatus !== undefined && task.status !== input.expectedStatus) {
-        return statusConflict(task);
-      }
-
-      const assignees = listAssigneesInTransaction(tx, task.id);
-      const context: TaskActionContext = {
-        participantsModeEnabled: input.participantsModeEnabled,
-        actor: input.actor,
-        participantRole: input.participantRole,
-        participantActive: input.participantActive,
-      };
-      const resolution = resolveTaskAction(
+  return withSharedMutation(
+    { entityType: "task", entityId: input.taskId },
+    () => {
+      const nowIso = (input.now ?? new Date()).toISOString();
+      log.debug(
         {
-          status: task.status,
-          autoMode: task.autoMode,
-          executionOwner: task.executionOwner,
-          assignees,
-          blockedFromStatus: task.blockedFromStatus,
-          skipReview: task.skipReview,
-          runPostVerify: task.runPostVerify,
-        },
-        input.event,
-        context,
-      );
-      if (!resolution.ok) {
-        log.warn(
-          {
-            taskId: task.id,
-            event: input.event,
-            status: task.status,
-            executionOwner: task.executionOwner,
-            actorKind: input.actor.kind,
-            actorId: input.actor.id,
-            code: resolution.code,
-          },
-          "Task action rejected",
-        );
-        return {
-          ok: false,
-          code: resolution.code,
-          message: resolution.error,
-          currentStatus: task.status,
-        } as const;
-      }
-
-      const updated = tx
-        .update(tasks)
-        .set({
-          ...normalizeExtra(input.extra ?? {}),
-          ...normalizeExtra(resolution.patch),
-          status: resolution.patch.status,
-          sessionId: null,
-          ...(input.event === "retry_from_blocked"
-            ? {}
-            : {
-                activeRuntimeStatus: null,
-                activeRuntimeSelectionJson: null,
-              }),
-          lastHeartbeatAt: nowIso,
-          updatedAt: nowIso,
-        })
-        .where(and(eq(tasks.id, task.id), eq(tasks.status, task.status)))
-        .returning()
-        .get();
-      if (!updated) return statusConflict(task);
-
-      appendTransitionAudit(tx, {
-        task,
-        assignees,
-        fromStatus: task.status,
-        toStatus: updated.status,
-        actor: input.actor,
-        action: `task.action.${input.event}`,
-        reason: input.reason ?? null,
-        createdAt: nowIso,
-      });
-      log.info(
-        {
-          taskId: task.id,
+          taskId: input.taskId,
           event: input.event,
-          fromStatus: task.status,
-          toStatus: updated.status,
+          expectedStatus: input.expectedStatus ?? null,
+          participantsModeEnabled: input.participantsModeEnabled,
           actorKind: input.actor.kind,
           actorId: input.actor.id,
+          participantRole: input.participantRole ?? null,
         },
-        "Task action committed",
+        "Evaluating atomic task action",
       );
-      return {
-        ok: true,
-        task: updated,
-        fromStatus: task.status,
-        toStatus: updated.status,
-      } as const;
-    });
-  } catch (error) {
-    log.error(
-      { error, taskId: input.taskId, event: input.event },
-      "Task action transaction failed",
-    );
-    throw error;
-  }
+
+      try {
+        return getDb().transaction((tx) => {
+          const task = tx.select().from(tasks).where(eq(tasks.id, input.taskId)).get();
+          if (!task) {
+            return { ok: false, code: "not_found", message: "Task not found" } as const;
+          }
+          if (input.expectedStatus !== undefined && task.status !== input.expectedStatus) {
+            return statusConflict(task);
+          }
+
+          const assignees = listAssigneesInTransaction(tx, task.id);
+          const context: TaskActionContext = {
+            participantsModeEnabled: input.participantsModeEnabled,
+            actor: input.actor,
+            participantRole: input.participantRole,
+            participantActive: input.participantActive,
+          };
+          const resolution = resolveTaskAction(
+            {
+              status: task.status,
+              autoMode: task.autoMode,
+              executionOwner: task.executionOwner,
+              assignees,
+              blockedFromStatus: task.blockedFromStatus,
+              skipReview: task.skipReview,
+              runPostVerify: task.runPostVerify,
+            },
+            input.event,
+            context,
+          );
+          if (!resolution.ok) {
+            log.warn(
+              {
+                taskId: task.id,
+                event: input.event,
+                status: task.status,
+                executionOwner: task.executionOwner,
+                actorKind: input.actor.kind,
+                actorId: input.actor.id,
+                code: resolution.code,
+              },
+              "Task action rejected",
+            );
+            return {
+              ok: false,
+              code: resolution.code,
+              message: resolution.error,
+              currentStatus: task.status,
+            } as const;
+          }
+
+          const updated = tx
+            .update(tasks)
+            .set({
+              ...normalizeExtra(input.extra ?? {}),
+              ...normalizeExtra(resolution.patch),
+              status: resolution.patch.status,
+              sessionId: null,
+              ...(input.event === "retry_from_blocked"
+                ? {}
+                : {
+                    activeRuntimeStatus: null,
+                    activeRuntimeSelectionJson: null,
+                  }),
+              lastHeartbeatAt: nowIso,
+              updatedAt: nowIso,
+            })
+            .where(and(eq(tasks.id, task.id), eq(tasks.status, task.status)))
+            .returning()
+            .get();
+          if (!updated) return statusConflict(task);
+
+          appendTransitionAudit(tx, {
+            task,
+            assignees,
+            fromStatus: task.status,
+            toStatus: updated.status,
+            actor: input.actor,
+            action: `task.action.${input.event}`,
+            reason: input.reason ?? null,
+            createdAt: nowIso,
+          });
+          log.info(
+            {
+              taskId: task.id,
+              event: input.event,
+              fromStatus: task.status,
+              toStatus: updated.status,
+              actorKind: input.actor.kind,
+              actorId: input.actor.id,
+            },
+            "Task action committed",
+          );
+          return {
+            ok: true,
+            task: updated,
+            fromStatus: task.status,
+            toStatus: updated.status,
+          } as const;
+        });
+      } catch (error) {
+        log.error(
+          { error, taskId: input.taskId, event: input.event },
+          "Task action transaction failed",
+        );
+        throw error;
+      }
+    },
+    { expected: input.expectedSyncRevisions, actor: input.actor },
+  );
 }

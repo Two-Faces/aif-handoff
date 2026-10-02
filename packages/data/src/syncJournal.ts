@@ -99,7 +99,13 @@ export function listSyncConflicts(
     .all()
     .flatMap((row) => {
       const versions = fieldVersionsSchema.parse(JSON.parse(row.versionsJson));
-      if (row.field.startsWith("__") || row.field === "position" || !hasFieldConflict(versions))
+      if (
+        row.field.startsWith("__") ||
+        row.field === "createdAt" ||
+        row.field === "position" ||
+        !hasFieldConflict(versions) ||
+        !readSyncEntity(projectId, row.entityType as SyncEntityType, row.entityId)
+      )
         return [];
       return [{ entityType: row.entityType, entityId: row.entityId, field: row.field, versions }];
     });
@@ -204,16 +210,18 @@ function applyRegisters(operation: SyncOperation): void {
     operation.fields.workflow &&
     operation.actorKind === "agent"
   ) {
-    const knownHumanOwner = (current.workflow ?? []).some(
+    const protectedWorkflow = (current.workflow ?? []).some(
       (version) =>
         covers(operation.causalContext, version.dot) &&
         version.value !== null &&
         typeof version.value === "object" &&
         !Array.isArray(version.value) &&
-        "executionOwner" in version.value &&
-        version.value.executionOwner === "human",
+        (("executionOwner" in version.value && version.value.executionOwner === "human") ||
+          ("status" in version.value &&
+            (version.value.status === "done" || version.value.status === "verified") &&
+            version.value.status !== operation.fields.workflow?.status)),
     );
-    if (knownHumanOwner) throw new SyncError("invalid_transition");
+    if (protectedWorkflow) throw new SyncError("invalid_transition");
   }
   if (operation.intent !== "create" && operation.intent !== "delete" && !current.__created) {
     throw new SyncError("entity_not_ready");
@@ -254,6 +262,7 @@ export interface LocalSyncChange {
   intent: SyncOperation["intent"];
   fields: Record<string, unknown>;
   actorKind?: SyncOperation["actorKind"];
+  actor?: SyncOperation["actor"];
   parents?: Record<string, SyncDot[]>;
 }
 
@@ -296,6 +305,7 @@ export function recordLocalSyncChange(change: LocalSyncChange): SyncOperation | 
       intent: change.intent,
       fields: change.fields,
       actorKind: change.actorKind ?? "system",
+      ...(change.actor === undefined ? {} : { actor: change.actor }),
       causalContext: getSyncWatermarks(change.projectId),
       ...(change.parents ? { parents: change.parents } : {}),
     });

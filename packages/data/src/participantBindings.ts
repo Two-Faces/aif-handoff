@@ -1,6 +1,8 @@
 import { and, eq } from "drizzle-orm";
 import { logicalParticipants, participantBindings, participants } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
+import { withSharedMutation } from "./syncMutations.js";
+import { refreshLocalParticipantProjection } from "./syncDomain.js";
 
 export class ParticipantBindingError extends Error {
   constructor(
@@ -37,7 +39,12 @@ export function recordLogicalParticipant(input: {
   id: string;
   displayName: string;
 }) {
-  getDb().insert(logicalParticipants).values(input).onConflictDoNothing().run();
+  return withSharedMutation(
+    { entityType: "participant", entityId: input.id, projectId: input.projectId },
+    () => {
+      getDb().insert(logicalParticipants).values(input).onConflictDoNothing().run();
+    },
+  );
 }
 
 export function bindLogicalParticipant(input: {
@@ -76,6 +83,7 @@ export function bindLogicalParticipant(input: {
     if (previous && previous.participantId !== input.participantId)
       throw new ParticipantBindingError("identity_already_bound");
     tx.insert(participantBindings).values(input).onConflictDoNothing().run();
+    refreshLocalParticipantProjection(input.projectId);
     return input;
   });
 }

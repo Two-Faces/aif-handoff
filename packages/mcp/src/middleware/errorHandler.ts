@@ -1,4 +1,4 @@
-import { logger } from "@aif/shared";
+import { logger, SyncError } from "@aif/shared";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
 const log = logger("mcp:error");
@@ -7,6 +7,13 @@ const log = logger("mcp:error");
  * Map common error types to MCP error codes.
  */
 export function toMcpError(error: unknown): McpError {
+  if (error instanceof SyncError) {
+    return new McpError(
+      ErrorCode.InvalidParams,
+      "Personal sync operation rejected; refresh the task before editing",
+      { code: error.code },
+    );
+  }
   if (error instanceof McpError) {
     return error;
   }
