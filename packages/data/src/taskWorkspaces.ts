@@ -23,7 +23,11 @@ import {
 import { getDb } from "@aif/shared/server";
 import { getPersonalExecutionBlock } from "./personalMode.js";
 import { verifyLocalCodeSnapshot } from "./codeSnapshots.js";
-import { assertTaskDeviceExecution } from "./deviceExecution.js";
+import {
+  assertTaskDeviceExecution,
+  assertTaskDeviceWorkspaceMutable,
+  withTaskDeviceMutation,
+} from "./deviceExecution.js";
 
 export class TaskWorkspaceError extends Error {
   constructor(
@@ -134,6 +138,7 @@ export function resolveRegisteredTaskRoot(
  */
 export function prepareTaskExecutionWorkspace(input: TaskCheckoutInput): Workspace {
   assertPolicy(input.projectId, input.taskId);
+  assertTaskDeviceWorkspaceMutable(input.taskId);
   const db = getDb();
   const initial = db.transaction((tx) => {
     const task = tx.select().from(tasks).where(eq(tasks.id, input.taskId)).get();
@@ -221,67 +226,83 @@ export function prepareTaskExecutionWorkspace(input: TaskCheckoutInput): Workspa
 }
 
 export function prepareTaskWorkspaceCheckpoint(taskId: string, message: string): Workspace {
-  assertTaskDeviceExecution(taskId);
-  const row = requireWorkspace(taskId);
-  if (row.state === "checkpoint_prepared" || row.state === "checkpointed") return row;
-  if (row.state !== "active" || !row.scopeJson)
-    throw new TaskWorkspaceError(
-      "workspace_not_ready",
-      "No saved pre-execution scope is available.",
-    );
-  const scope = restoreTaskChangeScope(row.scopeJson, checkout(row));
-  const intent = prepareTaskCommit(scope, message);
-  const changed = getDb()
-    .update(taskExecutionWorkspaces)
-    .set({
-      state: "checkpoint_prepared",
-      intentJson: serializeTaskCommitIntent(intent),
-      revision: row.revision + 1,
-    })
-    .where(
-      and(
-        eq(taskExecutionWorkspaces.taskId, taskId),
-        eq(taskExecutionWorkspaces.revision, row.revision),
-        eq(taskExecutionWorkspaces.state, "active"),
-      ),
-    )
-    .run();
-  if (changed.changes !== 1)
-    throw new TaskWorkspaceError(
-      "workspace_conflict",
-      "Another writer prepared the task checkpoint first.",
-    );
-  return requireWorkspace(taskId);
+  return withTaskDeviceMutation(
+    taskId,
+    () => {
+      assertTaskDeviceExecution(taskId);
+      const row = requireWorkspace(taskId);
+      if (row.state === "checkpoint_prepared" || row.state === "checkpointed") return row;
+      if (row.state !== "active" || !row.scopeJson)
+        throw new TaskWorkspaceError(
+          "workspace_not_ready",
+          "No saved pre-execution scope is available.",
+        );
+      const scope = restoreTaskChangeScope(row.scopeJson, checkout(row));
+      const intent = prepareTaskCommit(scope, message);
+      const changed = getDb()
+        .update(taskExecutionWorkspaces)
+        .set({
+          state: "checkpoint_prepared",
+          intentJson: serializeTaskCommitIntent(intent),
+          revision: row.revision + 1,
+        })
+        .where(
+          and(
+            eq(taskExecutionWorkspaces.taskId, taskId),
+            eq(taskExecutionWorkspaces.revision, row.revision),
+            eq(taskExecutionWorkspaces.state, "active"),
+          ),
+        )
+        .run();
+      if (changed.changes !== 1)
+        throw new TaskWorkspaceError(
+          "workspace_conflict",
+          "Another writer prepared the task checkpoint first.",
+        );
+      return requireWorkspace(taskId);
+    },
+    true,
+  );
 }
 
 export function publishTaskWorkspaceCheckpoint(taskId: string): TaskCommitResult {
-  assertTaskDeviceExecution(taskId);
-  const row = requireWorkspace(taskId);
-  if ((row.state !== "checkpoint_prepared" && row.state !== "checkpointed") || !row.intentJson)
-    throw new TaskWorkspaceError(
-      "workspace_not_ready",
-      "A durable prepared checkpoint is required before publishing its Git ref.",
-    );
-  const intent = restoreTaskCommitIntent(row.intentJson, checkout(row));
-  const result = publishTaskCommit(intent);
-  if (row.state === "checkpointed") return result;
-  const changed = getDb()
-    .update(taskExecutionWorkspaces)
-    .set({ state: "checkpointed", resultJson: JSON.stringify(result), revision: row.revision + 1 })
-    .where(
-      and(
-        eq(taskExecutionWorkspaces.taskId, taskId),
-        eq(taskExecutionWorkspaces.revision, row.revision),
-        eq(taskExecutionWorkspaces.state, "checkpoint_prepared"),
-      ),
-    )
-    .run();
-  if (changed.changes !== 1)
-    throw new TaskWorkspaceError(
-      "workspace_conflict",
-      "The Git checkpoint is published; reload its journal before acknowledging completion.",
-    );
-  return result;
+  return withTaskDeviceMutation(
+    taskId,
+    () => {
+      assertTaskDeviceExecution(taskId);
+      const row = requireWorkspace(taskId);
+      if ((row.state !== "checkpoint_prepared" && row.state !== "checkpointed") || !row.intentJson)
+        throw new TaskWorkspaceError(
+          "workspace_not_ready",
+          "A durable prepared checkpoint is required before publishing its Git ref.",
+        );
+      const intent = restoreTaskCommitIntent(row.intentJson, checkout(row));
+      const result = publishTaskCommit(intent);
+      if (row.state === "checkpointed") return result;
+      const changed = getDb()
+        .update(taskExecutionWorkspaces)
+        .set({
+          state: "checkpointed",
+          resultJson: JSON.stringify(result),
+          revision: row.revision + 1,
+        })
+        .where(
+          and(
+            eq(taskExecutionWorkspaces.taskId, taskId),
+            eq(taskExecutionWorkspaces.revision, row.revision),
+            eq(taskExecutionWorkspaces.state, "checkpoint_prepared"),
+          ),
+        )
+        .run();
+      if (changed.changes !== 1)
+        throw new TaskWorkspaceError(
+          "workspace_conflict",
+          "The Git checkpoint is published; reload its journal before acknowledging completion.",
+        );
+      return result;
+    },
+    true,
+  );
 }
 
 export function checkpointTaskExecutionWorkspace(
@@ -301,6 +322,7 @@ export function beginTaskWorkspaceContinuation(input: {
   worktreePath: string;
 }) {
   const row = requireWorkspace(input.taskId);
+  assertTaskDeviceWorkspaceMutable(input.taskId);
   const db = getDb();
   const existing = db
     .select()
@@ -396,6 +418,7 @@ export function activateTaskWorkspaceContinuation(id: string): Workspace {
   }
   if (row.revision !== continuation.fromRevision || row.state !== "checkpointed")
     throw new TaskWorkspaceError("workspace_conflict", "Continuation source changed");
+  assertTaskDeviceWorkspaceMutable(continuation.taskId);
   const result = publishTaskWorkspaceCheckpoint(row.taskId);
   const pack = verifyLocalCodeSnapshot(continuation.snapshotId, row.projectId, row.projectRoot);
   if (

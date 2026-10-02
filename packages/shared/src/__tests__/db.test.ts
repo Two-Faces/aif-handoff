@@ -7,7 +7,71 @@ import { eq } from "drizzle-orm";
 import { chatSessions } from "../schema.js";
 import { closeDb, createTestDb, getDb } from "../db.js";
 
-const CURRENT_SCHEMA_VERSION = 37;
+const CURRENT_SCHEMA_VERSION = 38;
+
+it("upgrades v37 without adopting legacy sessions or altering an unresolved run", () => {
+  closeDb();
+  const path = join(tmpdir(), `aif-session-upgrade-${crypto.randomUUID()}.sqlite`);
+  const connections: Database.Database[] = [];
+  try {
+    getDb(path);
+    closeDb();
+    const old = new Database(path);
+    connections.push(old);
+    old.exec("DROP TABLE task_device_sessions");
+    old
+      .prepare("INSERT INTO projects (id,name,root_path) VALUES ('project','Existing','root')")
+      .run();
+    old
+      .prepare(
+        "INSERT INTO tasks (id,project_id,title,session_id) VALUES ('task','project','Existing','legacy')",
+      )
+      .run();
+    old
+      .prepare(
+        "INSERT INTO task_device_grants (id,task_id,project_id,execution_epoch,grant_json) VALUES ('grant','task','project',0,'{}')",
+      )
+      .run();
+    old
+      .prepare(
+        "INSERT INTO task_device_grant_heads (task_id,project_id,grant_id,owner_device_id,execution_epoch,state,active_run_id) VALUES ('task','project','grant','device',0,'owned','run')",
+      )
+      .run();
+    old.pragma("user_version = 37");
+    old.close();
+    getDb(path);
+    closeDb();
+    const upgraded = new Database(path);
+    connections.push(upgraded);
+    expect(upgraded.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
+    expect(upgraded.prepare("SELECT session_id FROM tasks").get()).toEqual({
+      session_id: "legacy",
+    });
+    expect(upgraded.prepare("SELECT active_run_id FROM task_device_grant_heads").get()).toEqual({
+      active_run_id: "run",
+    });
+    expect(upgraded.prepare("SELECT count(*) AS count FROM task_device_sessions").get()).toEqual({
+      count: 0,
+    });
+    upgraded
+      .prepare(
+        "INSERT INTO task_device_sessions (key,kind,task_id,project_id,grant_id,worktree_path,snapshot_commit,native_session_id,runtime_key) VALUES ('native:key','native','task','project','grant','root','commit','native','runtime')",
+      )
+      .run();
+    upgraded.close();
+    getDb(path);
+    closeDb();
+    const reopened = new Database(path, { readonly: true });
+    connections.push(reopened);
+    expect(
+      reopened.prepare("SELECT native_session_id,worktree_path FROM task_device_sessions").get(),
+    ).toEqual({ native_session_id: "native", worktree_path: "root" });
+  } finally {
+    closeDb();
+    for (const connection of connections) if (connection.open) connection.close();
+    removeSqliteArtifacts(path);
+  }
+});
 
 it("upgrades v36 without enrolling existing tasks or changing their locks and transfer readiness", () => {
   closeDb();

@@ -846,6 +846,20 @@ export const taskDeviceRuns = sqliteTable("task_device_runs", {
   settledAt: text("settled_at"),
 });
 
+// Local-only native session provenance. No cascade: retired sessions must not
+// become unscoped imports after a task/chat is deleted or handed to another root.
+export const taskDeviceSessions = sqliteTable("task_device_sessions", {
+  key: text("key").primaryKey(),
+  kind: text("kind", { enum: ["chat", "native"] }).notNull(),
+  taskId: text("task_id").notNull(),
+  projectId: text("project_id").notNull(),
+  grantId: text("grant_id").notNull(),
+  worktreePath: text("worktree_path").notNull(),
+  snapshotCommit: text("snapshot_commit").notNull(),
+  nativeSessionId: text("native_session_id"),
+  runtimeKey: text("runtime_key"),
+});
+
 export const codeSnapshots = sqliteTable("handoff_code_snapshots", {
   id: text("id").primaryKey(),
   projectId: text("project_id").notNull(),

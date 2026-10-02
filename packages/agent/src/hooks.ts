@@ -1,4 +1,4 @@
-import { appendTaskActivityLog } from "@aif/data";
+import { appendTaskActivityLog, bindTaskDeviceExecution, currentTaskDeviceRunId } from "@aif/data";
 import { logger, findMonorepoRootFromUrl, getEnv } from "@aif/shared";
 import { notifyTaskBroadcast } from "./notifier.js";
 
@@ -38,6 +38,7 @@ interface QueueEntry {
 
 /** Per-task in-memory queue for batch mode. */
 const taskQueues = new Map<string, QueueEntry[]>();
+const queueWriters = new Map<string, { runId: string | null; append: (lines: string) => void }>();
 
 /** Per-task flush timer handles. */
 const flushTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -64,7 +65,9 @@ export function flushActivityQueue(taskId: string): void {
 
   try {
     const newLines = entries.map((e) => `[${e.timestamp}] ${e.category}: ${e.detail}`).join("\n");
-    appendActivityLogToDb(taskId, newLines);
+    const writer = queueWriters.get(taskId);
+    if (writer) writer.append(newLines);
+    else appendActivityLogToDb(taskId, newLines);
     log.info({ taskId, entries: entries.length, mode: "batch" }, "Activity queue flushed");
   } catch (err) {
     log.error({ err, taskId, lostEntries: entries.length }, "Failed to flush activity queue");
@@ -94,6 +97,7 @@ export function disposeActivityQueue(taskId: string): void {
   }
   flushActivityQueue(taskId);
   taskQueues.delete(taskId);
+  queueWriters.delete(taskId);
   log.debug({ taskId }, "Activity queue disposed");
 }
 
@@ -141,6 +145,15 @@ export function logActivity(taskId: string, category: ActivityCategory, detail: 
   }
 
   // --- Batch mode ---
+  const runId = currentTaskDeviceRunId();
+  const previousWriter = queueWriters.get(taskId);
+  if (!previousWriter || previousWriter.runId !== runId) {
+    taskQueues.delete(taskId);
+    queueWriters.set(taskId, {
+      runId,
+      append: bindTaskDeviceExecution((lines: string) => appendActivityLogToDb(taskId, lines)),
+    });
+  }
   let queue = taskQueues.get(taskId);
   if (!queue) {
     queue = [];

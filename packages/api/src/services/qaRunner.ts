@@ -1,8 +1,10 @@
+import { DeviceExecutionError, PersonalExecutionDisabledError } from "@aif/shared";
+import { withProjectDeviceExecution } from "@aif/data";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { getProjectConfig, logger } from "@aif/shared";
-import { type DeviceExecutionError } from "@aif/shared";
+
 import { getDeviceExecutionBlock } from "@aif/data";
 import {
   findTaskById,
@@ -167,6 +169,23 @@ function persistQaError(taskId: string, error: string): RunQaQueryResult {
  * — so the atomic claim stays the single point that serializes concurrent runs.
  */
 export async function runQaQuery(input: RunQaQueryInput): Promise<RunQaQueryResult> {
+  try {
+    return await withProjectDeviceExecution(
+      { projectId: input.projectId, taskId: input.taskId, projectRoot: input.executionRoot },
+      async (root) => runQaQueryScoped({ ...input, executionRoot: root ?? input.executionRoot }),
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      ...(error instanceof DeviceExecutionError || error instanceof PersonalExecutionDisabledError
+        ? { code: error.code }
+        : {}),
+    };
+  }
+}
+
+async function runQaQueryScoped(input: RunQaQueryInput): Promise<RunQaQueryResult> {
   const { projectId, taskId } = input;
   let executionRoot = input.executionRoot;
   const blocked =

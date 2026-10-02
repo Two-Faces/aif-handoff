@@ -1,3 +1,4 @@
+import { withProjectDeviceExecution } from "@aif/data";
 import { findTaskById, assertTaskExecutionAllowed } from "@aif/data";
 import { parseAttachments } from "@aif/shared";
 import { UsageSource } from "@aif/runtime";
@@ -62,6 +63,13 @@ function formatLatestCommentForPrompt(comment: FastFixComment): string {
 }
 
 export async function runFastFixQuery(input: RunFastFixQueryInput): Promise<string> {
+  return await withProjectDeviceExecution(
+    { taskId: input.taskId, projectRoot: input.projectRoot },
+    async (root) => runFastFixQueryScoped({ ...input, projectRoot: root ?? input.projectRoot }),
+  );
+}
+
+async function runFastFixQueryScoped(input: RunFastFixQueryInput): Promise<string> {
   input = {
     ...input,
     projectRoot: assertTaskExecutionAllowed(input.taskId, input.projectRoot) ?? input.projectRoot,

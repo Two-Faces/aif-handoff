@@ -14,7 +14,7 @@ import {
   type SyncRevisions,
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
-import { withTaskDeviceMutation } from "./deviceExecution.js";
+import { withTaskDeviceMutation, withCurrentTaskDeviceMutation } from "./deviceExecution.js";
 import {
   captureSharedEntity,
   portableActor,
@@ -222,7 +222,7 @@ export function withSharedMutation<T>(
         () => sharedMutation(input, mutate, options),
         input.execution,
       )
-    : sharedMutation(input, mutate, options);
+    : withCurrentTaskDeviceMutation(() => sharedMutation(input, mutate, options));
 }
 
 function sharedMutation<T>(input: MutationRef, mutate: () => T, options: SharedMutationOptions): T {

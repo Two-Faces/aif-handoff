@@ -1,3 +1,4 @@
+import { withProjectDeviceExecution, getDeviceExecutionBlock } from "@aif/data";
 import { personalTaskExecutionGate } from "../middleware/personalExecution.js";
 import { Hono, type Context } from "hono";
 import { jsonValidator } from "../middleware/zodValidator.js";
@@ -213,58 +214,65 @@ function dispatchQaRun(
   executionRoot: string,
   lockId: string,
 ): void {
-  void (async () => {
-    try {
-      const { runQaQuery } = await import("../services/qaRunner.js");
-      const result = await runQaQuery({ projectId, taskId, executionRoot });
-      broadcast(
-        result.ok
-          ? { type: "task:qa_done", payload: { taskId, projectId, status: "done" } }
-          : {
-              type: "task:qa_failed",
-              payload: { taskId, projectId, status: "failed", error: result.error },
-            },
-      );
-      const refreshedTask = result.ok ? findTaskById(taskId) : undefined;
-      if (refreshedTask?.autoQaCheck) {
-        if (tryStartQaCheckRun(taskId)) {
-          const runningTask = findTaskById(taskId);
-          if (runningTask) {
-            broadcast({ type: "task:updated", payload: toTaskBroadcastPayload(runningTask) });
-          }
-          log.info({ taskId, projectId }, "QA Check chained after successful QA run");
-          await runClaimedQaCheck(projectId, taskId, executionRoot);
-        } else {
-          log.warn({ taskId, projectId }, "QA Check chain skipped because it is already running");
-        }
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      log.error({ taskId, projectId, error }, "QA dispatch failed before runner completed");
-      // Release the claimed "running" slot with a terminal status: tryStartQaRun
-      // only wins when qa_status != 'running', so without this a dispatch failure
-      // would block every future QA start for the task. Defensive wrap — a DB
-      // failure here must not prevent the task:qa_failed broadcast below.
+  void withProjectDeviceExecution(
+    { projectId, taskId, projectRoot: executionRoot, coordinatorId: lockId },
+    async (root) => {
+      executionRoot = root ?? executionRoot;
       try {
-        updateTask(taskId, { qaStatus: "error" });
-        const failedTask = findTaskById(taskId);
-        if (failedTask) {
-          broadcast({ type: "task:updated", payload: toTaskBroadcastPayload(failedTask) });
-        }
-      } catch (persistErr) {
-        log.error(
-          { persistErr, taskId },
-          "Failed to persist QA error status after dispatch failure",
+        const { runQaQuery } = await import("../services/qaRunner.js");
+        const result = await runQaQuery({ projectId, taskId, executionRoot });
+        const fenced = getDeviceExecutionBlock(projectId, taskId);
+        if (fenced) return;
+        broadcast(
+          result.ok
+            ? { type: "task:qa_done", payload: { taskId, projectId, status: "done" } }
+            : {
+                type: "task:qa_failed",
+                payload: { taskId, projectId, status: "failed", error: result.error },
+              },
         );
+        const refreshedTask = result.ok ? findTaskById(taskId) : undefined;
+        if (refreshedTask?.autoQaCheck) {
+          if (tryStartQaCheckRun(taskId)) {
+            const runningTask = findTaskById(taskId);
+            if (runningTask) {
+              broadcast({ type: "task:updated", payload: toTaskBroadcastPayload(runningTask) });
+            }
+            log.info({ taskId, projectId }, "QA Check chained after successful QA run");
+            await runClaimedQaCheck(projectId, taskId, executionRoot);
+          } else {
+            log.warn({ taskId, projectId }, "QA Check chain skipped because it is already running");
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        log.error({ taskId, projectId, error }, "QA dispatch failed before runner completed");
+        if (getDeviceExecutionBlock(projectId, taskId)) return;
+        // Release the claimed "running" slot with a terminal status: tryStartQaRun
+        // only wins when qa_status != 'running', so without this a dispatch failure
+        // would block every future QA start for the task. Defensive wrap — a DB
+        // failure here must not prevent the task:qa_failed broadcast below.
+        try {
+          updateTask(taskId, { qaStatus: "error" });
+          const failedTask = findTaskById(taskId);
+          if (failedTask) {
+            broadcast({ type: "task:updated", payload: toTaskBroadcastPayload(failedTask) });
+          }
+        } catch (persistErr) {
+          log.error(
+            { persistErr, taskId },
+            "Failed to persist QA error status after dispatch failure",
+          );
+        }
+        broadcast({
+          type: "task:qa_failed",
+          payload: { taskId, projectId, status: "failed", error: message },
+        });
+      } finally {
+        releaseTaskClaim(taskId, lockId);
       }
-      broadcast({
-        type: "task:qa_failed",
-        payload: { taskId, projectId, status: "failed", error: message },
-      });
-    } finally {
-      releaseTaskClaim(taskId, lockId);
-    }
-  })();
+    },
+  ).catch((error) => log.error({ error, taskId }, "QA lifecycle fenced; reservation retained"));
 }
 
 /**
@@ -316,13 +324,17 @@ function dispatchQaCheckRun(
   executionRoot: string,
   lockId: string,
 ): void {
-  void (async () => {
-    try {
-      await runClaimedQaCheck(projectId, taskId, executionRoot);
-    } finally {
-      releaseTaskClaim(taskId, lockId);
-    }
-  })();
+  void withProjectDeviceExecution(
+    { projectId, taskId, projectRoot: executionRoot, coordinatorId: lockId },
+    async (root) => {
+      executionRoot = root ?? executionRoot;
+      try {
+        await runClaimedQaCheck(projectId, taskId, executionRoot);
+      } finally {
+        releaseTaskClaim(taskId, lockId);
+      }
+    },
+  ).catch((error) => log.error({ error, taskId }, "QA lifecycle fenced; reservation retained"));
 }
 
 function startQaCheckRun(

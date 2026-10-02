@@ -47,7 +47,16 @@ build/Chromium/k6/protocol зелёные. Двухпроцессные TLS/cras
 Пользователь подтвердил native Mac smoke P12 02.10.2026: shared 6 passed,
 data 4 passed, API 12 passed (включая два процесса и loopback TLS), всего 22.
 Реальный Win↔Mac code transfer и полный handoff ещё открыты.
-Далее следуй зависимостям P13–P15. M3/M4 не отмечай готовыми после M2.
+P13 v37 grants/run fencing foundation прошла 54 native Mac tests 03.10.2026.
+Следующий блок подключает scopes к полному lifecycle coordinator/API/chat,
+runtime promises/callbacks, timeout/abort и finalization. v38/deviceSessions.ts
+сохраняет provenance native/chat sessions по task/grant/root/runtime, без sync.
+Не используй project warmup или произвольный native session в managed checkout.
+Uncertain run нельзя очистить по TTL; personal AI по-прежнему запрещён.
+Актуальный quality gate и Mac smoke этого блока сверяй с планом и
+docs/local-device-sync.md. Далее P14: подтверждённый process-tree stop и
+persisted handoff; P15: onboarding, local session existence и continuation UI.
+M3/M4 не отмечай готовыми после M2.
 Сохраняй прогресс в указанном плане, не заменяя другие планы.
 
 Существующие проекты подключай только attach_existing: без init/install,

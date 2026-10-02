@@ -1,3 +1,5 @@
+import { DeviceExecutionError, PersonalExecutionDisabledError } from "@aif/shared";
+import { withProjectDeviceExecution } from "@aif/data";
 import {
   assertCurrentBranch,
   buildCommitPrompt,
@@ -5,7 +7,6 @@ import {
   isBranchIsolationError,
   logger,
   restorePersistedBranch,
-  type DeviceExecutionError,
 } from "@aif/shared";
 import {
   findProjectById,
@@ -55,6 +56,23 @@ export { buildCommitPrompt } from "@aif/shared";
  * success/failure over WS. Never throws.
  */
 export async function runCommitQuery(input: RunCommitQueryInput): Promise<RunCommitQueryResult> {
+  try {
+    return await withProjectDeviceExecution(
+      { projectId: input.projectId, taskId: input.taskId },
+      async () => runCommitQueryScoped(input),
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      ...(error instanceof DeviceExecutionError || error instanceof PersonalExecutionDisabledError
+        ? { code: error.code }
+        : {}),
+    };
+  }
+}
+
+async function runCommitQueryScoped(input: RunCommitQueryInput): Promise<RunCommitQueryResult> {
   const { projectId, taskId = null } = input;
   const blocked =
     getPersonalExecutionBlock(projectId, taskId) ?? getDeviceExecutionBlock(projectId, taskId);

@@ -1286,6 +1286,19 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 38,
+    description: "Bind local native sessions and chats to task grant and checkout",
+    sql: `
+      CREATE TABLE task_device_sessions (
+        key TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('chat', 'native')),
+        task_id TEXT NOT NULL, project_id TEXT NOT NULL, grant_id TEXT NOT NULL,
+        worktree_path TEXT NOT NULL, snapshot_commit TEXT NOT NULL,
+        native_session_id TEXT, runtime_key TEXT
+      );
+      CREATE INDEX task_device_native_session ON task_device_sessions(native_session_id);
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {

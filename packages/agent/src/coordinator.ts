@@ -1,3 +1,4 @@
+import { withProjectDeviceExecution } from "@aif/data";
 import {
   isPersonalProject,
   assertTaskExecutionAllowed,
@@ -541,6 +542,21 @@ function blockCandidateIfRuntimeLimited(task: TaskRow, stage: StatusTransition):
 
 /** Returns true on success, false on failure. */
 async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<boolean> {
+  try {
+    return await withProjectDeviceExecution(
+      { taskId: task.id, projectId: task.projectId, coordinatorId: COORDINATOR_ID },
+      () => processOneTaskScoped(task, stage),
+    );
+  } catch (error) {
+    log.error(
+      { taskId: task.id, error },
+      "Task lifecycle fenced; reservation retained for recovery",
+    );
+    return false;
+  }
+}
+
+async function processOneTaskScoped(task: TaskRow, stage: StatusTransition): Promise<boolean> {
   if (isPersonalProject(task.projectId)) return false;
   if (task.executionOwner !== "ai") {
     log.warn(

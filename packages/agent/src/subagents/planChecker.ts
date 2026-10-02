@@ -1,3 +1,4 @@
+import { withProjectDeviceExecution } from "@aif/data";
 import { assertTaskExecutionAllowed } from "@aif/data";
 import { findProjectById, findTaskById, persistTaskPlanForTask } from "@aif/data";
 import { logger, looksLikeFullPlanUpdate } from "@aif/shared";
@@ -45,6 +46,12 @@ export function isPlanAlreadyChecklist(text: string): boolean {
 }
 
 export async function runPlanChecker(taskId: string, projectRoot: string): Promise<void> {
+  return await withProjectDeviceExecution({ taskId, projectRoot }, async (root) =>
+    runPlanCheckerScoped(taskId, root ?? projectRoot),
+  );
+}
+
+async function runPlanCheckerScoped(taskId: string, projectRoot: string): Promise<void> {
   projectRoot = assertTaskExecutionAllowed(taskId, projectRoot) ?? projectRoot;
   const task = findTaskById(taskId);
 

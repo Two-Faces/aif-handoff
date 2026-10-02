@@ -30,7 +30,7 @@ describe("personal policy migration", () => {
       closeDb();
       const migrated = new Database(path);
       connections.push(migrated);
-      expect(migrated.pragma("user_version", { simple: true })).toBe(37);
+      expect(migrated.pragma("user_version", { simple: true })).toBe(38);
       expect(
         migrated
           .prepare("SELECT personal_mode, publication_policy FROM projects WHERE id = ?")

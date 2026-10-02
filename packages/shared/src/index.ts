@@ -25,6 +25,7 @@ export {
   taskDeviceGrants,
   taskDeviceGrantHeads,
   taskDeviceRuns,
+  taskDeviceSessions,
   codeSnapshots,
   contextSnapshotBlobs,
   codeSnapshotLocations,

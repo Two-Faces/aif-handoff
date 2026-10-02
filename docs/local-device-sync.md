@@ -360,7 +360,7 @@ npm test --workspace @aif/api -- gitSnapshotTransfer.test.ts peerProcesses.test.
 The API suite runs two local child processes with private databases and loopback
 TLS ports; it exercises real transport but does not replace Windows↔Mac acceptance.
 
-## Device execution authority foundation (P13, in progress)
+## Device execution authority and runner lifecycles (P13)
 
 Migration v37 records device grants, their current heads and local runs separately
 from board status, human/AI ownership and temporary coordinator locks. These tables
@@ -389,13 +389,27 @@ Nested unfinished or failed work leaves an **uncertain** reservation, as does an
 exception; a new process cannot steal it after restart. Do not clear these rows
 or use lock expiry as a recovery method: P14 must establish that writing stopped.
 
-This is the **foundation, not completion of P13**. Production coordinator/API/chat
-lifecycles still need their positive host-scope integration around the complete
-run, streamed callbacks, timeout/abort and result finalization. Until then, managed
-tasks are excluded from legacy scheduling, claims, watchdog and QA recovery, and
-direct stage/helper/chat execution is denied. Taskless execution is also denied
-for projects with managed tasks. Personal projects retain the stronger M1 ban.
-No autonomous cross-device execution has been enabled or accepted.
+Coordinator, direct stages, API helpers, background QA and task-bound chat now
+create one host scope for an internally enrolled standalone task with a local
+owned grant and active registered checkout. Nested helpers share the reservation
+through runtime promises, event callbacks, artifact writes and finalization.
+The adapter promise itself remains pending across a caller timeout. Abort, stale
+input and failed calls retain the reservation; watchdog retries are disabled for
+managed runs. Only successful settlement clears the matching local claim, in the
+same transaction. Legacy TTL/watchdog/QA recovery cannot clear managed runs.
+Legacy backlog scheduling, auto-queue advancement and quota recovery stay excluded;
+managed tasks enter this integration with an explicitly selected executable stage.
+Taskless execution remains denied for projects with managed tasks, including
+chat explore mode. Personal projects retain the stronger M1 execution ban.
+
+Local migration v38 binds chat/native sessions to task, project, grant, snapshot
+root and runtime/provider/profile/transport. Managed resume requires that saved
+provenance; changing cwd or importing an unbound/virtual session is insufficient.
+Bindings survive UI session deletion and are never synchronized. Project warmup
+sessions are not forked into managed tasks. This establishes origin, not provider
+session availability: P15 still owns the local existence check and continuation UI.
+P14 must prove process-tree termination before release/accept. No autonomous
+cross-device execution has been enabled or accepted.
 
 Fixture checks (require actual passed test summaries):
 
@@ -429,14 +443,42 @@ The API fixture now has 10 tests (54 across the four commands); both inherited
 login settings pass locally. On 2026-10-03 the user confirmed the corrected API
 rerun passed on native Mac. Together with the earlier shared/data/agent results,
 all 54 targeted fixture tests are accepted on Mac. This is user-reported native
-evidence; it does not close the P13 lifecycle or P14 native-stop gates.
+evidence for the foundation; it does not cover the later lifecycle integration
+or P14 native-stop gates.
 After the fixture correction, the complete Windows `ai:validate` gate passed
 again: 3337 tests, one existing skip, coverage above 70% in every package
 (API minimum 70.18%), builds 7/7, Chromium 8/8, k6 3/3 and protocol check.
-Only tests, the API checklist and acceptance documentation changed.
+Only tests, the API checklist and acceptance documentation changed in that fix.
 Package checklists were reviewed: no new
 request bodies/events, dependencies/packages, UI components or adapter capability
 changes; Docker/Pencil/adapter synchronization does not apply to this increment.
+
+The subsequent lifecycle integration adds real SQLite/Git fixtures around a
+controllable runtime adapter: coordinator stage completion, delayed stage timeout,
+chat cancellation/resume, background QA, checkpoint and snapshot-scoped roadmap
+input. No provider/model is called by these tests. New Mac smoke remains pending:
+
+```sh
+npm test --workspace @aif/shared -- db.test.ts deviceExecution.test.ts
+npm test --workspace @aif/data -- deviceExecution.test.ts taskWorkspaces.test.ts
+npm test --workspace @aif/api -- deviceExecutionLifecycle.test.ts personalMode.test.ts
+npm test --workspace @aif/agent -- deviceExecutionLifecycle.test.ts personalMode.test.ts
+```
+
+Expected passed counts: shared 30, data 41, API 16, agent 19. Run these after pulling the
+lifecycle commit and `npm ci` / `npm run build`; an empty test selection is not
+acceptance. Native process-tree stop and physical Windows↔Mac handoff remain P14/M2.
+
+Windows lifecycle validation on 2026-10-03 passed the isolated `ai:validate` gate:
+3358 tests and one existing skip, seven builds, Chromium 8/8, k6 3/3 and protocol
+check against CLI 0.145.0. Minimum package coverage metrics: shared 75.03%, data
+77.31%, API 70.41%, agent 76.17%, runtime 73.25%, web 74.49%, MCP 86.27%.
+Logs: `.codex/m2/logs/lifecycle-final-validate.log` and the final-file rerun
+`lifecycle-release-validate.log`. Thresholds, exclusions and test timeouts were
+not relaxed. Package checklists were reviewed; migration v38 is append-only and
+tested from v37 with existing data. REST request schemas/WS events, packages,
+dependencies, runtime capabilities and UI components did not change; Docker,
+adapter and Pencil synchronization does not apply. No push or M2→M1 merge occurred.
 
 ## Implementation references
 

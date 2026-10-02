@@ -1549,12 +1549,18 @@ POST /chat
 **Errors:**
 
 - `403` — Execution preflight denied. Personal projects return `personal_execution_disabled`.
-  A task enrolled in device execution currently requires an internal host run scope
-  (`run_scope_required`); taskless chat in such a project returns `taskless_execution_denied`,
-  including `explore: true`. A missing enrolled grant returns `grant_missing` and a
-  mismatched task/project returns `run_fenced`. These denials occur before session
-  creation, runtime resolution or filesystem work. P13 lifecycle integration and
-  P14 stop/readiness acceptance must complete before managed chat can be enabled.
+  Taskless chat in a project with managed tasks returns `taskless_execution_denied`,
+  including `explore: true`; a missing enrolled grant returns `grant_missing`.
+  A managed task without a registered checkout returns `run_scope_required`.
+- `409` — A managed task already has an unresolved run (`run_busy`), its input or
+  task/project scope changed (`run_fenced`), or the chat/native session does not
+  belong to the same task, grant, checkout and runtime (`run_session_mismatch`).
+  A fresh chat or matching local resume for an internally enrolled standalone task
+  uses a host scope through result persistence. Native/virtual imports do not
+  establish session provenance. PUT of protected session runtime metadata also
+  returns `409`; title edits remain available. Abort requests cancellation and
+  retains the unresolved reservation until P14 verifies process stop. Personal AI
+  stays disabled until P14 and native M2 acceptance; no enrollment endpoint exists.
 - `404` — Project not found
 - `429` — Runtime usage limit reached (`code: "CHAT_USAGE_LIMIT"`, response may include `runtimeLimitSnapshot`)
 - `500` — Chat request failed (`code: "CHAT_REQUEST_FAILED"`)

@@ -1,3 +1,4 @@
+import { withProjectDeviceExecution } from "@aif/data";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { z } from "zod";
@@ -217,6 +218,15 @@ Rules:
 export async function generateRoadmapTasks(
   input: RoadmapGenerationInput,
 ): Promise<RoadmapGenerationResult> {
+  return await withProjectDeviceExecution(
+    { projectId: input.projectId, taskId: input.trackingTaskId },
+    async () => generateRoadmapTasksScoped(input),
+  );
+}
+
+async function generateRoadmapTasksScoped(
+  input: RoadmapGenerationInput,
+): Promise<RoadmapGenerationResult> {
   const { projectId, roadmapAlias, trackingTaskId } = input;
   assertProjectExecutionAllowed(projectId, trackingTaskId);
 
@@ -227,6 +237,8 @@ export async function generateRoadmapTasks(
   if (!project) {
     throw new RoadmapGenerationError("PROJECT_NOT_FOUND", `Project ${projectId} not found`);
   }
+  project.rootPath =
+    assertProjectExecutionAllowed(projectId, trackingTaskId, project.rootPath) ?? project.rootPath;
 
   const tasksCfg = getProjectConfig(project.rootPath);
   const roadmapPath = join(project.rootPath, tasksCfg.paths.roadmap);

@@ -1,3 +1,4 @@
+import { withProjectDeviceExecution } from "@aif/data";
 import {
   appendTaskActivityLog,
   findTaskById,
@@ -97,6 +98,17 @@ function reconcileCleanTree(input: {
 }
 
 export async function ensureAutoQueueTaskCommit(input: {
+  taskId: string;
+  projectRoot: string;
+}): Promise<AutoQueueCommitOutcome> {
+  return await withProjectDeviceExecution(
+    { taskId: input.taskId, projectRoot: input.projectRoot },
+    async (root) =>
+      ensureAutoQueueTaskCommitScoped({ ...input, projectRoot: root ?? input.projectRoot }),
+  );
+}
+
+async function ensureAutoQueueTaskCommitScoped(input: {
   taskId: string;
   projectRoot: string;
 }): Promise<AutoQueueCommitOutcome> {

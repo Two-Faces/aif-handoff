@@ -14,6 +14,30 @@ vi.mock("../services/runtime.js", () => ({
 }));
 
 vi.mock("@aif/data", () => ({
+  // These unit fixtures model unmanaged tasks; managed lifecycles use real-DB tests.
+  recordTaskDeviceNativeSession: () => {},
+  recordTaskDeviceRuntimeEvent: () => {},
+  canResumeTaskDeviceSession: () => true,
+  assertTaskDeviceChatSession: () => {},
+  assertTaskDeviceChatProject: () => {},
+  withProjectDeviceExecution: (
+    input: { projectRoot?: string },
+    execute: (root?: string) => unknown,
+  ) => execute(input.projectRoot),
+  createTaskDeviceRuntimeGuard: (
+    _taskId?: string | null,
+    abortController = new AbortController(),
+  ) => ({
+    managed: false,
+    abortController,
+    assertCurrent: () => {},
+    bind: <T>(callback: T) => callback,
+    run: (execute: () => unknown) => execute(),
+  }),
+  invalidateTaskDeviceExecution: () => false,
+  bindTaskDeviceExecution: <T>(callback: T) => callback,
+  currentTaskDeviceRunId: () => null,
+
   getPersonalExecutionBlock: vi.fn(() => null),
   getDeviceExecutionBlock: vi.fn(() => null),
   isProjectPublicationAllowed: vi.fn(() => true),

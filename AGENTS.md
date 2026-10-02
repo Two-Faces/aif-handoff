@@ -137,13 +137,17 @@ chosen locally. No transfer, checkout preparation or board sync grants execution
 Workspace registration is internal pending M2 onboarding/grants. Keep M1 personal
 execution guards until the grant and stop/fencing gates are complete.
 
-P13 foundation adds shared/data `deviceExecution.ts` and migration v37. Device
+P13 adds shared/data `deviceExecution.ts` and migration v37. Device
 grants are separate from board workflow and TTL claims; `withTaskDeviceExecution`
 reserves a durable run and fences result writes by grant/epoch/run/root/input.
-Managed tasks are excluded from legacy automation. Public runners still deny
-managed execution without a host scope; lifecycle integration and confirmed
-process-stop recovery remain open. Do not expose enrollment/release/accept as
-REST/MCP actions or enable personal AI before those gates are complete.
+Coordinator/stage/API/chat lifecycles create the host scope for an internally
+enrolled, locally owned standalone task. Runtime promises, callbacks, timeouts,
+claims and finalization retain that run; failures remain uncertain until P14
+proves process-tree stop. Managed tasks stay excluded from legacy TTL recovery.
+Migration v38/data `deviceSessions.ts` binds native/chat sessions to the local
+task, grant, checkout and runtime identity; project warmups are not reused.
+Personal AI remains disabled. Do not expose enrollment/release/accept as REST/MCP
+actions or enable personal AI before P14 and native M2 acceptance are complete.
 
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |

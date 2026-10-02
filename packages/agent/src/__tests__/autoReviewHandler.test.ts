@@ -5,6 +5,30 @@ const mockCreateTaskComment = vi.fn();
 const mockAppendTaskActivityLog = vi.fn();
 
 vi.mock("@aif/data", () => ({
+  // These unit fixtures model unmanaged tasks; managed lifecycles use real-DB tests.
+  recordTaskDeviceNativeSession: () => {},
+  recordTaskDeviceRuntimeEvent: () => {},
+  canResumeTaskDeviceSession: () => true,
+  assertTaskDeviceChatSession: () => {},
+  assertTaskDeviceChatProject: () => {},
+  withProjectDeviceExecution: (
+    input: { projectRoot?: string },
+    execute: (root?: string) => unknown,
+  ) => execute(input.projectRoot),
+  createTaskDeviceRuntimeGuard: (
+    _taskId?: string | null,
+    abortController = new AbortController(),
+  ) => ({
+    managed: false,
+    abortController,
+    assertCurrent: () => {},
+    bind: <T>(callback: T) => callback,
+    run: (execute: () => unknown) => execute(),
+  }),
+  invalidateTaskDeviceExecution: () => false,
+  bindTaskDeviceExecution: <T>(callback: T) => callback,
+  currentTaskDeviceRunId: () => null,
+
   findTaskById: (...args: unknown[]) => mockFindTaskById(...args),
   createTaskComment: (...args: unknown[]) => mockCreateTaskComment(...args),
   appendTaskActivityLog: (...args: unknown[]) => mockAppendTaskActivityLog(...args),

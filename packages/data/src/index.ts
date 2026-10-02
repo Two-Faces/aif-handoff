@@ -1,5 +1,22 @@
 export * from "./taskWorkspaces.js";
 export {
+  assertTaskDeviceChatSession,
+  assertTaskDeviceChatProject,
+  getTaskDeviceChatRoot,
+  recordTaskDeviceNativeSession,
+  recordTaskDeviceRuntimeEvent,
+  canResumeTaskDeviceSession,
+  type TaskDeviceRuntimeIdentity,
+} from "./deviceSessions.js";
+import {
+  bindTaskDeviceChatSession,
+  assertTaskDeviceChatRuntimeWrite,
+  assertTaskDeviceNativeImport,
+  recordTaskDeviceNativeSession,
+  canResumeTaskDeviceSession,
+  type TaskDeviceRuntimeIdentity,
+} from "./deviceSessions.js";
+export {
   getTaskDeviceGrant,
   getTaskDeviceRun,
   initializeTaskDeviceGrant,
@@ -11,11 +28,21 @@ export {
   getDeviceExecutionBlock,
   withTaskDeviceExecution,
   bindTaskDeviceExecution,
+  withProjectDeviceExecution,
+  createTaskDeviceRuntimeGuard,
+  invalidateTaskDeviceExecution,
+  currentTaskDeviceRunId,
 } from "./deviceExecution.js";
 export * from "./codeSnapshots.js";
 export * from "./snapshotTransfers.js";
 import { getTaskExecutionWorkspace, resolveRegisteredTaskRoot } from "./taskWorkspaces.js";
-import { unmanagedTaskExecutionFilter, withTaskDeviceMutation } from "./deviceExecution.js";
+import {
+  unmanagedTaskExecutionFilter,
+  availableTaskDeviceFilter,
+  currentTaskDeviceFilter,
+  withTaskDeviceMutation,
+  withCurrentTaskDeviceMutation,
+} from "./deviceExecution.js";
 
 import {
   and,
@@ -1561,7 +1588,7 @@ export function tryStartQaRun(id: string): boolean {
     .set({ qaStatus: "running", updatedAt: new Date().toISOString() })
     .where(
       and(
-        unmanagedTaskExecutionFilter(),
+        currentTaskDeviceFilter(true),
         eq(tasks.id, id),
         eq(tasks.executionOwner, "ai"),
         ne(tasks.qaStatus, "running"),
@@ -1584,7 +1611,7 @@ export function tryStartQaCheckRun(id: string): boolean {
     })
     .where(
       and(
-        unmanagedTaskExecutionFilter(),
+        currentTaskDeviceFilter(true),
         eq(tasks.id, id),
         eq(tasks.executionOwner, "ai"),
         ne(tasks.qaCheckStatus, "running"),
@@ -2373,7 +2400,7 @@ function executableTaskProjectFilter() {
   return getEnv().AIF_PERSONAL_MODE
     ? sql`0`
     : and(
-        unmanagedTaskExecutionFilter(),
+        availableTaskDeviceFilter(),
         notInArray(
           tasks.projectId,
           getDb().select({ id: projects.id }).from(projects).where(eq(projects.personalMode, true)),
@@ -2476,7 +2503,7 @@ export function claimTask(taskId: string, coordinatorId: string, lockDurationMs:
     .set({ lockedBy: coordinatorId, lockedUntil })
     .where(
       and(
-        unmanagedTaskExecutionFilter(),
+        availableTaskDeviceFilter(),
         eq(tasks.id, taskId),
         eq(tasks.executionOwner, "ai"),
         or(sql`${tasks.lockedBy} IS NULL`, lte(tasks.lockedUntil, nowIso)),
@@ -2498,7 +2525,7 @@ export function claimCoordinatorTaskIfEligible(
   const nowIso = new Date().toISOString();
   const lockedUntil = new Date(Date.now() + input.lockDurationMs).toISOString();
   const conditions = [
-    unmanagedTaskExecutionFilter(),
+    availableTaskDeviceFilter(),
     eq(tasks.id, input.taskId),
     eq(tasks.projectId, input.expectedProjectId),
     eq(tasks.status, input.expectedStatus),
@@ -2539,6 +2566,9 @@ export function blockTaskForRuntimeGateIfEligible(input: {
   const normalizedSnapshot = input.snapshot ? normalizeRuntimeLimitSnapshot(input.snapshot) : null;
   const conditions = [
     executableTaskProjectFilter(),
+    // The pre-claim quota probe has no run scope. It may skip a managed
+    // candidate, but cannot publish status/results on its behalf.
+    unmanagedTaskExecutionFilter(),
     eq(tasks.id, input.taskId),
     eq(tasks.status, input.expectedStatus),
     eq(tasks.executionOwner, "ai"),
@@ -2804,9 +2834,7 @@ export function renewTaskClaim(
   getDb()
     .update(tasks)
     .set({ lockedUntil })
-    .where(
-      and(unmanagedTaskExecutionFilter(), eq(tasks.id, taskId), eq(tasks.lockedBy, coordinatorId)),
-    )
+    .where(and(currentTaskDeviceFilter(), eq(tasks.id, taskId), eq(tasks.lockedBy, coordinatorId)))
     .run();
 }
 
@@ -2863,6 +2891,7 @@ export function listDueBlockedExternalTasks(nowIso: string): TaskRow[] {
     .where(
       and(
         executableTaskProjectFilter(),
+        unmanagedTaskExecutionFilter(),
         eq(tasks.status, "blocked_external"),
         eq(tasks.executionOwner, "ai"),
         eq(tasks.paused, false),
@@ -2883,6 +2912,7 @@ export function listDueScheduledTasks(nowIso: string): TaskRow[] {
     .where(
       and(
         executableTaskProjectFilter(),
+        unmanagedTaskExecutionFilter(),
         eq(tasks.status, "backlog"),
         eq(tasks.executionOwner, "ai"),
         eq(tasks.paused, false),
@@ -2961,6 +2991,7 @@ export function nextBacklogTaskByPosition(projectId: string): TaskRow | undefine
     .where(
       and(
         executableTaskProjectFilter(),
+        unmanagedTaskExecutionFilter(),
         eq(tasks.projectId, projectId),
         eq(tasks.status, "backlog"),
         eq(tasks.executionOwner, "ai"),
@@ -2981,6 +3012,7 @@ export function listStaleInProgressTasks(): TaskRow[] {
     .where(
       and(
         executableTaskProjectFilter(),
+        unmanagedTaskExecutionFilter(),
         inArray(tasks.status, ["planning", "improve", "implementing", "review", "verify"]),
         eq(tasks.executionOwner, "ai"),
         eq(tasks.paused, false),
@@ -3040,13 +3072,29 @@ export function updateTaskStatus(
   }
 }
 
-export function saveTaskSessionId(taskId: string, sessionId: string): void {
-  setTaskFields(taskId, { sessionId });
+export function saveTaskSessionId(
+  taskId: string,
+  sessionId: string,
+  identity?: TaskDeviceRuntimeIdentity,
+): void {
+  withTaskDeviceMutation(
+    taskId,
+    () => {
+      if (identity) recordTaskDeviceNativeSession(sessionId, identity);
+      setTaskFields(taskId, { sessionId });
+    },
+    true,
+  );
 }
 
-export function getTaskSessionId(taskId: string): string | null {
+export function getTaskSessionId(
+  taskId: string,
+  identity?: TaskDeviceRuntimeIdentity,
+): string | null {
   const task = findTaskById(taskId);
-  return task?.sessionId ?? null;
+  return task?.sessionId && canResumeTaskDeviceSession(taskId, task.sessionId, identity)
+    ? task.sessionId
+    : null;
 }
 
 export function saveTaskActiveRuntimeSelection(
@@ -3139,21 +3187,23 @@ export function incrementChatSessionTokenUsage(
   chatSessionId: string,
   usage: Record<string, unknown> | null | undefined,
 ) {
-  const delta = parseTaskTokenUsage(usage);
-  if (delta.total === 0 && delta.costUsd === 0) return delta;
+  return withCurrentTaskDeviceMutation(() => {
+    const delta = parseTaskTokenUsage(usage);
+    if (delta.total === 0 && delta.costUsd === 0) return delta;
 
-  getDb()
-    .update(chatSessions)
-    .set({
-      tokenInput: sql<number>`coalesce(${chatSessions.tokenInput}, 0) + ${delta.input}`,
-      tokenOutput: sql<number>`coalesce(${chatSessions.tokenOutput}, 0) + ${delta.output}`,
-      tokenTotal: sql<number>`coalesce(${chatSessions.tokenTotal}, 0) + ${delta.total}`,
-      costUsd: sql<number>`coalesce(${chatSessions.costUsd}, 0) + ${delta.costUsd}`,
-    })
-    .where(eq(chatSessions.id, chatSessionId))
-    .run();
+    getDb()
+      .update(chatSessions)
+      .set({
+        tokenInput: sql<number>`coalesce(${chatSessions.tokenInput}, 0) + ${delta.input}`,
+        tokenOutput: sql<number>`coalesce(${chatSessions.tokenOutput}, 0) + ${delta.output}`,
+        tokenTotal: sql<number>`coalesce(${chatSessions.tokenTotal}, 0) + ${delta.total}`,
+        costUsd: sql<number>`coalesce(${chatSessions.costUsd}, 0) + ${delta.costUsd}`,
+      })
+      .where(eq(chatSessions.id, chatSessionId))
+      .run();
 
-  return delta;
+    return delta;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -3935,24 +3985,32 @@ export function updateChatSessionRuntime(
     runtimeSessionId?: string | null;
   },
 ): ChatSessionRow | undefined {
-  log.debug(
-    {
-      sessionId,
-      runtimeProfileId: input.runtimeProfileId ?? null,
-      hasRuntimeSessionId: input.runtimeSessionId !== undefined,
-    },
-    "Updating chat session runtime metadata",
-  );
-  getDb()
-    .update(chatSessions)
-    .set({
-      ...(input.runtimeProfileId !== undefined ? { runtimeProfileId: input.runtimeProfileId } : {}),
-      ...(input.runtimeSessionId !== undefined ? { runtimeSessionId: input.runtimeSessionId } : {}),
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(chatSessions.id, sessionId))
-    .run();
-  return findChatSessionById(sessionId);
+  return withCurrentTaskDeviceMutation(() => {
+    assertTaskDeviceChatRuntimeWrite(sessionId);
+    assertTaskDeviceNativeImport(input.runtimeSessionId);
+    log.debug(
+      {
+        sessionId,
+        runtimeProfileId: input.runtimeProfileId ?? null,
+        hasRuntimeSessionId: input.runtimeSessionId !== undefined,
+      },
+      "Updating chat session runtime metadata",
+    );
+    getDb()
+      .update(chatSessions)
+      .set({
+        ...(input.runtimeProfileId !== undefined
+          ? { runtimeProfileId: input.runtimeProfileId }
+          : {}),
+        ...(input.runtimeSessionId !== undefined
+          ? { runtimeSessionId: input.runtimeSessionId }
+          : {}),
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(chatSessions.id, sessionId))
+      .run();
+    return findChatSessionById(sessionId);
+  });
 }
 
 export interface RuntimeLimitGateDecision {
@@ -4307,28 +4365,32 @@ export function createChatSession(input: {
   runtimeProfileId?: string | null;
   runtimeSessionId?: string | null;
 }): ChatSessionRow | undefined {
-  const id = crypto.randomUUID();
-  const now = new Date().toISOString();
-  log.debug(
-    {
-      projectId: input.projectId,
-      runtimeProfileId: input.runtimeProfileId ?? null,
-    },
-    "Creating chat session",
-  );
-  getDb()
-    .insert(chatSessions)
-    .values({
-      id,
-      projectId: input.projectId,
-      title: input.title ?? "New Chat",
-      runtimeProfileId: input.runtimeProfileId ?? null,
-      runtimeSessionId: input.runtimeSessionId ?? null,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .run();
-  return findChatSessionById(id);
+  return withCurrentTaskDeviceMutation(() => {
+    assertTaskDeviceNativeImport(input.runtimeSessionId);
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    log.debug(
+      {
+        projectId: input.projectId,
+        runtimeProfileId: input.runtimeProfileId ?? null,
+      },
+      "Creating chat session",
+    );
+    getDb()
+      .insert(chatSessions)
+      .values({
+        id,
+        projectId: input.projectId,
+        title: input.title ?? "New Chat",
+        runtimeProfileId: input.runtimeProfileId ?? null,
+        runtimeSessionId: input.runtimeSessionId ?? null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+    bindTaskDeviceChatSession(id, input.projectId);
+    return findChatSessionById(id);
+  });
 }
 
 export function findChatSessionById(id: string): ChatSessionRow | undefined {
@@ -4355,28 +4417,40 @@ export function updateChatSession(
     runtimeSessionId?: string | null;
   },
 ): ChatSessionRow | undefined {
-  log.debug(
-    {
-      sessionId: id,
-      runtimeProfileId: fields.runtimeProfileId ?? null,
-      hasRuntimeSessionId: fields.runtimeSessionId !== undefined,
-    },
-    "Updating chat session runtime metadata",
-  );
-  const patch: Record<string, unknown> = { updatedAt: new Date().toISOString() };
-  if (fields.title !== undefined) patch.title = fields.title;
-  if (fields.agentSessionId !== undefined) patch.agentSessionId = fields.agentSessionId;
-  if (fields.runtimeProfileId !== undefined) patch.runtimeProfileId = fields.runtimeProfileId;
-  if (fields.runtimeSessionId !== undefined) patch.runtimeSessionId = fields.runtimeSessionId;
-  getDb().update(chatSessions).set(patch).where(eq(chatSessions.id, id)).run();
-  return findChatSessionById(id);
+  return withCurrentTaskDeviceMutation(() => {
+    if (
+      fields.runtimeSessionId !== undefined ||
+      fields.agentSessionId !== undefined ||
+      fields.runtimeProfileId !== undefined
+    ) {
+      assertTaskDeviceChatRuntimeWrite(id);
+      assertTaskDeviceNativeImport(fields.runtimeSessionId ?? fields.agentSessionId);
+    }
+    log.debug(
+      {
+        sessionId: id,
+        runtimeProfileId: fields.runtimeProfileId ?? null,
+        hasRuntimeSessionId: fields.runtimeSessionId !== undefined,
+      },
+      "Updating chat session runtime metadata",
+    );
+    const patch: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+    if (fields.title !== undefined) patch.title = fields.title;
+    if (fields.agentSessionId !== undefined) patch.agentSessionId = fields.agentSessionId;
+    if (fields.runtimeProfileId !== undefined) patch.runtimeProfileId = fields.runtimeProfileId;
+    if (fields.runtimeSessionId !== undefined) patch.runtimeSessionId = fields.runtimeSessionId;
+    getDb().update(chatSessions).set(patch).where(eq(chatSessions.id, id)).run();
+    return findChatSessionById(id);
+  });
 }
 
 export function deleteChatSession(id: string): void {
-  log.debug("deleteChatSession id=%s", id);
-  const db = getDb();
-  db.delete(chatMessages).where(eq(chatMessages.sessionId, id)).run();
-  db.delete(chatSessions).where(eq(chatSessions.id, id)).run();
+  return withCurrentTaskDeviceMutation(() => {
+    log.debug("deleteChatSession id=%s", id);
+    const db = getDb();
+    db.delete(chatMessages).where(eq(chatMessages.sessionId, id)).run();
+    db.delete(chatSessions).where(eq(chatSessions.id, id)).run();
+  });
 }
 
 export function createChatMessage(input: {
@@ -4385,21 +4459,24 @@ export function createChatMessage(input: {
   content: string;
   attachments?: ChatMessageAttachment[];
 }): ChatMessageRow | undefined {
-  const id = crypto.randomUUID();
-  const now = new Date().toISOString();
-  log.debug("createChatMessage sessionId=%s role=%s", input.sessionId, input.role);
-  getDb()
-    .insert(chatMessages)
-    .values({
-      id,
-      sessionId: input.sessionId,
-      role: input.role,
-      content: input.content,
-      attachments: input.attachments?.length ? JSON.stringify(input.attachments) : null,
-      createdAt: now,
-    })
-    .run();
-  return getDb().select().from(chatMessages).where(eq(chatMessages.id, id)).get();
+  return withCurrentTaskDeviceMutation(() => {
+    assertTaskDeviceChatRuntimeWrite(input.sessionId);
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    log.debug("createChatMessage sessionId=%s role=%s", input.sessionId, input.role);
+    getDb()
+      .insert(chatMessages)
+      .values({
+        id,
+        sessionId: input.sessionId,
+        role: input.role,
+        content: input.content,
+        attachments: input.attachments?.length ? JSON.stringify(input.attachments) : null,
+        createdAt: now,
+      })
+      .run();
+    return getDb().select().from(chatMessages).where(eq(chatMessages.id, id)).get();
+  });
 }
 
 export function listChatMessages(sessionId: string): ChatMessageRow[] {
@@ -4413,12 +4490,15 @@ export function listChatMessages(sessionId: string): ChatMessageRow[] {
 }
 
 export function updateChatSessionTimestamp(id: string): void {
-  log.debug("updateChatSessionTimestamp id=%s", id);
-  getDb()
-    .update(chatSessions)
-    .set({ updatedAt: new Date().toISOString() })
-    .where(eq(chatSessions.id, id))
-    .run();
+  return withCurrentTaskDeviceMutation(() => {
+    assertTaskDeviceChatRuntimeWrite(id);
+    log.debug("updateChatSessionTimestamp id=%s", id);
+    getDb()
+      .update(chatSessions)
+      .set({ updatedAt: new Date().toISOString() })
+      .where(eq(chatSessions.id, id))
+      .run();
+  });
 }
 
 // - Codex index repository (session read-model + limit overlays) -

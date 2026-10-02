@@ -1,3 +1,4 @@
+import { withProjectDeviceExecution } from "@aif/data";
 import { assertTaskExecutionAllowed } from "@aif/data";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -169,6 +170,12 @@ Requirements:
 }
 
 export async function runImplementer(taskId: string, projectRoot: string): Promise<void> {
+  return await withProjectDeviceExecution({ taskId, projectRoot }, async (root) =>
+    runImplementerScoped(taskId, root ?? projectRoot),
+  );
+}
+
+async function runImplementerScoped(taskId: string, projectRoot: string): Promise<void> {
   projectRoot = assertTaskExecutionAllowed(taskId, projectRoot) ?? projectRoot;
   const task = findTaskById(taskId);
 

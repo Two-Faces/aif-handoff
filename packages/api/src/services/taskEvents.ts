@@ -1,3 +1,4 @@
+import { withProjectDeviceExecution, invalidateTaskDeviceExecution } from "@aif/data";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -89,6 +90,12 @@ function assertTaskBranchPostRun(task: TaskRow, projectRoot: string): EventHandl
 }
 
 async function handleFastFix(input: EventHandlerInput): Promise<EventHandlerResult> {
+  return await withProjectDeviceExecution({ taskId: input.taskId }, async () =>
+    handleFastFixScoped(input),
+  );
+}
+
+async function handleFastFixScoped(input: EventHandlerInput): Promise<EventHandlerResult> {
   const task = findTaskById(input.taskId);
   if (!task) {
     return { ok: false, status: 404, error: "Task not found" };
@@ -149,7 +156,8 @@ async function handleFastFix(input: EventHandlerInput): Promise<EventHandlerResu
       90_000,
       "Fast fix query timed out",
     );
-  } catch {
+  } catch (error) {
+    if (invalidateTaskDeviceExecution()) throw error;
     // Fallback to no-tools mode below
   }
 

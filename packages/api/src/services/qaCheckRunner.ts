@@ -1,5 +1,7 @@
+import { DeviceExecutionError, PersonalExecutionDisabledError } from "@aif/shared";
+import { withProjectDeviceExecution } from "@aif/data";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { type DeviceExecutionError } from "@aif/shared";
+
 import { getDeviceExecutionBlock } from "@aif/data";
 import { join } from "node:path";
 import {
@@ -144,6 +146,24 @@ export function buildQaCheckPrompt(input: {
 
 /** Execute ready aif-qa test cases and persist qa-check.md. Never throws. */
 export async function runQaCheckQuery(input: RunQaCheckQueryInput): Promise<RunQaCheckQueryResult> {
+  try {
+    return await withProjectDeviceExecution(
+      { projectId: input.projectId, taskId: input.taskId, projectRoot: input.executionRoot },
+      async (root) =>
+        runQaCheckQueryScoped({ ...input, executionRoot: root ?? input.executionRoot }),
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      ...(error instanceof DeviceExecutionError || error instanceof PersonalExecutionDisabledError
+        ? { code: error.code }
+        : {}),
+    };
+  }
+}
+
+async function runQaCheckQueryScoped(input: RunQaCheckQueryInput): Promise<RunQaCheckQueryResult> {
   const { projectId, taskId } = input;
   let executionRoot = input.executionRoot;
   const blocked =

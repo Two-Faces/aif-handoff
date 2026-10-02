@@ -48,7 +48,8 @@ export class DeviceExecutionError extends Error {
       | "run_fenced"
       | "run_scope_required"
       | "run_root_mismatch"
-      | "taskless_execution_denied",
+      | "taskless_execution_denied"
+      | "run_session_mismatch",
   ) {
     super(code);
     this.name = "DeviceExecutionError";

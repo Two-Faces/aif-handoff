@@ -18,5 +18,6 @@ Run through this list whenever you touch anything under `packages/agent/`.
 - [ ] If candidate setup can fail after earlier tasks were spawned, drain all started task promises in `finally` before the project lane exits or propagates the setup error.
 - [ ] When `AIF_AGENT_AUTO_QUEUE_COMMIT_GATE_ENABLED=true`, auto-queue terminal transitions await a verified commit and auto-queue projects sharing one Git worktree remain serial; when disabled, preserve legacy concurrency.
 - [ ] If you touched first-activity watchdog logic, verify streamed runtime events (not only tool/subagent hooks) count as activity for tool-less workflows.
+- [ ] Managed lifecycles hold the durable run through callbacks and finalization. Watchdog/abort never retry an unresolved adapter, heartbeat expiry never releases it, and batched logs keep the originating run. Project warmups cannot fork into a managed snapshot.
 - [ ] `npm run lint`
 - [ ] `npm test`

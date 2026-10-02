@@ -12,6 +12,8 @@ import {
   taskDeviceRuns,
   tasks,
   projects,
+  localDevice,
+  taskExecutionWorkspaces,
   type TaskDeviceGrant,
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
@@ -27,6 +29,8 @@ interface ExecutionScope {
   run: Readonly<Run>;
   pending: number;
   failed: boolean;
+  completionOwnershipRevision?: number;
+  cleanup: Array<() => void>;
 }
 const execution = new AsyncLocalStorage<ExecutionScope>();
 const samePath = (a: string, b: string) => relative(resolve(a), resolve(b)) === "";
@@ -76,6 +80,32 @@ function inputDigest(task: typeof tasks.$inferSelect): string {
   return createHash("sha256")
     .update(canonicalJson(Object.fromEntries(keys.map((key) => [key, task[key]]))))
     .digest("hex");
+}
+function assertUnconflictedInputs(projectId: string, taskId: string): void {
+  const versions = readSyncVersions(projectId, "task", taskId);
+  if (
+    versions.__deleted ||
+    ["__created", "plan", "workflow", "title", "description"].some(
+      (field) => (versions[field]?.length ?? 0) > 1,
+    )
+  )
+    fail("run_fenced");
+}
+function assertHeadAuthority(head: Head): void {
+  const row = getDb()
+    .select()
+    .from(taskDeviceGrants)
+    .where(eq(taskDeviceGrants.id, head.grantId))
+    .get();
+  if (!row) return fail("grant_invalid");
+  const grant = storedGrant(row);
+  if (
+    grant.taskId !== head.taskId ||
+    grant.projectId !== head.projectId ||
+    grant.executionEpoch !== head.executionEpoch ||
+    grant.ownerDeviceId !== head.ownerDeviceId
+  )
+    fail("grant_invalid");
 }
 function parseGrant(value: unknown): TaskDeviceGrant {
   const parsed = taskDeviceGrantSchema.safeParse(value);
@@ -300,11 +330,15 @@ export function receiveTaskDeviceSuccessor(peerDeviceId: string, value: unknown)
   return result ?? fail("grant_conflict");
 }
 
-function assertRun(run: Readonly<Run>, taskId: string, root?: string): void {
+function assertRun(run: Readonly<Run>, taskId: string, root?: string, completion = false): void {
   const head = getTaskDeviceGrant(taskId);
   const saved = getTaskDeviceRun(run.id);
   const task = requireTask(taskId);
   const workspace = getTaskExecutionWorkspace(taskId);
+  assertUnconflictedInputs(task.projectId, taskId);
+  const closingRevision = completion
+    ? execution.getStore()?.completionOwnershipRevision
+    : undefined;
   if (
     run.taskId !== taskId ||
     !head ||
@@ -316,8 +350,8 @@ function assertRun(run: Readonly<Run>, taskId: string, root?: string): void {
     head.grantId !== run.grantId ||
     saved?.state !== "running" ||
     task.projectId !== head.projectId ||
-    task.executionOwner !== "ai" ||
-    task.ownershipRevision !== run.ownershipRevision ||
+    task.executionOwner !== (closingRevision === undefined ? "ai" : "human") ||
+    task.ownershipRevision !== (closingRevision ?? run.ownershipRevision) ||
     saved.inputDigest !== inputDigest(task) ||
     !workspace ||
     workspace.worktreePath !== run.worktreePath ||
@@ -383,17 +417,32 @@ export function withTaskDeviceMutation<T>(
 ): T {
   if (!execution.getStore() && !requireScope) return mutate();
   return getDb().transaction(() => {
-    assertTaskDeviceExecution(taskId);
+    const scope = execution.getStore();
+    if (scope) assertRun(scope.run, taskId, undefined, true);
+    else assertTaskDeviceExecution(taskId);
     const result = mutate();
     const current = execution.getStore();
-    if (current)
+    if (current) {
+      const task = requireTask(taskId);
+      if (task.executionOwner === "human" && current.completionOwnershipRevision === undefined) {
+        if (current.pending || current.failed) return fail("run_fenced");
+        current.completionOwnershipRevision = task.ownershipRevision;
+      }
       getDb()
         .update(taskDeviceRuns)
         .set({ inputDigest: inputDigest(requireTask(taskId)) })
         .where(eq(taskDeviceRuns.id, current.run.id))
         .run();
+    }
     return result;
   });
+}
+
+/** Task-bound chat and roadmap writes retain their originating run even though
+ * their target rows are sessions/messages or newly created board entities. */
+export function withCurrentTaskDeviceMutation<T>(mutate: () => T): T {
+  const scope = execution.getStore();
+  return scope ? withTaskDeviceMutation(scope.run.taskId, mutate) : mutate();
 }
 
 /** Internal runner integration point. Existing standalone tasks are unchanged.
@@ -413,8 +462,14 @@ export async function withTaskDeviceExecution<T>(
     throw new PersonalExecutionDisabledError();
   const head = getTaskDeviceGrant(task.id);
   if (!head && !execution.getStore()) return execute(input.projectRoot);
-  const root = resolveRegisteredTaskRoot(task.id, input.projectRoot, task.projectId!);
   const inherited = execution.getStore();
+  if (inherited) assertRun(inherited.run, task.id);
+  else if (head) {
+    if (head.state !== "owned") return fail("grant_not_ready");
+    if (head.ownerDeviceId !== getLocalDevice().deviceId) return fail("grant_not_owned");
+    if (head.activeRunId) return fail("run_busy");
+  }
+  const root = resolveRegisteredTaskRoot(task.id, input.projectRoot, task.projectId!);
   if (inherited) {
     assertRun(inherited.run, task.id, root);
     inherited.pending++;
@@ -435,6 +490,8 @@ export async function withTaskDeviceExecution<T>(
     if (current.state !== "owned") return fail("grant_not_ready");
     if (current.ownerDeviceId !== getLocalDevice().deviceId) return fail("grant_not_owned");
     if (current.activeRunId) return fail("run_busy");
+    assertHeadAuthority(current);
+    assertUnconflictedInputs(current.projectId, task.id);
     const fresh = requireTask(task.id);
     if (fresh.projectId !== current.projectId || fresh.executionOwner !== "ai")
       return fail("run_fenced");
@@ -471,13 +528,13 @@ export async function withTaskDeviceExecution<T>(
       .run();
     return Object.freeze(record);
   });
-  const scope: ExecutionScope = { run, pending: 0, failed: false };
+  const scope: ExecutionScope = { run, pending: 0, failed: false, cleanup: [] };
   return execution.run(scope, async () => {
     try {
       const result = await execute(root);
       getDb().transaction(() => {
         if (scope.pending || scope.failed) return fail("run_fenced");
-        assertRun(run, task.id);
+        assertRun(run, task.id, undefined, true);
         getDb()
           .update(taskDeviceRuns)
           .set({ state: "settled", settledAt: new Date().toISOString() })
@@ -493,6 +550,12 @@ export async function withTaskDeviceExecution<T>(
             ),
           )
           .run();
+        if (input.coordinatorId)
+          getDb()
+            .update(tasks)
+            .set({ lockedBy: null, lockedUntil: null })
+            .where(and(eq(tasks.id, task.id), eq(tasks.lockedBy, input.coordinatorId)))
+            .run();
       });
       return result;
     } catch (error) {
@@ -502,6 +565,9 @@ export async function withTaskDeviceExecution<T>(
         .where(and(eq(taskDeviceRuns.id, run.id), eq(taskDeviceRuns.state, "running")))
         .run();
       throw error;
+    } finally {
+      for (const cleanup of scope.cleanup) cleanup();
+      scope.cleanup.length = 0;
     }
   });
 }
@@ -522,7 +588,13 @@ export function bindTaskDeviceExecution<T extends unknown[], R>(
   return (...args) =>
     execution.run(scope, () => {
       assertRun(scope.run, scope.run.taskId);
-      const result = callback(...args);
+      let result: R;
+      try {
+        result = callback(...args);
+      } catch (error) {
+        scope.failed = true;
+        throw error;
+      }
       if (!isPromiseLike(result)) return result;
       scope.pending++;
       return Promise.resolve(result)
@@ -540,9 +612,196 @@ export function bindTaskDeviceExecution<T extends unknown[], R>(
     });
 }
 
-/** P13 rollout stays closed for managed tasks until all runner scopes and P14
- * process-stop recovery are wired. SQL exclusion happens BEFORE queue limits.
- */
+/** Top-level host lifecycle. Enrollment is never implicit and personal policy
+ * stays closed. Helpers nest in the same run through all result/finalizer work. */
+export async function withProjectDeviceExecution<T>(
+  input: {
+    projectId?: string | null;
+    taskId?: string | null;
+    projectRoot?: string;
+    coordinatorId?: string;
+  },
+  execute: (root?: string) => Promise<T>,
+): Promise<T> {
+  if (input.projectId && getPersonalExecutionBlock(input.projectId, input.taskId))
+    throw new PersonalExecutionDisabledError();
+  const head = input.taskId ? getTaskDeviceGrant(input.taskId) : null;
+  if (!head && !execution.getStore()) {
+    if (input.projectId) assertProjectDeviceExecution(input.projectId, input.taskId);
+    return execute(input.projectRoot);
+  }
+  if (!input.taskId || !head) return fail("run_fenced");
+  if (input.projectId && input.projectId !== head.projectId) return fail("run_fenced");
+  if (getPersonalExecutionBlock(head.projectId, input.taskId))
+    throw new PersonalExecutionDisabledError();
+  const workspace = getTaskExecutionWorkspace(input.taskId);
+  if (!workspace) return fail("run_scope_required");
+  return withTaskDeviceExecution(
+    {
+      taskId: input.taskId,
+      projectRoot: input.projectRoot ?? workspace.worktreePath,
+      coordinatorId: input.coordinatorId,
+    },
+    execute,
+  );
+}
+
+/** The adapter promise, not a timeout wrapper, owns this pending operation.
+ * Abort, stale input, and any failed call retain an uncertain durable run.
+ * This requests cancellation; only P14 may prove OS process-tree termination. */
+export function createTaskDeviceRuntimeGuard(
+  taskId?: string | null,
+  abortController = new AbortController(),
+) {
+  const scope = execution.getStore();
+  if (taskId) assertTaskDeviceExecution(taskId);
+  else if (scope) fail("taskless_execution_denied");
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let finished = false;
+  const callbacks = new Set<Promise<void>>();
+  function fence() {
+    if (!scope) return;
+    scope.failed = true;
+    getDb()
+      .update(taskDeviceRuns)
+      .set({ state: "uncertain" })
+      .where(and(eq(taskDeviceRuns.id, scope.run.id), eq(taskDeviceRuns.state, "running")))
+      .run();
+    if (timer) clearInterval(timer);
+  }
+  function assertCurrent() {
+    if (scope) assertRun(scope.run, scope.run.taskId);
+  }
+  function abortStale() {
+    fence();
+    if (!abortController.signal.aborted)
+      abortController.abort(new DeviceExecutionError("run_fenced"));
+  }
+  if (scope) {
+    abortController.signal.addEventListener("abort", fence, { once: true });
+    scope.cleanup.push(() => abortController.signal.removeEventListener("abort", fence));
+    if (abortController.signal.aborted) fence();
+  }
+  return {
+    managed: Boolean(scope),
+    abortController,
+    assertCurrent,
+    bind<T extends unknown[]>(callback: (...args: T) => void): (...args: T) => void {
+      if (!scope) return callback;
+      return (...args) =>
+        execution.run(scope, () => {
+          try {
+            if (finished) fail("run_fenced");
+            assertCurrent();
+            const result: unknown = callback(...args);
+            if (isPromiseLike(result)) {
+              scope.pending++;
+              const pending = Promise.resolve(result)
+                .then(assertCurrent)
+                .catch(() => abortStale())
+                .finally(() => {
+                  scope.pending--;
+                  callbacks.delete(pending);
+                });
+              callbacks.add(pending);
+            }
+          } catch (error) {
+            abortStale();
+            if (!(error instanceof DeviceExecutionError)) throw error;
+          }
+        });
+    },
+    async run<T>(operation: () => Promise<T>): Promise<T> {
+      if (!scope) return operation();
+      assertCurrent();
+      if (abortController.signal.aborted) {
+        fence();
+        return fail("run_fenced");
+      }
+      scope.pending++;
+      timer = setInterval(() => {
+        try {
+          execution.run(scope, assertCurrent);
+        } catch {
+          abortStale();
+        }
+      }, 1000);
+      timer.unref();
+      try {
+        const result = await operation();
+        finished = true;
+        await Promise.all(callbacks);
+        assertCurrent();
+        return result;
+      } catch (error) {
+        abortStale();
+        throw error;
+      } finally {
+        finished = true;
+        clearInterval(timer);
+        scope.pending--;
+      }
+    },
+  };
+}
+
+/** Timeout/cancel callers must fence before a fallback, catch handler or retry. */
+export function invalidateTaskDeviceExecution(): boolean {
+  const scope = execution.getStore();
+  if (!scope) return false;
+  scope.failed = true;
+  getDb()
+    .update(taskDeviceRuns)
+    .set({ state: "uncertain" })
+    .where(and(eq(taskDeviceRuns.id, scope.run.id), eq(taskDeviceRuns.state, "running")))
+    .run();
+  return true;
+}
+
+/** Legacy TTL/watchdog/reset logic cannot recover a managed run. */
 export function unmanagedTaskExecutionFilter() {
   return sql`NOT EXISTS (SELECT 1 FROM ${taskDeviceGrantHeads} WHERE ${taskDeviceGrantHeads.taskId} = ${tasks.id})`;
+}
+
+/** Only local accepted grants with an active checkout and no unresolved run. */
+export function availableTaskDeviceFilter() {
+  return sql`(${unmanagedTaskExecutionFilter()} OR EXISTS (
+    SELECT 1 FROM ${taskDeviceGrantHeads} JOIN ${taskExecutionWorkspaces}
+      ON ${taskExecutionWorkspaces.taskId} = ${taskDeviceGrantHeads.taskId}
+    WHERE ${taskDeviceGrantHeads.taskId} = ${tasks.id}
+      AND ${taskDeviceGrantHeads.projectId} = ${tasks.projectId}
+      AND ${taskDeviceGrantHeads.state} = 'owned' AND ${taskDeviceGrantHeads.activeRunId} IS NULL
+      AND ${taskDeviceGrantHeads.ownerDeviceId} = (SELECT ${localDevice.deviceId} FROM ${localDevice} WHERE ${localDevice.slot} = 1)
+      AND ${taskExecutionWorkspaces.state} = 'active'
+      AND ${taskExecutionWorkspaces.worktreePath} = ${tasks.worktreePath} AND ${tasks.branchName} IS NULL
+  ))`;
+}
+export function currentTaskDeviceFilter(allowAvailable = false) {
+  const scope = execution.getStore();
+  if (!scope) return allowAvailable ? availableTaskDeviceFilter() : unmanagedTaskExecutionFilter();
+  assertRun(scope.run, scope.run.taskId);
+  return sql`(${tasks.id} = ${scope.run.taskId}
+    AND EXISTS (SELECT 1 FROM ${taskDeviceGrantHeads} WHERE ${taskDeviceGrantHeads.taskId} = ${tasks.id}
+    AND ${taskDeviceGrantHeads.activeRunId} = ${scope.run.id}
+    AND ${taskDeviceGrantHeads.state} = 'owned' AND ${taskDeviceGrantHeads.grantId} = ${scope.run.grantId}
+    AND ${taskDeviceGrantHeads.executionEpoch} = ${scope.run.executionEpoch}
+    AND ${taskDeviceGrantHeads.ownerDeviceId} = ${scope.run.ownerDeviceId}))`;
+}
+export function currentTaskDeviceRunId(): string | null {
+  return execution.getStore()?.run.id ?? null;
+}
+export function currentTaskDeviceBinding() {
+  const scope = execution.getStore();
+  if (!scope) return null;
+  assertRun(scope.run, scope.run.taskId);
+  return {
+    taskId: scope.run.taskId,
+    projectId: requireTask(scope.run.taskId).projectId,
+    grantId: scope.run.grantId,
+    worktreePath: scope.run.worktreePath,
+    snapshotCommit: scope.run.snapshotCommit,
+  };
+}
+export function assertTaskDeviceWorkspaceMutable(taskId: string): void {
+  if (getTaskDeviceGrant(taskId)?.activeRunId) fail("run_busy");
 }
