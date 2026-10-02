@@ -1,3 +1,4 @@
+import { assertTaskExecutionAllowed } from "@aif/data";
 import {
   clearRuntimeProfileLimitSnapshot,
   createDbUsageSink,
@@ -838,6 +839,7 @@ export async function executeSubagentQuery(
   options: SubagentQueryOptions,
 ): Promise<SubagentQueryResult> {
   const { taskId, projectRoot, agentName } = options;
+  assertTaskExecutionAllowed(taskId);
   assertAiExecutionOwner(taskId);
   const stderrCollector = createStderrCollector();
   const heartbeatTimer = startHeartbeat(taskId);

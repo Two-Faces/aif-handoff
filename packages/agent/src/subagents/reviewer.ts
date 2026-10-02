@@ -1,3 +1,4 @@
+import { assertTaskExecutionAllowed } from "@aif/data";
 import { findProjectById, findTaskById, setTaskFields } from "@aif/data";
 import { createRuntimeWorkflowSpec, type RuntimeWorkflowSpec } from "@aif/runtime";
 import { getEnv, logger, formatAttachmentsForPrompt } from "@aif/shared";
@@ -57,6 +58,7 @@ async function runSidecar(
 }
 
 export async function runReviewer(taskId: string, projectRoot: string): Promise<void> {
+  assertTaskExecutionAllowed(taskId);
   const env = getEnv();
   const task = findTaskById(taskId);
 

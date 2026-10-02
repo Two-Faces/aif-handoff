@@ -13,6 +13,22 @@ Node packages (`@aif/api`, `@aif/agent`, `@aif/data`, `@aif/shared`) auto-load e
 - `.env`
 - `.env.local` (loaded after `.env`, overrides duplicate keys)
 
+## Personal project onboarding
+
+`AIF_PERSONAL_MODE` is a boolean and defaults to `false`. When enabled, new local
+projects use read-only `attach_existing` registration and persist
+`personalMode=true` and `publicationPolicy=local_only`. GitHub cloning is rejected.
+New tasks are paused with automatic execution disabled. The persisted project
+policy remains in force after this environment switch is turned off.
+
+During M1, personal projects cannot launch any Handoff runtime, including manual
+QA, fixes, commits, roadmap generation, warmup or chat. Unpausing a task or
+enabling auto-queue does not bypass this server-side restriction. Standalone
+projects retain their existing behavior when the switch is off. Device grants
+and safe handoff must be implemented and verified before personal execution can
+be enabled. Peer synchronization itself is a later part of M1; this switch alone
+does not enable a listener or connect devices.
+
 ## Environment Variables
 
 | Variable                                               | Type    | Default                        | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |

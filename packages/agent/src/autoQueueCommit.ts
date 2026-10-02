@@ -1,4 +1,10 @@
-import { appendTaskActivityLog, findTaskById, getAutoQueueMode, setTaskFields } from "@aif/data";
+import {
+  appendTaskActivityLog,
+  findTaskById,
+  getAutoQueueMode,
+  setTaskFields,
+  assertTaskExecutionAllowed,
+} from "@aif/data";
 import { createRuntimeWorkflowSpec, UsageSource } from "@aif/runtime";
 import {
   assertCurrentBranch,
@@ -92,6 +98,7 @@ export async function ensureAutoQueueTaskCommit(input: {
   taskId: string;
   projectRoot: string;
 }): Promise<AutoQueueCommitOutcome> {
+  assertTaskExecutionAllowed(input.taskId);
   const task = findTaskById(input.taskId);
   if (!task) {
     throw new StageManualBlockError(`Auto-queue commit failed: task ${input.taskId} not found.`);

@@ -1,3 +1,4 @@
+import { getPersonalExecutionBlock } from "@aif/data";
 import { Hono } from "hono";
 import { jsonValidator } from "../middleware/zodValidator.js";
 import { z } from "zod";
@@ -1275,6 +1276,8 @@ chatRouter.post("/:conversationId/abort", async (c) => {
 chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
   const body = c.req.valid("json") as ChatRequestPayload;
   const { projectId, message, clientId, conversationId, explore, taskId, attachments } = body;
+  const personalBlock = getPersonalExecutionBlock(projectId, taskId);
+  if (personalBlock) return c.json(personalBlock, 403);
   let { sessionId: inputSessionId } = body;
   const env = getEnv();
 

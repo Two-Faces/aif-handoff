@@ -1,3 +1,4 @@
+import { assertTaskExecutionAllowed } from "@aif/data";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -168,6 +169,7 @@ Requirements:
 }
 
 export async function runImplementer(taskId: string, projectRoot: string): Promise<void> {
+  assertTaskExecutionAllowed(taskId);
   const task = findTaskById(taskId);
 
   if (!task) {

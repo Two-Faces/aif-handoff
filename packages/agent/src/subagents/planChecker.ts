@@ -1,3 +1,4 @@
+import { assertTaskExecutionAllowed } from "@aif/data";
 import { findProjectById, findTaskById, persistTaskPlanForTask } from "@aif/data";
 import { logger, looksLikeFullPlanUpdate } from "@aif/shared";
 import { executeSubagentQuery } from "../subagentQuery.js";
@@ -44,6 +45,7 @@ export function isPlanAlreadyChecklist(text: string): boolean {
 }
 
 export async function runPlanChecker(taskId: string, projectRoot: string): Promise<void> {
+  assertTaskExecutionAllowed(taskId);
   const task = findTaskById(taskId);
 
   if (!task) {

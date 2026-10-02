@@ -9,6 +9,7 @@ import {
 import { findProjectById, findTaskById } from "@aif/data";
 import { UsageSource } from "@aif/runtime";
 import { runApiRuntimeOneShot } from "./runtime.js";
+import { getPersonalExecutionBlock, isProjectPublicationAllowed } from "@aif/data";
 
 const log = logger("commit-generation");
 
@@ -20,7 +21,7 @@ const PROJECT_SCOPE_APPEND =
 export interface RunCommitQueryResult {
   ok: boolean;
   error?: string;
-  code?: "ai_handoff_required";
+  code?: "ai_handoff_required" | "personal_execution_disabled";
 }
 
 export interface RunCommitQueryInput {
@@ -48,6 +49,8 @@ export { buildCommitPrompt } from "@aif/shared";
  */
 export async function runCommitQuery(input: RunCommitQueryInput): Promise<RunCommitQueryResult> {
   const { projectId, taskId = null } = input;
+  const blocked = getPersonalExecutionBlock(projectId, taskId);
+  if (blocked) return { ok: false, ...blocked };
   const project = findProjectById(projectId);
   if (!project) {
     const msg = `Project not found: ${projectId}`;
@@ -98,7 +101,8 @@ export async function runCommitQuery(input: RunCommitQueryInput): Promise<RunCom
   }
 
   const { git } = getProjectConfig(executionRoot);
-  const shouldPush = git.enabled && !git.skip_push_after_commit;
+  const shouldPush =
+    isProjectPublicationAllowed(projectId) && git.enabled && !git.skip_push_after_commit;
   const prompt = buildCommitPrompt(shouldPush);
 
   log.info(

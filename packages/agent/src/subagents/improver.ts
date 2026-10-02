@@ -1,3 +1,4 @@
+import { assertTaskExecutionAllowed } from "@aif/data";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { findProjectById, findTaskById, persistTaskPlanForTask } from "@aif/data";
@@ -28,6 +29,7 @@ function readPlanFromDisk(
 }
 
 export async function runImprover(taskId: string, projectRoot: string): Promise<void> {
+  assertTaskExecutionAllowed(taskId);
   const task = findTaskById(taskId);
 
   if (!task) {

@@ -79,6 +79,7 @@ const exactOriginSchema = z.string().transform((value, context) => {
 });
 
 const envSchema = z.object({
+  AIF_PERSONAL_MODE: booleanEnvSchema.default(false),
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_AUTH_TOKEN: z.string().optional(),
   ANTHROPIC_BASE_URL: z.string().optional(),

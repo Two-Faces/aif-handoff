@@ -1,3 +1,4 @@
+import { personalTaskExecutionGate } from "../middleware/personalExecution.js";
 import { Hono, type Context } from "hono";
 import { jsonValidator } from "../middleware/zodValidator.js";
 import { internalBroadcastAuth } from "../middleware/internalBroadcastAuth.js";
@@ -1112,7 +1113,7 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
 });
 
 // POST /tasks/:id/run-qa — manually trigger the aif-qa pipeline (fire-and-forget)
-tasksRouter.post("/:id/run-qa", (c) => {
+tasksRouter.post("/:id/run-qa", personalTaskExecutionGate, (c) => {
   const { id } = c.req.param();
   const task = findTaskById(id);
   if (!task) {
@@ -1165,7 +1166,7 @@ tasksRouter.post("/:id/run-qa", (c) => {
 });
 
 // POST /tasks/:id/run-qa-check — execute test cases produced by aif-qa.
-tasksRouter.post("/:id/run-qa-check", (c) => {
+tasksRouter.post("/:id/run-qa-check", personalTaskExecutionGate, (c) => {
   const { id } = c.req.param();
   const task = findTaskById(id);
   if (!task) {

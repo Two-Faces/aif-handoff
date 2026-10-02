@@ -56,6 +56,7 @@ const runtimeAdapter: RuntimeAdapter = {
 };
 
 vi.mock("@aif/data", () => ({
+  getPersonalExecutionBlock: vi.fn(() => null),
   createChatSession: (...args: unknown[]) => mockCreateChatSession(...args),
   findChatSessionById: (...args: unknown[]) => mockFindChatSessionById(...args),
   listChatSessions: (...args: unknown[]) => mockListChatSessions(...args),

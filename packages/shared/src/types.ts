@@ -61,6 +61,8 @@ export interface Project {
   id: string;
   name: string;
   rootPath: string;
+  personalMode?: boolean;
+  publicationPolicy?: "standard" | "local_only";
   plannerMaxBudgetUsd: number | null;
   planCheckerMaxBudgetUsd: number | null;
   implementerMaxBudgetUsd: number | null;
@@ -159,7 +161,14 @@ interface ProjectInputSettings {
 }
 
 export type CreateProjectInput = ProjectInputSettings &
-  ({ rootPath: string; githubRepository?: never } | { rootPath?: never; githubRepository: string });
+  (
+    | {
+        rootPath: string;
+        githubRepository?: never;
+        registrationMode?: "initialize" | "attach_existing";
+      }
+    | { rootPath?: never; githubRepository: string; registrationMode?: never }
+  );
 
 export interface UpdateProjectInput extends ProjectInputSettings {
   rootPath: string;

@@ -279,6 +279,22 @@ project, or `null` when the project has no tasks.
 
 ### Create Project
 
+For an existing local checkout, pass `registrationMode: "attach_existing"` with
+`rootPath`. This registers a personal project without initialization, package
+installation, branch changes or context writes. Git linked worktrees are
+supported. The response includes `personalMode: true` and
+`publicationPolicy: "local_only"`. An invalid checkout returns HTTP 400 with
+`code: "invalid_git_checkout"`. Omitting the mode keeps legacy initialization
+unless `AIF_PERSONAL_MODE=true`, which forces attach and rejects cloning with
+`code: "attach_existing_required"`.
+
+In M1, manual QA, QA Check, warmup, roadmap generation and chat for personal
+projects return HTTP 403 with `code: "personal_execution_disabled"` before
+runtime or checkout preparation. Direct GitHub PR publication returns HTTP 403
+with `code: "local_publication_only"`. Changing pause/auto-queue flags does not
+enable execution. These policies apply independently of legacy GitHub flags and
+`skip_push_after_commit`.
+
 ```
 POST /projects
 ```

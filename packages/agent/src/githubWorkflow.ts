@@ -4,6 +4,7 @@ import {
   findGitHubIssueByTaskId,
   findTaskById,
   listEnabledGitHubRepositories,
+  isProjectPublicationAllowed,
 } from "@aif/data";
 import { getEnv, logger } from "@aif/shared";
 import { ensureAutoQueueTaskCommit } from "./autoQueueCommit.js";
@@ -36,6 +37,7 @@ export async function synchronizeGitHubProjects(now = Date.now()): Promise<void>
   }
   const baseUrl = env.API_BASE_URL;
   for (const connection of listEnabledGitHubRepositories()) {
+    if (!isProjectPublicationAllowed(connection.projectId)) continue;
     const lastSync = connection.lastSyncedAt ? Date.parse(connection.lastSyncedAt) : 0;
     const lastAttempt = lastSyncAttempts.get(connection.projectId) ?? 0;
     if (
@@ -80,6 +82,8 @@ function pushBranch(projectRoot: string, branch: string): void {
 }
 
 export async function publishGitHubTask(taskId: string, projectRoot: string): Promise<boolean> {
+  const publicationTask = findTaskById(taskId);
+  if (publicationTask && !isProjectPublicationAllowed(publicationTask.projectId)) return false;
   if (!getEnv().AIF_GITHUB_ISSUE_PR_ENABLED) {
     log.debug(
       { taskId },

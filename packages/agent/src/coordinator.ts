@@ -1,3 +1,4 @@
+import { isPersonalProject } from "@aif/data";
 import {
   clearTaskActiveRuntimeSelection,
   clearTaskRuntimeLimitSnapshot,
@@ -536,6 +537,7 @@ function blockCandidateIfRuntimeLimited(task: TaskRow, stage: StatusTransition):
 
 /** Returns true on success, false on failure. */
 async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<boolean> {
+  if (isPersonalProject(task.projectId)) return false;
   if (task.executionOwner !== "ai") {
     log.warn(
       { taskId: task.id, stage: stage.label, executionOwner: task.executionOwner },
@@ -858,6 +860,7 @@ export function processDueScheduledTasks(): number {
 
   let fired = 0;
   for (const task of due) {
+    if (isPersonalProject(task.projectId)) continue;
     try {
       const project = findProjectById(task.projectId);
       if (scheduledTaskHasDirtyAutoQueueWorktree(task, project)) {
@@ -930,6 +933,7 @@ export function processAutoQueueAdvance(): number {
 
   let advanced = 0;
   for (const project of projects) {
+    if (isPersonalProject(project.id)) continue;
     // Serialization predicate combines:
     //   - current config (`git.create_branches=true` on a real git repo), AND
     //   - task state (any in-flight task already has a persisted branchName).

@@ -94,6 +94,9 @@ import {
 } from "./taskOwnership.js";
 import { transitionTaskStatus as transitionTaskStatusAtomic } from "./taskTransitions.js";
 import { createAuditEventValues } from "./audit.js";
+import { isPersonalProject, isPersonalTask } from "./personalMode.js";
+
+export * from "./personalMode.js";
 
 export * from "./normalizeBacklogPositions.js";
 export * from "./github.js";
@@ -1208,6 +1211,7 @@ export function createTask(input: {
   position?: number;
 }): HydratedTaskRow | undefined {
   const db = getDb();
+  const personalMode = isPersonalProject(input.projectId);
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const executionOwner = input.executionOwner ?? "ai";
@@ -1283,7 +1287,7 @@ export function createTask(input: {
       description: input.description,
       attachments: JSON.stringify(input.attachments ?? []),
       priority: input.priority,
-      autoMode: input.autoMode,
+      autoMode: personalMode ? false : input.autoMode,
       executionOwner,
       ownershipRevision: 0,
       isFix: input.isFix,
@@ -1298,7 +1302,7 @@ export function createTask(input: {
       autoQa: input.autoQa,
       autoQaCheck: input.autoQaCheck,
       maxReviewIterations: input.maxReviewIterations,
-      paused: input.paused,
+      paused: personalMode ? true : input.paused,
       runtimeProfileId: input.runtimeProfileId ?? null,
       modelOverride: input.modelOverride ?? null,
       runtimeOptionsJson:
@@ -1419,6 +1423,7 @@ export function updateTask(id: string, fields: TaskFieldsUpdate): TaskRow | unde
  * and never spawn two runtime runs. Bumps `updatedAt` to mirror updateTask.
  */
 export function tryStartQaRun(id: string): boolean {
+  if (isPersonalTask(id)) return false;
   const result = getDb()
     .update(tasks)
     .set({ qaStatus: "running", updatedAt: new Date().toISOString() })
@@ -1435,6 +1440,7 @@ export function tryStartQaRun(id: string): boolean {
 
 /** Atomically claim QA Check and clear outputs from the previous run. */
 export function tryStartQaCheckRun(id: string): boolean {
+  if (isPersonalTask(id)) return false;
   const result = getDb()
     .update(tasks)
     .set({
@@ -1943,6 +1949,7 @@ export function findProjectById(id: string): ProjectRow | undefined {
 export function createProject(input: {
   name: string;
   rootPath: string;
+  personalMode?: boolean;
   plannerMaxBudgetUsd?: number | null;
   planCheckerMaxBudgetUsd?: number | null;
   implementerMaxBudgetUsd?: number | null;
@@ -1971,6 +1978,9 @@ export function createProject(input: {
       id,
       name: input.name,
       rootPath: input.rootPath,
+      personalMode: input.personalMode === true || getEnv().AIF_PERSONAL_MODE,
+      publicationPolicy:
+        input.personalMode === true || getEnv().AIF_PERSONAL_MODE ? "local_only" : "standard",
       plannerMaxBudgetUsd: input.plannerMaxBudgetUsd ?? null,
       planCheckerMaxBudgetUsd: input.planCheckerMaxBudgetUsd ?? null,
       implementerMaxBudgetUsd: input.implementerMaxBudgetUsd ?? null,
@@ -2135,6 +2145,12 @@ function coordinatorAnyStageFilter() {
 
 function unlockedCoordinatorTaskFilter(nowIso: string) {
   return and(
+    getEnv().AIF_PERSONAL_MODE
+      ? sql`0`
+      : notInArray(
+          tasks.projectId,
+          getDb().select({ id: projects.id }).from(projects).where(eq(projects.personalMode, true)),
+        ),
     eq(tasks.paused, false),
     or(sql`${tasks.lockedBy} IS NULL`, lte(tasks.lockedUntil, nowIso)),
   );
@@ -2219,6 +2235,7 @@ export function listCoordinatorActionableProjectIds(
 
 /** Atomically claim a task for processing. Returns true if claim succeeded. */
 export function claimTask(taskId: string, coordinatorId: string, lockDurationMs: number): boolean {
+  if (isPersonalTask(taskId)) return false;
   const nowIso = new Date().toISOString();
   const lockedUntil = new Date(Date.now() + lockDurationMs).toISOString();
 
@@ -2245,6 +2262,7 @@ export function claimTask(taskId: string, coordinatorId: string, lockDurationMs:
 export function claimCoordinatorTaskIfEligible(
   input: CoordinatorTaskClaimInput,
 ): TaskRow | undefined {
+  if (isPersonalTask(input.taskId)) return undefined;
   const nowIso = new Date().toISOString();
   const lockedUntil = new Date(Date.now() + input.lockDurationMs).toISOString();
   const conditions = [
@@ -2368,6 +2386,7 @@ export function claimBacklogTaskForAdvance(
     baseSha: string | null;
   },
 ): boolean {
+  if (isPersonalTask(taskId)) return false;
   const nowIso = new Date().toISOString();
   return getDb().transaction((tx) => {
     const task = tx.select().from(tasks).where(eq(tasks.id, taskId)).get();

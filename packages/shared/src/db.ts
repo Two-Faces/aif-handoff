@@ -44,6 +44,8 @@ function ensureTables(sqlite: Database.Database): void {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       root_path TEXT NOT NULL,
+      personal_mode INTEGER NOT NULL DEFAULT 0,
+      publication_policy TEXT NOT NULL DEFAULT 'standard',
       planner_max_budget_usd REAL,
       plan_checker_max_budget_usd REAL,
       implementer_max_budget_usd REAL,
@@ -1094,6 +1096,14 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE tasks ADD COLUMN qa_check_playwright_configured INTEGER;
     `,
   },
+  {
+    version: 30,
+    description: "Persist personal project execution and publication restrictions",
+    sql: `
+      ALTER TABLE projects ADD COLUMN personal_mode INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE projects ADD COLUMN publication_policy TEXT NOT NULL DEFAULT 'standard';
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {
@@ -1408,7 +1418,9 @@ function ensureIndexes(sqlite: Database.Database): void {
 }
 
 /** Create a fresh in-memory DB — useful for testing */
-export function createTestDb(): BetterSQLite3Database<typeof schema> {
+export function createTestDb(): BetterSQLite3Database<typeof schema> & {
+  $client: Database.Database;
+} {
   const sqlite = new Database(":memory:");
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");

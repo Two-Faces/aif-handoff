@@ -55,6 +55,7 @@ const runtimeAdapter: RuntimeAdapter = {
 };
 
 vi.mock("@aif/data", () => ({
+  getPersonalExecutionBlock: vi.fn(() => null),
   findProjectById: (id: string) => mockFindProjectById(id),
   findTaskById: (id: string) => mockFindTaskById(id),
   toTaskResponse: (task: unknown) => mockToTaskResponse(task),

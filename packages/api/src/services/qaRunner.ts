@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { getProjectConfig, logger } from "@aif/shared";
-import { findTaskById, updateTask } from "@aif/data";
+import { findTaskById, updateTask, getPersonalExecutionBlock } from "@aif/data";
 import { RuntimeExecutionError, UsageSource } from "@aif/runtime";
 import { runApiRuntimeOneShot } from "./runtime.js";
 import { toTaskBroadcastPayload } from "../repositories/tasks.js";
@@ -13,7 +13,7 @@ const log = logger("qa-runner");
 export interface RunQaQueryResult {
   ok: boolean;
   error?: string;
-  code?: "ai_handoff_required";
+  code?: "ai_handoff_required" | "personal_execution_disabled";
 }
 
 export interface RunQaQueryInput {
@@ -161,6 +161,8 @@ function persistQaError(taskId: string, error: string): RunQaQueryResult {
  */
 export async function runQaQuery(input: RunQaQueryInput): Promise<RunQaQueryResult> {
   const { projectId, taskId, executionRoot } = input;
+  const blocked = getPersonalExecutionBlock(projectId, taskId);
+  if (blocked) return { ok: false, ...blocked };
 
   const task = findTaskById(taskId);
   if (!task) {

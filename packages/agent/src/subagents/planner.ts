@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { assertTaskExecutionAllowed } from "@aif/data";
 import { resolve } from "node:path";
 import {
   findProjectById,
@@ -129,6 +130,7 @@ function buildFixCommandText(taskContext: string): string {
 }
 
 export async function runPlanner(taskId: string, projectRoot: string): Promise<void> {
+  assertTaskExecutionAllowed(taskId);
   const task = findTaskById(taskId);
   const comments = listTaskComments(taskId).sort(
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),

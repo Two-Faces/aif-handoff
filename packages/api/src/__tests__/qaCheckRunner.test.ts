@@ -16,6 +16,7 @@ vi.mock("../services/runtime.js", () => ({
 }));
 
 vi.mock("@aif/data", () => ({
+  getPersonalExecutionBlock: vi.fn(() => null),
   findTaskById: (...args: unknown[]) => mockFindTaskById(...args),
   updateTask: (...args: unknown[]) => mockUpdateTask(...args),
 }));

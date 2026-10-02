@@ -1,7 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { isAbsolute, posix, relative, resolve, sep, win32 } from "node:path";
 import { initProject } from "@aif/runtime";
-import { findMonorepoRoot, validateProjectRootPath, logger } from "@aif/shared";
+import {
+  findMonorepoRoot,
+  validateProjectRootPath,
+  logger,
+  getEnv,
+  inspectExistingCheckout,
+  ExistingCheckoutError,
+} from "@aif/shared";
 import type { CreateProjectInput, UpdateProjectOrganizationInput } from "@aif/shared";
 import { getApiRuntimeRegistry } from "../services/runtime.js";
 import {
@@ -184,6 +191,21 @@ function cleanupManagedClone(destination: string, projectId?: string): void {
 
 async function createPathProject(input: CreateProjectInput & { rootPath: string }) {
   const rootPath = mapProjectPathToContainer(input.rootPath);
+  if (input.registrationMode === "attach_existing" || getEnv().AIF_PERSONAL_MODE) {
+    try {
+      const checkout = inspectExistingCheckout(rootPath);
+      const project = createProjectRecord({
+        ...projectRecordInput(input, checkout.rootPath),
+        personalMode: true,
+      });
+      return project
+        ? ({ ok: true, project } as const)
+        : ({ ok: false, status: 500, error: "Failed to attach project" } as const);
+    } catch (error) {
+      if (!(error instanceof ExistingCheckoutError)) throw error;
+      return { ok: false, status: 400, error: error.message, code: error.code } as const;
+    }
+  }
   const pathError = validateProjectRootPath(rootPath);
   if (pathError) return { ok: false, status: 400, error: pathError } as const;
 
@@ -320,6 +342,14 @@ async function createGitHubProject(
 }
 
 export async function createProject(input: CreateProjectInput): Promise<ProjectCreationResult> {
+  if (getEnv().AIF_PERSONAL_MODE && input.rootPath === undefined) {
+    return {
+      ok: false,
+      status: 400,
+      code: "attach_existing_required",
+      error: "Personal mode requires an existing local checkout",
+    };
+  }
   log.debug(
     { sourceKind: input.rootPath === undefined ? "github" : "path", name: input.name },
     "Project creation started",

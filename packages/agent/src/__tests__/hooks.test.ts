@@ -35,6 +35,7 @@ const TASK_ID = "test-task-1";
 function makeEnv(overrides: Record<string, unknown> = {}) {
   return {
     ANTHROPIC_API_KEY: undefined,
+    AIF_PERSONAL_MODE: false,
     OPENAI_API_KEY: undefined,
     OPENAI_BASE_URL: undefined,
     CODEX_CLI_PATH: undefined,

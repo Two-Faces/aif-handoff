@@ -14,6 +14,11 @@ export const projects = sqliteTable("projects", {
     .$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull(),
   rootPath: text("root_path").notNull(),
+  personalMode: integer("personal_mode", { mode: "boolean" }).notNull().default(false),
+  publicationPolicy: text("publication_policy")
+    .$type<"standard" | "local_only">()
+    .notNull()
+    .default("standard"),
   plannerMaxBudgetUsd: real("planner_max_budget_usd"),
   planCheckerMaxBudgetUsd: real("plan_checker_max_budget_usd"),
   implementerMaxBudgetUsd: real("implementer_max_budget_usd"),

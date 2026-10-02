@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { findTaskById, updateTask } from "@aif/data";
+import { findTaskById, updateTask, getPersonalExecutionBlock } from "@aif/data";
 import { createRuntimeWorkflowSpec, RuntimeExecutionError, UsageSource } from "@aif/runtime";
 import { getEnv, logger } from "@aif/shared";
 import { toTaskBroadcastPayload } from "../repositories/tasks.js";
@@ -20,7 +20,7 @@ export interface RunQaCheckQueryInput {
 export interface RunQaCheckQueryResult {
   ok: boolean;
   error?: string;
-  code?: "ai_handoff_required" | "qa_test_cases_required";
+  code?: "ai_handoff_required" | "qa_test_cases_required" | "personal_execution_disabled";
 }
 
 export interface PlaywrightMcpPreflight {
@@ -134,6 +134,8 @@ export function buildQaCheckPrompt(input: {
 /** Execute ready aif-qa test cases and persist qa-check.md. Never throws. */
 export async function runQaCheckQuery(input: RunQaCheckQueryInput): Promise<RunQaCheckQueryResult> {
   const { projectId, taskId, executionRoot } = input;
+  const blocked = getPersonalExecutionBlock(projectId, taskId);
+  if (blocked) return { ok: false, ...blocked };
   const task = findTaskById(taskId);
   if (!task) {
     const error = `Task not found: ${taskId}`;

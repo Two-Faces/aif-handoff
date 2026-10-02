@@ -107,6 +107,7 @@ vi.mock("@aif/runtime", async (importOriginal) => {
 });
 
 vi.mock("@aif/data", () => ({
+  assertProjectExecutionAllowed: vi.fn(),
   clearRuntimeProfileLimitSnapshot: mockClearRuntimeProfileLimitSnapshot,
   findProjectById: mockFindProjectById,
   findRuntimeProfileById: mockFindRuntimeProfileById,

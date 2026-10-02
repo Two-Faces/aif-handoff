@@ -1,4 +1,4 @@
-import { findTaskById } from "@aif/data";
+import { findTaskById, assertTaskExecutionAllowed } from "@aif/data";
 import { parseAttachments } from "@aif/shared";
 import { UsageSource } from "@aif/runtime";
 import { resolveApiLightModel, runApiRuntimeOneShot } from "./runtime.js";
@@ -62,6 +62,7 @@ function formatLatestCommentForPrompt(comment: FastFixComment): string {
 }
 
 export async function runFastFixQuery(input: RunFastFixQueryInput): Promise<string> {
+  assertTaskExecutionAllowed(input.taskId);
   const task = findTaskById(input.taskId);
   if (!task) {
     throw new Error(`Task ${input.taskId} not found for fast fix runtime resolution`);

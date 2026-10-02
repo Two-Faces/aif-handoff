@@ -1,3 +1,4 @@
+import { assertProjectExecutionAllowed } from "@aif/data";
 import {
   bootstrapRuntimeRegistry,
   buildRuntimeLimitBroadcastCacheKey,
@@ -633,6 +634,7 @@ export async function runApiRuntimeOneShot(input: {
   result: RuntimeRunResult;
   context: RuntimeExecutionContext;
 }> {
+  assertProjectExecutionAllowed(input.projectId, input.taskId);
   const env = getEnv();
   const workflow = createRuntimeWorkflowSpec({
     workflowKind: input.workflowKind ?? "oneshot",

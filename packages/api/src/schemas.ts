@@ -98,6 +98,7 @@ export const createProjectSchema = projectSettingsSchema.and(
     z.object({
       rootPath: z.string().min(1, "Root path is required"),
       githubRepository: z.never().optional(),
+      registrationMode: z.enum(["initialize", "attach_existing"]).optional(),
     }),
     z.object({
       rootPath: z.never().optional(),
