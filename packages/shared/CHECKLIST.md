@@ -6,5 +6,6 @@ Run through this list whenever you touch anything under `packages/shared/`.
 - [ ] If you changed `types.ts`, check all consumers (`api`, `agent`, `runtime`, `web`) still compile — shared types fan out everywhere.
 - [ ] If you changed `stateMachine.ts`, verify every subagent and API route that drives stage transitions still honours the new rules.
 - [ ] Keep `browser.ts` free of Node-only imports — the web package depends on it.
+- [ ] Task checkpoint changes preserve source/task HEAD, branches, index and unrelated files in native Git fixtures. Begin scopes before writes; reject overlapping pre-existing edits and stale checkpoint refs. Snapshot plumbing must not execute repository hooks or external filters.
 - [ ] `npm run lint`
 - [ ] `npm test`

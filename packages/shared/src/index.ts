@@ -265,6 +265,20 @@ export {
 
 export { buildCommitPrompt } from "./commitWorkflow.js";
 
+export {
+  assertTaskCheckout,
+  prepareTaskCheckout,
+  taskCheckpointRef,
+  TaskCheckoutError,
+  type TaskCheckoutInput,
+} from "./taskCheckout.js";
+export {
+  beginTaskChangeScope,
+  commitTaskChanges,
+  type TaskChangeScope,
+  type TaskCommitResult,
+} from "./taskCommit.js";
+
 // Attachment utilities
 export {
   parseAttachments,

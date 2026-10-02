@@ -446,7 +446,8 @@ export function projectSupportsTaskWorktrees(projectRoot: string): boolean {
 function copyPathIfExists(source: string, destination: string): void {
   if (!existsSync(source)) return;
   mkdirSync(dirname(destination), { recursive: true });
-  cpSync(source, destination, { recursive: true, force: true });
+  // Tracked snapshot content wins over an overlay from the source checkout.
+  cpSync(source, destination, { recursive: true, force: false });
 }
 
 function copyLatestPatchFiles(
@@ -570,8 +571,15 @@ export function ensureTaskWorktree(input: EnsureTaskWorktreeInput): EnsureTaskWo
     : buildTaskWorktreePath(projectRoot, branchName, taskId);
 
   if (existsSync(worktreePath)) {
-    if (isGitRepo(worktreePath) && getCurrentBranch(worktreePath) === branchName) {
-      copyProjectContextToWorktree(projectRoot, worktreePath);
+    const sourceCommon = runGit(projectRoot, ["rev-parse", "--git-common-dir"]);
+    const targetCommon = runGit(worktreePath, ["rev-parse", "--git-common-dir"]);
+    const sameRepository =
+      sourceCommon.status === 0 &&
+      targetCommon.status === 0 &&
+      resolve(projectRoot, sourceCommon.stdout) === resolve(worktreePath, targetCommon.stdout);
+    if (sameRepository && getCurrentBranch(worktreePath) === branchName) {
+      // The task may have edited or removed its context since creation. Reuse
+      // must never replay an overlay from the mutable source checkout.
       return { action: "reused", branchName, worktreePath };
     }
     throw new BranchIsolationError(

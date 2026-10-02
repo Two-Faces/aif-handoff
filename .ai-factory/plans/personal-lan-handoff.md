@@ -105,11 +105,13 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
 ## M2. Снимки кода и продолжение задачи
 
 - [ ] **P10. Сделать commits scoped и task checkouts воспроизводимыми.**
+  - **В работе, первый блок M2:** `codex/personal-lan-handoff-m2` от принятого M1 `b523143`; отдельный worktree сохраняет работающие нативные M1-узлы. Добавлены exact-commit checkout и host-controlled checkpoint primitives в shared; текущие runners ещё не переведены на них, P10 не закрыта.
   - Зависимости: P02, P03.
   - Файлы: `packages/shared/src/commitWorkflow.ts`, `gitIsolation.ts`, `packages/agent/src/autoQueueCommit.ts`, `subagents/planner.ts`, остальные mutating stage root resolution.
   - Детерминированный ownership/whitelist diff helper; убрать требование prompt `git add -A`; сохранить index/unrelated files. Exact-snapshot root для implementation/fix/QA/commit, а не только условного planner worktree.
   - Context overlay не переписывает mutable reused worktree. Local-only guard протестировать на worker, API helper и GitHub workflow.
   - Проверка: чужие staged hunks/untracked/dirty files, чужая ветка, одинаковое имя ветки с другим HEAD, глобально грязный root, один commit или корректная последовательность task commits. Failure сохраняет исходное состояние.
+  - Осталось подключить общий root/scope lifecycle к planner/implementation/fix/QA/commit, заменить старый runtime commit prompt, сохранить scope/provenance для восстановления после restart. До P13/P14 API и worker personal-проектов остаются закрыты прежними guards; новые primitives сами по себе не разрешают запуск.
 
 - [ ] **P11. Добавить immutable code/context snapshot contract.**
   - Зависимости: P10, P04.
@@ -208,6 +210,16 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
 | AC-16 | P20/P21 | CRM pilot и manifest подключённых checkout |
 
 В планировании проверки кода и native scenarios не выполнялись: функциональности пока нет. При реализации записывать точные команды, результаты и ограничения, а не только отметки checkbox. Ошибки baseline и недоступные среды отделять от регрессий; не ослаблять assertions ради зелёной проверки.
+
+## Первый блок M2 — 02.10.2026
+
+- Ветка `codex/personal-lan-handoff-m2` от принятого M1 `b523143`; managed worktree `C:\Users\anton\.codex\worktrees\personal-lan-m2\aif-handoff`. Основной `E:\Projects\aif-handoff` и запущенные нативные M1-серверы не переключались.
+- Добавлены `prepareTaskCheckout` / `assertTaskCheckout` и opaque scope до начала записи. `commitTaskChanges` сохраняет проверенный diff через temporary index, `commit-tree` и CAS только namespaced ref. HEAD, пользовательские ветки/index/файлы не двигаются; обычный commit workflow ещё не заменён. Snapshot plumbing не запускает hooks, fsmonitor, внешние filters и публикацию; Git replacement objects и symbolic checkpoint refs не обходят проверки.
+- 26 новых native Git fixtures плюс 2 regression tests старого helper: чужие staged/unstaged/untracked изменения, overlap в одном файле, source/task index byte preservation, dirty source, другая repository с той же веткой, HEAD drift, linked checkout boundaries, SHA-256, binary/UTF-8 filenames, directory-to-file replacement, ref contention, цепочка checkpoints, hooks/filter non-execution. Старый helper не переписывает tracked context при создании и изменённый/удалённый context при reuse.
+- Финальный `npm run ai:validate` после последних изменений кода завершился с exit 0: **3241 passed / 1 existing skipped**, lint 10/10, build 7/7, Chromium 8/8, k6 3/3 с исходными thresholds, Codex protocol check passed. Coverage всех пакетов ≥70%; минимальные метрики: shared 74.68%, data 75.00%, runtime 73.25%, api 70.86%, agent 76.35%, mcp 86.27%, web 74.49%.
+- Quality fixture использует отдельную БД `.codex/m2/validation/fixture.sqlite`, 100 paused/manual synthetic задач и порты 3309/5480. `API_BASE_URL` также указывает на 3309 для worker WebSocket. Browser baseline теперь учитывает `AIF_API_URL`, вместо безусловного обращения к рабочему API на 3009. Локальный драйвер `.codex/m2/validate.mjs`, финальный лог `.codex/m2/logs/ai-validate-final.log`; ничего из fixture/credentials не добавляется в Git.
+- CHECKLIST root/shared/web пройдены. Schema/migrations, общие DTO/state transitions, REST/WS, runtime adapters, UI components/themes и зависимости не менялись — соответствующие migration/parity/Pencil/Docker пункты неприменимы. Node-only exports не добавлены в `browser.ts`; сборка всех consumers прошла.
+- **P10 остаётся в работе:** primitives не подключены к mutating runners; нужны root/scope lifecycle, durable provenance/recovery и замена старого commit prompt. Code/context transfer, grant/fencing и stop acceptance P11–P15 не реализованы этим блоком. Personal execution guards сохранены; новая Mac acceptance открыта. Промпт следующей сессии обновлён под текущее состояние M2. Push/PR агентом не выполнялись.
 
 ## Прогресс реализации — 02.10.2026
 

@@ -170,6 +170,47 @@ remain outside M1 and disabled for personal projects until M2's execution gates 
 Validation results and the acceptance evidence are recorded in the
 [implementation plan](../.ai-factory/plans/personal-lan-handoff.md).
 
+## M2 implementation in progress: local checkpoint primitives
+
+`@aif/shared` now provides `prepareTaskCheckout`, `assertTaskCheckout`,
+`beginTaskChangeScope` and `commitTaskChanges`. They are internal building blocks;
+the application runners still use the M1 execution guards and have not migrated
+to this lifecycle. This does not enable code transfer or personal AI execution.
+
+- A checkout is detached at a full immutable commit ID. Its registration binds
+  the project, task, repository, path and base commit. Reuse checks this identity
+  and HEAD; it never restores a branch or overwrites edited/deleted context.
+  Preparation neither fetches nor pulls and does not copy mutable ignored context.
+- The caller must open a change scope **before** task writes in the isolated
+  checkout. Existing dirty, staged and untracked paths are excluded. Any later
+  change to those files or their staged entries blocks the checkpoint, including
+  overlaps within one file. A model-provided list of paths cannot create a scope.
+- The helper builds and verifies a whitelisted tree using a temporary index.
+  `commit-tree` creates a checkpoint object; compare-and-swap `update-ref` publishes
+  only `refs/aif/tasks/<project-and-task-digest>/checkpoint`. Both source and task
+  HEADs, branches, indexes and working files stay unchanged. Failure may leave
+  unreachable Git objects, but never partially stages or resets user changes.
+- These are local **snapshot commits**: project hooks and filesystem monitor
+  commands do not run. They are not the existing interactive commit workflow.
+  External filters, LFS attributes, working-tree encodings, submodules and symlinks
+  currently produce readiness blockers. Built-in Git line-ending normalization
+  is retained. No push, PR or runtime is invoked.
+- To continue a checkpoint sequence, prepare a fresh checkout from the returned
+  commit. A stale checkout cannot replace a newer task checkpoint. The current
+  in-process scope deliberately cannot be recovered by claiming dirty files after
+  a restart. Durable execution provenance, explicit manual recovery and the shared
+  runner lifecycle are still pending P10/P13/P14 work. Exclusive execution must be
+  supplied by those gates; these helpers are not a filesystem sandbox.
+
+The existing standalone worktree helper also stops replaying context on reuse,
+preserves tracked context on creation, and rejects an unrelated repository that
+merely has the same branch name.
+
+Native Windows Git fixtures cover source/index preservation, overlapping staged
+hunks, foreign untracked files, binary and UTF-8 paths, HEAD drift, ref contention,
+linear checkpoint chains and hook/filter non-execution. Native macOS validation
+of these new primitives remains open, independently of the completed M1 acceptance.
+
 ## Implementation references
 
 - [ADR](decisions/personal-lan-sync.md)
