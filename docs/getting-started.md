@@ -207,12 +207,22 @@ the existing anonymous behavior and existing/new tasks default to AI ownership.
    The command prompts for identity fields and reads the password plus confirmation without
    echoing them. Passwords must contain at least 12 characters. `--password` and password
    values on the command line are rejected so they cannot leak through shell history or
-   process listings. For automation, use protected stdin or a mode-`0600` password file.
+   process listings. For automation, use protected stdin or a protected password file
+   (maximum 64 KiB). On macOS/Linux the file must have owner-only permissions such as `0600`.
 
    ```bash
    chmod 600 /secure/path/admin-password
    npm run participants:bootstrap -- --username admin --display-name "Workspace Admin" --password-file /secure/path/admin-password
    ```
+
+   On Windows, `chmod` does not set an owner-only ACL. Use interactive bootstrap, protected
+   stdin, or restrict the file's **Security → Advanced** permissions to the current OS user,
+   SYSTEM and Administrators. Broad explicit or inherited access (including write-only access)
+   is rejected. Windows PowerShell checks the ACL and reads through the same open file handle;
+   unavailable or unreadable ACLs fail closed. The command does not change file permissions.
+
+   Implementation references: [Node file permissions](https://nodejs.org/docs/latest-v22.x/api/fs.html#fschmodpath-mode-callback)
+   and [FileStream ACL access](https://learn.microsoft.com/en-us/dotnet/api/system.io.filestream.getaccesscontrol?view=netframework-4.8.1).
 
 3. For Docker, feed the protected host file through stdin to the API container:
 
@@ -276,6 +286,16 @@ curl -s http://localhost:3009/agent/readiness
 | `npm test`         | Run all tests (Vitest)             |
 | `npm run db:setup` | Build shared and initialize SQLite |
 | `npm run db:push`  | Push schema changes                |
+
+`npm test` schedules one workspace suite at a time, matching `npm run coverage`.
+Vitest workers and the multi-process integration scenarios inside each package stay
+enabled. This avoids multiplying worker pools across packages and starving native
+Git/CLI fixtures; test assertions and timeouts are unchanged.
+
+`npm run ai:protocol` checks generated artifacts with the CLI on npm's local PATH
+(`--use-path`), and still requires its version to match the installed Codex SDK.
+Direct generator commands continue to honor `CODEX_CLI_PATH`. A newer CLI configured
+for interactive runtime use does not select the generator for the repository check.
 
 ## Next Steps
 

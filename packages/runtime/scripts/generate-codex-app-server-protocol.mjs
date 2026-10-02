@@ -171,6 +171,9 @@ function runCodex(executablePath, args) {
 }
 
 function resolveCodexExecutable() {
+  // npm prepends this checkout's node_modules/.bin to PATH for reproducible checks.
+  // Direct generator calls keep honoring the explicit runtime CLI override.
+  if (process.argv.includes("--use-path")) return "codex";
   const configured = process.env.CODEX_CLI_PATH;
   if (typeof configured === "string" && configured.trim().length > 0) {
     return configured.trim();

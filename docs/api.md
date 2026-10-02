@@ -1701,6 +1701,9 @@ The Handoff MCP server (`packages/mcp`) provides bidirectional sync between AIF 
 
 The web settings route `POST /settings/mcp/install` installs the MCP server into supported runtimes. When `MCP_PORT` is a valid integer port in the server environment, it writes a streamable HTTP entry pointing to `http://localhost:<MCP_PORT>/mcp`; otherwise it writes the local `stdio` launcher entry. The response includes per-runtime success/error entries, so partial install failures are surfaced without hiding runtimes that succeeded.
 
+The `stdio` entry preserves absolute `DATABASE_URL` and `PROJECTS_DIR` paths, including
+Windows drive paths. Relative paths are resolved against the Handoff monorepo root.
+
 See [MCP Sync Server](mcp-sync.md) for full documentation.
 
 ## See Also

@@ -8,6 +8,7 @@ Run through this list whenever you touch anything under `packages/api/`.
 - [ ] Runtime execution goes through `@aif/runtime` — no direct provider SDK calls from routes or services.
 - [ ] Validate every new request body/query with Zod via the `zodValidator` middleware.
 - [ ] Add integration tests for new routes (happy path + one error path minimum).
+- [ ] Filesystem fixtures use `mkdtemp` under the OS temporary directory and clean up afterwards. Tests that assume default paths explicitly stub and restore environment settings; include absolute-path coverage for spawned MCP configuration.
 - [ ] `npm run lint`
 - [ ] `npm test`
 - [ ] Peer traffic uses the dedicated pinned TLS listener and project allowlists. Browser/MCP credentials never authenticate peers; personal runtime guards run before Git/filesystem preparation.

@@ -1,7 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validateRuntimeModelEffort } from "../modelEffort.js";
 import type { RuntimeRunInput } from "../types.js";
 import { TEST_USAGE_CONTEXT } from "./helpers/usageContext.js";
+
+afterEach(() => vi.unstubAllEnvs());
 
 // Mock the Codex SDK
 const mockRunStreamed = vi.fn();
@@ -56,6 +58,7 @@ describe("runCodexSdk", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
+    vi.stubEnv("CODEX_CLI_PATH", undefined);
     mockStartThread.mockReturnValue(mockThread);
     mockResumeThread.mockReturnValue(mockThread);
     mockGetCodexSessionLimitSnapshot.mockResolvedValue(null);
@@ -698,7 +701,7 @@ describe("runCodexSdk", () => {
       expect.objectContaining({ codexPathOverride: "/env/codex" }),
     );
 
-    vi.unstubAllEnvs();
+    vi.stubEnv("CODEX_CLI_PATH", undefined);
     await runCodexSdk(createRunInput());
     expect(mockCodexConstructor).toHaveBeenLastCalledWith(
       expect.objectContaining({ codexPathOverride: "codex" }),

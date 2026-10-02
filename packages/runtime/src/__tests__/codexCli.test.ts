@@ -66,6 +66,7 @@ describe("codex cli transport", () => {
     mockGetCodexSessionLimitSnapshot.mockReset();
     mockGetCodexSessionLimitSnapshot.mockResolvedValue(null);
     vi.unstubAllEnvs();
+    vi.stubEnv("CODEX_CLI_PATH", undefined);
     vi.useRealTimers();
   });
 

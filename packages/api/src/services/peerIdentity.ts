@@ -47,7 +47,9 @@ export function generatePeerIdentity(deviceId: string): PeerTlsIdentity {
     der(0x31, sequence(der(0x06, Buffer.from("550403", "hex")), der(0x0c, Buffer.from(deviceId)))),
   );
   const serial = randomBytes(16);
-  serial[0] = serial[0]! & 0x7f;
+  // DER INTEGER must be positive with no redundant leading zero padding.
+  // Merely clearing the sign bit sometimes leaves 00 followed by a byte < 80.
+  serial[0] = serial[0]! & 0x7f || 1;
   // Fixed broad validity avoids making sync authority depend on clocks differing by a day.
   const validity = sequence(
     der(0x18, Buffer.from("20200101000000Z")),

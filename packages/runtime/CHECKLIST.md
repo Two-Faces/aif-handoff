@@ -20,6 +20,7 @@ Every feature or fix in the runtime layer must cover **every** adapter, not just
 
 ## Tests
 
+- [ ] CLI fallback tests explicitly stub and restore `CODEX_CLI_PATH`; do not assume the developer's shell has no override. Keep real override cases covered.
 - [ ] Add or update unit tests in `packages/runtime/src/__tests__/` for every adapter you touched.
 - [ ] If the change spans multiple adapters, add a parity test or table-driven test that exercises each adapter.
 - [ ] If Codex App Server protocol artifacts are touched or adapter protocol shapes change, run `npm run codex:app-server:protocol:check --workspace=@aif/runtime` and regenerate with `npm run codex:app-server:protocol:generate --workspace=@aif/runtime` if needed.

@@ -32,7 +32,7 @@ describe("codex app-server process helpers", () => {
       }),
     ).toBe("/env/codex");
 
-    vi.unstubAllEnvs();
+    vi.stubEnv("CODEX_CLI_PATH", undefined);
     expect(
       resolveCodexAppServerExecutable({
         runtimeId: "codex",

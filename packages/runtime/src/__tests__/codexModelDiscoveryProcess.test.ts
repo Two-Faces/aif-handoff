@@ -29,6 +29,7 @@ function clearProxyEnv() {
 describe("codex model discovery process helpers", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
+    vi.stubEnv("CODEX_CLI_PATH", undefined);
     clearProxyEnv();
   });
 
@@ -143,7 +144,7 @@ describe("codex model discovery process helpers", () => {
       ),
     ).toBe("/env/codex");
 
-    vi.unstubAllEnvs();
+    vi.stubEnv("CODEX_CLI_PATH", undefined);
     expect(
       resolveDiscoveryExecutable(
         createModelDiscoveryInput({
