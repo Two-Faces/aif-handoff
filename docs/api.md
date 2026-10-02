@@ -312,6 +312,14 @@ with `code: "local_publication_only"`. Changing pause/auto-queue flags does not
 enable execution. These policies apply independently of legacy GitHub flags and
 `skip_push_after_commit`.
 
+During M2 development, internally registered task workspaces use a local durable
+checkpoint journal for API and auto-queue commits. They do not invoke an AI commit
+workflow or publish to GitHub. A prepared/checkpointed workspace blocks new writes
+until the continuation lifecycle prepares another workspace. Registration is not
+yet a public API and does not bypass personal execution denial. The legacy commit
+workflow now commits only changes already staged by the user; it does not stage
+all dirty/untracked files automatically.
+
 ```
 POST /projects
 ```

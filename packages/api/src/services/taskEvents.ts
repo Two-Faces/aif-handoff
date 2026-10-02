@@ -23,6 +23,7 @@ import {
   persistTaskPlanForTask,
   setTaskFields,
   isPersonalProject,
+  assertTaskExecutionAllowed,
   type TaskRow,
 } from "@aif/data";
 import { AiHandoffRequiredError, runFastFixQuery, withTimeout } from "./fastFix.js";
@@ -46,8 +47,9 @@ function restoreTaskBranchForMutation(
   task: TaskRow,
   projectRoot: string,
 ): EventHandlerResult | null {
-  if (!task.branchName || task.isFix) return null;
   try {
+    assertTaskExecutionAllowed(task.id, projectRoot);
+    if (!task.branchName || task.isFix) return null;
     // task.branchName is a source-of-truth contract: every mutation path
     // (fast-fix, regular transition, accept_existing_plan) must land on the
     // persisted branch or fail loud. Use `restorePersistedBranch` instead of
@@ -71,8 +73,9 @@ function restoreTaskBranchForMutation(
 }
 
 function assertTaskBranchPostRun(task: TaskRow, projectRoot: string): EventHandlerResult | null {
-  if (!task.branchName || task.isFix) return null;
   try {
+    assertTaskExecutionAllowed(task.id, projectRoot);
+    if (!task.branchName || task.isFix) return null;
     assertCurrentBranch(projectRoot, task.branchName);
     return null;
   } catch (err) {
@@ -295,10 +298,9 @@ function handleAcceptExistingPlan(input: EventHandlerInput): EventHandlerResult 
   // Fix tasks keep the legacy no-branch behavior.
   let boundBranchName: string | null = task.branchName ?? null;
   let executionRoot = task.worktreePath ?? project.rootPath;
-  if (!task.isFix && boundBranchName) {
-    const branchError = restoreTaskBranchForMutation(task, executionRoot);
-    if (branchError) return branchError;
-  } else if (!task.isFix && !boundBranchName) {
+  const rootError = restoreTaskBranchForMutation(task, executionRoot);
+  if (rootError) return rootError;
+  if (!task.isFix && !boundBranchName && !task.worktreePath) {
     try {
       const branchResult = ensureFeatureBranch({
         projectRoot: project.rootPath,

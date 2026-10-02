@@ -1199,6 +1199,21 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 34,
+    description: "Local task execution workspace and durable checkpoint intent",
+    sql: `
+      CREATE TABLE task_execution_workspaces (
+        task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        project_root TEXT NOT NULL, worktree_path TEXT NOT NULL UNIQUE,
+        snapshot_commit TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('preparing', 'active', 'checkpoint_prepared', 'checkpointed')),
+        revision INTEGER NOT NULL DEFAULT 0,
+        scope_json TEXT, intent_json TEXT, result_json TEXT
+      );
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {

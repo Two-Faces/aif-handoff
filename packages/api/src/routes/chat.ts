@@ -1,4 +1,4 @@
-import { getPersonalExecutionBlock } from "@aif/data";
+import { getPersonalExecutionBlock, assertProjectExecutionAllowed } from "@aif/data";
 import { Hono } from "hono";
 import { jsonValidator } from "../middleware/zodValidator.js";
 import { z } from "zod";
@@ -1313,6 +1313,9 @@ chatRouter.post("/", jsonValidator(chatRequestSchema), async (c) => {
     if (!project) {
       return c.json({ error: "Project not found" }, 404);
     }
+
+    project.rootPath =
+      assertProjectExecutionAllowed(projectId, taskId, project.rootPath) ?? project.rootPath;
 
     // Resolve currently open task for context injection
     let currentTask: Task | null = null;

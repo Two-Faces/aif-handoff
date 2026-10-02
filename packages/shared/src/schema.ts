@@ -774,3 +774,23 @@ export const syncCheckpointRecords = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.checkpointId, table.ordinal] })],
 );
+
+// Local execution provenance only: never part of the peer board checkpoint.
+export const taskExecutionWorkspaces = sqliteTable("task_execution_workspaces", {
+  taskId: text("task_id")
+    .primaryKey()
+    .references(() => tasks.id, { onDelete: "cascade" }),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  projectRoot: text("project_root").notNull(),
+  worktreePath: text("worktree_path").notNull().unique(),
+  snapshotCommit: text("snapshot_commit").notNull(),
+  state: text("state", {
+    enum: ["preparing", "active", "checkpoint_prepared", "checkpointed"],
+  }).notNull(),
+  revision: integer("revision").notNull().default(0),
+  scopeJson: text("scope_json"),
+  intentJson: text("intent_json"),
+  resultJson: text("result_json"),
+});

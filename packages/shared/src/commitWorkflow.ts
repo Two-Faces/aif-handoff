@@ -7,7 +7,7 @@ export function buildCommitPrompt(shouldPush: boolean): string {
     "You are running the aif-commit workflow. Follow these steps exactly:",
     "",
     "1. Run `git status` to see the current working tree.",
-    "2. Stage ALL changes, including untracked files: run `git add -A` from the project root.",
+    "2. Use only changes already staged by the user. Do not stage, unstage, or modify any files. If the index is empty, stop and ask the user to select the changes to commit.",
     "3. Analyze the staged diff (`git diff --cached`) and draft ONE conventional commit message (feat/fix/chore/docs/refactor/test/perf, optional scope, short subject, body if helpful).",
     "4. Create the commit with `git commit -m ...`. Create exactly one commit. Do not amend.",
     pushLine,
@@ -16,6 +16,6 @@ export function buildCommitPrompt(shouldPush: boolean): string {
     "- Never skip git hooks (no --no-verify).",
     "- Never rewrite history (no rebase, no reset --hard, no amend).",
     "- Never add the `Co-Authored-By` trailer.",
-    "- If there are no changes to commit after `git add -A`, report that and stop — do NOT create an empty commit.",
+    "- If there are no staged changes, report that and stop — do NOT create an empty commit.",
   ].join("\n");
 }

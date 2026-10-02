@@ -5,6 +5,7 @@ import {
   findTaskById,
   listEnabledGitHubRepositories,
   isProjectPublicationAllowed,
+  getTaskExecutionWorkspace,
 } from "@aif/data";
 import { getEnv, logger } from "@aif/shared";
 import { ensureAutoQueueTaskCommit } from "./autoQueueCommit.js";
@@ -82,6 +83,7 @@ function pushBranch(projectRoot: string, branch: string): void {
 }
 
 export async function publishGitHubTask(taskId: string, projectRoot: string): Promise<boolean> {
+  if (getTaskExecutionWorkspace(taskId)) return false;
   const publicationTask = findTaskById(taskId);
   if (publicationTask && !isProjectPublicationAllowed(publicationTask.projectId)) return false;
   if (!getEnv().AIF_GITHUB_ISSUE_PR_ENABLED) {

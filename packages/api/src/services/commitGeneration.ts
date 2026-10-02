@@ -6,7 +6,12 @@ import {
   logger,
   restorePersistedBranch,
 } from "@aif/shared";
-import { findProjectById, findTaskById } from "@aif/data";
+import {
+  findProjectById,
+  findTaskById,
+  getTaskExecutionWorkspace,
+  checkpointTaskExecutionWorkspace,
+} from "@aif/data";
 import { UsageSource } from "@aif/runtime";
 import { runApiRuntimeOneShot } from "./runtime.js";
 import { getPersonalExecutionBlock, isProjectPublicationAllowed } from "@aif/data";
@@ -71,6 +76,17 @@ export async function runCommitQuery(input: RunCommitQueryInput): Promise<RunCom
     };
   }
   const executionRoot = task?.worktreePath ?? project.rootPath;
+  if (task && getTaskExecutionWorkspace(task.id)) {
+    try {
+      checkpointTaskExecutionWorkspace(task.id, `chore: checkpoint ${task.title}`);
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : "Task checkpoint failed",
+      };
+    }
+  }
   if (task?.branchName && !task.isFix) {
     // task.branchName is a source-of-truth contract: commit MUST land on the
     // persisted branch or fail loud. `ensureFeatureBranch({switchOnly:true})`

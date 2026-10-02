@@ -1,4 +1,4 @@
-import { isPersonalProject } from "@aif/data";
+import { isPersonalProject, assertTaskExecutionAllowed } from "@aif/data";
 import {
   clearTaskActiveRuntimeSelection,
   clearTaskRuntimeLimitSnapshot,
@@ -555,9 +555,18 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
     return false;
   }
 
+  let executionRoot: string;
+  try {
+    const requestedRoot = task.worktreePath ?? project.rootPath;
+    executionRoot = assertTaskExecutionAllowed(task.id, requestedRoot) ?? requestedRoot;
+  } catch (error) {
+    log.error({ taskId: task.id, error }, "Task workspace is not ready for execution");
+    return false;
+  }
+
   if (_runtimeRegistry) {
     const initResult = initProject({
-      projectRoot: task.worktreePath ?? project.rootPath,
+      projectRoot: executionRoot,
       registry: _runtimeRegistry,
     });
     if (!initResult.ok) {
@@ -593,7 +602,6 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
   );
 
   try {
-    const executionRoot = task.worktreePath ?? project.rootPath;
     const executionBoundaryTask = findTaskById(task.id);
     if (!executionBoundaryTask || executionBoundaryTask.executionOwner !== "ai") {
       log.warn(
@@ -607,6 +615,8 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
       return false;
     }
     await runStageWithTimeout(stage.runner, task.id, executionRoot, stage.label);
+
+    assertTaskExecutionAllowed(task.id, executionRoot);
 
     flushActivityQueue(task.id);
 

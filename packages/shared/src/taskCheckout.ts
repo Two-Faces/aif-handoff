@@ -26,6 +26,7 @@ export class TaskCheckoutError extends Error {
       | "git_failed"
       | "scope_overlap"
       | "scope_changed"
+      | "invalid_scope"
       | "checkpoint_conflict",
     message: string,
   ) {

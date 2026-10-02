@@ -24,6 +24,7 @@ export function persistTaskPlan(input: PersistTaskPlanInput): { updatedAt: strin
         projectId: tasks.projectId,
         isFix: tasks.isFix,
         planPath: tasks.planPath,
+        worktreePath: tasks.worktreePath,
       })
       .from(tasks)
       .where(eq(tasks.id, input.taskId))
@@ -45,8 +46,8 @@ export function persistTaskPlan(input: PersistTaskPlanInput): { updatedAt: strin
       throw new Error(`Project not found for task ${input.taskId}`);
     }
 
-    projectRoot = project.rootPath;
-    isFix = task.isFix;
+    projectRoot = projectRoot ?? task.worktreePath ?? project.rootPath;
+    isFix = isFix ?? task.isFix;
     planPath = planPath ?? task.planPath;
   }
 

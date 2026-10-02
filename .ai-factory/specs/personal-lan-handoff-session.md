@@ -22,15 +22,19 @@
 Это доработка существующего Handoff: Codex adapter, доска и локальный MCP уже есть.
 Сначала сверяй план с актуальной ревизией. M1 (P01–P09) принят после нативной
 проверки Windows/Mac 02.10.2026 и опубликован пользователем до b523143.
-Продолжай M2 в codex/personal-lan-handoff-m2; подходящий managed worktree
-уже создан, сначала найди и используй его вместо создания ещё одной копии.
-Работающий M1 checkout E:\Projects\aif-handoff и его серверы сохраняй.
+Продолжай M2 в codex/personal-lan-handoff-m2 в E:\Projects\aif-handoff:
+по просьбе пользователя эта ветка теперь открыта в основном checkout/IDEA.
+Вспомогательный managed worktree оставлен detached на c51f3fc; не продолжай
+там старую копию. Слияние M2 в codex/personal-lan-handoff — после готовности M2.
+Нативные M1-серверы и их данные сохраняй; quality gate запускай отдельно.
 В shared добавлены taskCheckout.ts/taskCommit.ts: exact detached checkout,
 scope до начала записи, checkpoint через temporary index и namespaced ref.
-Это primitives, ещё не подключённые к runners. P10 остаётся открытой:
-нужны общий root/scope lifecycle для implementation/fix/QA/commit,
-замена прежнего runtime commit prompt и durable provenance/recovery.
-Не восстанавливай принадлежность dirty files новым scope после restart.
+Local migration v34/taskWorkspaces.ts сохраняет scope до записи и commit intent
+до Git publication. Registered roots подключены к stage/API/chat guards,
+а API/auto-queue checkpoints восстанавливаются по исходному журналу.
+P10 остаётся открытой для onboarding/rotation checkout и native Mac acceptance.
+Не восстанавливай принадлежность dirty files новым scope после restart и
+не подменяй grants/fencing журналом: он не останавливает уже запущенный процесс.
 Далее следуй зависимостям P11–P15. M3/M4 не отмечай готовыми после M2.
 Сохраняй прогресс в указанном плане, не заменяя другие планы.
 

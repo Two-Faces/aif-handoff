@@ -4,6 +4,8 @@ import {
   getAutoQueueMode,
   setTaskFields,
   assertTaskExecutionAllowed,
+  getTaskExecutionWorkspace,
+  checkpointTaskExecutionWorkspace,
 } from "@aif/data";
 import { createRuntimeWorkflowSpec, UsageSource } from "@aif/runtime";
 import {
@@ -109,6 +111,25 @@ export async function ensureAutoQueueTaskCommit(input: {
       "Auto-queue commit skipped for human-owned task",
     );
     return { status: "not_required", commitSha: null };
+  }
+
+  const workspace = getTaskExecutionWorkspace(task.id);
+  if (workspace && (getAutoQueueMode(task.projectId) || task.autoQueueCommitStatus != null)) {
+    try {
+      const result = checkpointTaskExecutionWorkspace(task.id, `chore: checkpoint ${task.title}`);
+      const outcome =
+        result.status === "committed"
+          ? { status: "committed" as const, commitSha: result.commitSha }
+          : { status: "no_changes" as const, commitSha: null };
+      recordCommitOutcome(task.id, outcome);
+      return outcome;
+    } catch (error) {
+      return blockForCommitFailure(
+        task.id,
+        error instanceof Error ? error.message : "Task checkpoint failed",
+        error,
+      );
+    }
   }
 
   if (task.autoQueueCommitStatus === "committed" && task.commitSha) {

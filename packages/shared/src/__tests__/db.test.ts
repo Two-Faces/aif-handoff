@@ -7,7 +7,40 @@ import { eq } from "drizzle-orm";
 import { chatSessions } from "../schema.js";
 import { closeDb, createTestDb, getDb } from "../db.js";
 
-const CURRENT_SCHEMA_VERSION = 33;
+const CURRENT_SCHEMA_VERSION = 34;
+
+it("upgrades a populated v33 database with the local checkpoint journal", () => {
+  closeDb();
+  const path = join(tmpdir(), `aif-workspace-upgrade-${crypto.randomUUID()}.sqlite`);
+  const connections: Database.Database[] = [];
+  try {
+    getDb(path);
+    closeDb();
+    const old = new Database(path);
+    connections.push(old);
+    old.exec("DROP TABLE task_execution_workspaces");
+    old
+      .prepare("INSERT INTO projects (id, name, root_path) VALUES (?, ?, ?)")
+      .run("keep", "Existing", "unchanged-root");
+    old.pragma("user_version = 33");
+    old.close();
+    getDb(path);
+    closeDb();
+    const upgraded = new Database(path, { readonly: true });
+    connections.push(upgraded);
+    expect(upgraded.pragma("user_version", { simple: true })).toBe(34);
+    expect(
+      upgraded.prepare("SELECT count(*) AS count FROM task_execution_workspaces").get(),
+    ).toEqual({ count: 0 });
+    expect(upgraded.prepare("SELECT root_path FROM projects WHERE id = 'keep'").get()).toEqual({
+      root_path: "unchanged-root",
+    });
+  } finally {
+    closeDb();
+    for (const connection of connections) if (connection.open) connection.close();
+    removeSqliteArtifacts(path);
+  }
+});
 
 function removeSqliteArtifacts(dbPath: string): void {
   for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {

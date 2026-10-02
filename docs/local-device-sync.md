@@ -173,9 +173,11 @@ Validation results and the acceptance evidence are recorded in the
 ## M2 implementation in progress: local checkpoint primitives
 
 `@aif/shared` now provides `prepareTaskCheckout`, `assertTaskCheckout`,
-`beginTaskChangeScope` and `commitTaskChanges`. They are internal building blocks;
-the application runners still use the M1 execution guards and have not migrated
-to this lifecycle. This does not enable code transfer or personal AI execution.
+`beginTaskChangeScope` and `commitTaskChanges`, with separate prepare/publish and
+host-only journal serialization helpers. `@aif/data/taskWorkspaces` records these
+in the local `task_execution_workspaces` table (migration v34). These are internal
+building blocks; registration has no public endpoint yet. This does not enable
+code transfer or personal AI execution.
 
 - A checkout is detached at a full immutable commit ID. Its registration binds
   the project, task, repository, path and base commit. Reuse checks this identity
@@ -195,12 +197,28 @@ to this lifecycle. This does not enable code transfer or personal AI execution.
   External filters, LFS attributes, working-tree encodings, submodules and symlinks
   currently produce readiness blockers. Built-in Git line-ending normalization
   is retained. No push, PR or runtime is invoked.
+- Registration stores `preparing` before Git creation, then commits the original
+  scope, `active` state and task root together before execution. A partially
+  prepared checkout with new unclaimed edits is blocked instead of adopted.
+- Checkpointing stores the immutable candidate commit and whitelist as
+  `checkpoint_prepared` **before** advancing the Git ref. Only then does it record
+  `checkpointed`. Recovery validates the original journal, parent/tree/diff, files
+  and ref. If Git publication succeeded before a process died, the retry accepts
+  that same commit; it does not create another one or infer ownership from the
+  current dirty tree. Scope/intent JSON is trusted local storage, never API/peer
+  input, and is not included in board replication.
+- Coordinator, stage runners, fast-fix, QA, task-bound chat and runtime helpers
+  resolve registered roots through the shared execution guard. A prepared/sealed
+  workspace denies new runs. Plan persistence also checks the registration and
+  honors the task root when optional plan metadata is loaded from the database.
+  Registered API/auto-queue commits use the journal directly and GitHub automation
+  declines publication. Legacy interactive commit now uses only user-staged files;
+  its prompt no longer stages the entire checkout.
 - To continue a checkpoint sequence, prepare a fresh checkout from the returned
-  commit. A stale checkout cannot replace a newer task checkpoint. The current
-  in-process scope deliberately cannot be recovered by claiming dirty files after
-  a restart. Durable execution provenance, explicit manual recovery and the shared
-  runner lifecycle are still pending P10/P13/P14 work. Exclusive execution must be
-  supplied by those gates; these helpers are not a filesystem sandbox.
+  commit. Automatic workspace rotation/onboarding and exclusive execution remain
+  P10/P13–P15 integration work. The local journal does not stop a process already
+  running, issue a device grant, or replace stop/fencing checks. These helpers are
+  not a filesystem sandbox; M1 execution denial remains until those gates pass.
 
 The existing standalone worktree helper also stops replaying context on reuse,
 preserves tracked context on creation, and rejects an unrelated repository that
@@ -208,7 +226,8 @@ merely has the same branch name.
 
 Native Windows Git fixtures cover source/index preservation, overlapping staged
 hunks, foreign untracked files, binary and UTF-8 paths, HEAD drift, ref contention,
-linear checkpoint chains and hook/filter non-execution. Native macOS validation
+linear checkpoint chains, hook/filter non-execution, and independent Node process
+recovery after Git publication but before SQLite acknowledgement. Native macOS validation
 of these new primitives remains open, independently of the completed M1 acceptance.
 
 ## Implementation references

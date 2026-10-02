@@ -111,7 +111,8 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
   - Детерминированный ownership/whitelist diff helper; убрать требование prompt `git add -A`; сохранить index/unrelated files. Exact-snapshot root для implementation/fix/QA/commit, а не только условного planner worktree.
   - Context overlay не переписывает mutable reused worktree. Local-only guard протестировать на worker, API helper и GitHub workflow.
   - Проверка: чужие staged hunks/untracked/dirty files, чужая ветка, одинаковое имя ветки с другим HEAD, глобально грязный root, один commit или корректная последовательность task commits. Failure сохраняет исходное состояние.
-  - Осталось подключить общий root/scope lifecycle к planner/implementation/fix/QA/commit, заменить старый runtime commit prompt, сохранить scope/provenance для восстановления после restart. До P13/P14 API и worker personal-проектов остаются закрыты прежними guards; новые primitives сами по себе не разрешают запуск.
+  - **Второй блок:** append-only v34 хранит local workspace, исходный scope и prepared commit intent. Подключены stage/API/chat root guards, запись планов и детерминированные API/auto-queue checkpoints; legacy prompt больше не выполняет `git add -A`. Проверяется восстановление в новом процессе после Git publication до SQLite ACK.
+  - Остались onboarding/rotation checkout между checkpoint и новым run вместе с P13–P15 и native Mac acceptance. До P13/P14 API и worker personal-проектов остаются закрыты прежними guards; внутренний журнал сам по себе не останавливает текущий процесс и не выдаёт execution grant.
 
 - [ ] **P11. Добавить immutable code/context snapshot contract.**
   - Зависимости: P10, P04.
@@ -210,6 +211,18 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
 | AC-16 | P20/P21 | CRM pilot и manifest подключённых checkout |
 
 В планировании проверки кода и native scenarios не выполнялись: функциональности пока нет. При реализации записывать точные команды, результаты и ограничения, а не только отметки checkbox. Ошибки baseline и недоступные среды отделять от регрессий; не ослаблять assertions ради зелёной проверки.
+
+## Второй блок M2 — 02.10.2026
+
+- Работа продолжена в основном `E:\Projects\aif-handoff`, ветка `codex/personal-lan-handoff-m2`, после пользовательского push `c51f3fc`. По договорённости M2 вливается в `codex/personal-lan-handoff` после готовности M2; сейчас слияние и push не выполнялись.
+- Append-only migration v34 добавляет локальный `task_execution_workspaces`: preparing → active → checkpoint_prepared → checkpointed, исходный scope и prepared Git intent. Регистрация с записью scope завершается до запуска runner. Повторное открытие не захватывает уже изменённые файлы как новые собственные изменения. Записи не входят в peer replication.
+- Git preparation и publication разделены. Intent сохраняется в SQLite до CAS служебной ref; recovery проверяет исходные parent/tree/whitelist/состояние файлов. Тест с независимыми Node-процессами останавливает процесс после Git publication, оставляя SQLite без completion ACK: следующий процесс подтверждает тот же SHA, а число task commits остаётся 1.
+- Общий root guard подключён до подготовки coordinator, к шести stage runners, subagentQuery, API runtime, fast-fix, QA/QA Check, task events и task-bound chat. API/auto-queue commits зарегистрированных workspace используют checkpoint без AI runtime; GitHub automation отказывается публиковать такие workspace. После подготовки checkpoint новые исполнения блокируются.
+- Исправлен возврат записи плана в source project root при загрузке отсутствующего `isFix`: scoped root сохраняется, plan persistence проверяет active workspace. Legacy commit prompt использует только уже staged пользователем файлы; автоматического `git add -A` больше нет.
+- Финальный `npm run ai:validate` завершился с exit 0: **3255 passed / 1 existing skipped**, lint 10/10, build 7/7, Chromium 8/8, k6 3/3, protocol check passed. Минимальные coverage-метрики: shared 74.93%, data 73.99%, runtime 73.25%, api 70.92%, agent 76.27%, mcp 86.27%, web 74.49%. Лог `.codex/m2/logs/durable-validated.log`; отдельная fixture DB и порты 3309/5480, временные серверы остановлены. После прогона менялись только поясняющие комментарии и документация.
+- Проверены upgrade v33→v34 с сохранением старых данных, reopening/crash recovery, запрет personal registration до grant gate, неправильный project/root, неизменный scope при повторном открытии, dirty interrupted preparation, запись планов и повторный checkpoint. Старые migration fixtures обновлены до ожидаемой v34; SQLite connections теперь закрываются даже при assertion failure, чтобы Windows cleanup не скрывал исходную ошибку.
+- CHECKLIST root/shared/data/api/agent пройдены: DB boundary соблюдена, новые таблицы локальные, browser exports не затронуты, все consumers собраны. REST/WS request shapes, runtime adapter contracts, UI components/styles и зависимости не менялись; соответствующие Pencil/theme/adapter/Docker пункты неприменимы. Изменение commit behavior описано в API docs.
+- **P10 остаётся открытой** для выбора/rotation следующего checkout и интеграции с grant/onboarding P13–P15, а также native Mac acceptance. Это не stop acknowledgement и не execution grant: уже запущенный процесс журнал не останавливает. Все personal runtime guards M1 сохранены. M1-серверы на 3009/3010/5180 продолжают работать; их БД и native fixtures не использовались quality gate.
 
 ## Первый блок M2 — 02.10.2026
 

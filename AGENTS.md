@@ -120,11 +120,13 @@ administration in `routes/peers.ts` / `routes/personal.ts`. Personal projects ar
 board-only: do not remove execution guards before the M2 grant/fencing gate. See
 `docs/local-device-sync.md` for recovery, mutation inventory and native acceptance.
 
-M2 work in progress adds shared `taskCheckout.ts` / `taskCommit.ts`: exact detached
-checkouts, pre-execution change scopes and local namespaced checkpoint commits.
-These primitives are not yet wired into runners. Scope creation must precede task
-writes; never claim dirty files after restart as task-owned. Keep M1 guards until
-the durable provenance, grant and stop/fencing gates are complete.
+M2 work in progress adds shared `taskCheckout.ts` / `taskCommit.ts` and data
+`taskWorkspaces.ts`: exact detached checkouts, saved pre-execution scopes, and
+prepared checkpoint intents in local migration v34. Registered task roots are
+enforced at stage/API/chat boundaries; their commits use host-controlled snapshot
+plumbing. Restore the original scope after restart; never recapture dirty files.
+Workspace registration is internal pending M2 onboarding/grants. Keep M1 personal
+execution guards until the grant and stop/fencing gates are complete.
 
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |

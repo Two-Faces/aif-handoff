@@ -45,7 +45,7 @@ export function isPlanAlreadyChecklist(text: string): boolean {
 }
 
 export async function runPlanChecker(taskId: string, projectRoot: string): Promise<void> {
-  assertTaskExecutionAllowed(taskId);
+  projectRoot = assertTaskExecutionAllowed(taskId, projectRoot) ?? projectRoot;
   const task = findTaskById(taskId);
 
   if (!task) {

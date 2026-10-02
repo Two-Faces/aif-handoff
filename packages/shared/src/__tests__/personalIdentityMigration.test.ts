@@ -10,10 +10,12 @@ describe("personal identity migration", () => {
     const directory = mkdtempSync(join(tmpdir(), "aif-identity-migration-"));
     const path = join(directory, "db.sqlite");
     closeDb();
+    const connections: Database.Database[] = [];
     try {
       getDb(path);
       closeDb();
       const old = new Database(path);
+      connections.push(old);
       for (const table of [
         "handoff_task_assignments",
         "handoff_participant_bindings",
@@ -56,7 +58,8 @@ describe("personal identity migration", () => {
       getDb(path);
       closeDb();
       const migrated = new Database(path, { readonly: true });
-      expect(migrated.pragma("user_version", { simple: true })).toBe(33);
+      connections.push(migrated);
+      expect(migrated.pragma("user_version", { simple: true })).toBe(34);
       expect(
         migrated
           .prepare(
@@ -101,6 +104,7 @@ describe("personal identity migration", () => {
       migrated.close();
     } finally {
       closeDb();
+      for (const connection of connections) if (connection.open) connection.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });

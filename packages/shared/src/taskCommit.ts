@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { z } from "zod";
 import {
   assertTaskCheckout,
   assertTaskFileAttributes,
@@ -27,6 +28,150 @@ interface ScopeState {
   previousRef: string | null;
 }
 const scopes = new WeakMap<TaskChangeScope, ScopeState>();
+
+const oidSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
+const checkoutSchema = z
+  .object({
+    projectRoot: z.string().min(1),
+    worktreePath: z.string().min(1),
+    projectId: z.string().min(1),
+    taskId: z.string().min(1),
+    snapshotCommit: oidSchema,
+  })
+  .strict();
+const fingerprintSchema = z.string().regex(/^(?:deleted|100(?:644|755):[0-9a-f]{64})$/);
+const foreignSchema = z.tuple([
+  z.string().min(1),
+  z.string().regex(/^(?:deleted|100(?:644|755):[0-9a-f]{64}):[0-9a-f]{64}$/),
+]);
+const scopeSchema = z
+  .object({
+    version: z.literal(1),
+    checkout: checkoutSchema,
+    foreign: z.array(foreignSchema).max(100_000),
+    previousRef: oidSchema.nullable(),
+  })
+  .strict();
+type StoredScope = z.infer<typeof scopeSchema>;
+const intentSchema = z
+  .object({
+    version: z.literal(1),
+    scope: scopeSchema,
+    commitSha: oidSchema.nullable(),
+    treeSha: oidSchema.nullable(),
+    paths: z.array(z.string().min(1)).max(100_000),
+    files: z.array(z.tuple([z.string().min(1), fingerprintSchema])).max(100_000),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      (value.commitSha === null) !== (value.treeSha === null) ||
+      (value.commitSha === null && value.paths.length !== 0)
+    ) {
+      ctx.addIssue({ code: "custom", message: "Inconsistent checkpoint intent" });
+    }
+  });
+type StoredIntent = z.infer<typeof intentSchema>;
+const intentBrand = Symbol("task-commit-intent");
+export interface TaskCommitIntent {
+  readonly [intentBrand]: true;
+}
+const intents = new WeakMap<
+  TaskCommitIntent,
+  { stored: StoredIntent; sourceScope?: TaskChangeScope }
+>();
+
+function scopeRecord(state: ScopeState): StoredScope {
+  return {
+    version: 1,
+    checkout: { ...state.checkout },
+    foreign: [...state.foreign],
+    previousRef: state.previousRef,
+  };
+}
+
+function decodeRecord<T>(json: string, schema: z.ZodType<T>): T {
+  try {
+    if (Buffer.byteLength(json) > 16 * 1024 * 1024) throw new Error("Record too large");
+    return schema.parse(JSON.parse(json));
+  } catch {
+    throw new TaskCheckoutError(
+      "invalid_scope",
+      "Invalid or unsupported local checkpoint journal record.",
+    );
+  }
+}
+
+function validateStoredScope(stored: StoredScope, expected: TaskCheckoutInput): ScopeState {
+  for (const key of Object.keys(expected) as (keyof TaskCheckoutInput)[]) {
+    if (stored.checkout[key] !== expected[key])
+      throw new TaskCheckoutError(
+        "identity_mismatch",
+        "The saved scope belongs to another checkout.",
+      );
+  }
+  if (
+    new Set(stored.foreign.map(([path]) => path)).size !== stored.foreign.length ||
+    (stored.previousRef !== null && stored.previousRef !== stored.checkout.snapshotCommit)
+  ) {
+    throw new TaskCheckoutError("invalid_scope", "Invalid pre-execution scope baseline.");
+  }
+  assertTaskCheckout(expected);
+  return {
+    checkout: stored.checkout,
+    foreign: new Map(stored.foreign),
+    ref: taskCheckpointRef(expected),
+    previousRef: stored.previousRef,
+  };
+}
+
+/** Host-only persistence interface. Never accept this JSON from an API, peer or
+ * model: ownership provenance must come from the local database journal. */
+export function serializeTaskChangeScope(scope: TaskChangeScope): string {
+  const state = scopes.get(scope);
+  if (!state) throw new TaskCheckoutError("invalid_scope", "Unknown task change scope.");
+  return JSON.stringify(scopeRecord(state));
+}
+
+export function restoreTaskChangeScope(json: string, expected: TaskCheckoutInput): TaskChangeScope {
+  const state = validateStoredScope(decodeRecord(json, scopeSchema), expected);
+  const token = Object.freeze({ [scopeBrand]: true as const });
+  scopes.set(token, state);
+  return token;
+}
+
+function saveIntent(stored: StoredIntent, sourceScope?: TaskChangeScope): TaskCommitIntent {
+  const token = Object.freeze({ [intentBrand]: true as const });
+  intents.set(token, { stored, sourceScope });
+  return token;
+}
+
+export function serializeTaskCommitIntent(intent: TaskCommitIntent): string {
+  const state = intents.get(intent);
+  if (!state) throw new TaskCheckoutError("invalid_scope", "Unknown checkpoint intent.");
+  return JSON.stringify(state.stored);
+}
+
+export function restoreTaskCommitIntent(
+  json: string,
+  expected: TaskCheckoutInput,
+): TaskCommitIntent {
+  const stored = decodeRecord(json, intentSchema);
+  validateStoredScope(stored.scope, expected);
+  const filePaths = new Set(stored.files.map(([path]) => path));
+  if (
+    filePaths.size !== stored.files.length ||
+    new Set(stored.paths).size !== stored.paths.length ||
+    stored.paths.some((path) => !filePaths.has(path)) ||
+    stored.files.some(([path]) => stored.scope.foreign.some(([foreign]) => foreign === path))
+  ) {
+    throw new TaskCheckoutError(
+      "invalid_scope",
+      "The saved checkpoint contains overlapping or duplicate paths.",
+    );
+  }
+  return saveIntent(stored);
+}
 
 function nulPaths(output: Buffer): string[] {
   const text = output.toString("utf8");
@@ -147,10 +292,13 @@ function currentRef(checkout: TaskCheckoutInput, ref: string): string | null {
 
 /** Call before the task writes. Existing dirty/staged/untracked paths are foreign.
  * The opaque scope cannot be reconstructed from a model's proposed file list.
- * Restart recovery must create a new checkout from the last accepted checkpoint;
- * it must not claim dirty files by opening a new scope after execution.
+ * Persist serializeTaskChangeScope() before allowing writes. Restart recovery
+ * restores that exact baseline; it never captures a new baseline after execution.
  */
-export function beginTaskChangeScope(input: TaskCheckoutInput): TaskChangeScope {
+export function beginTaskChangeScope(
+  input: TaskCheckoutInput,
+  options: { requireClean?: boolean } = {},
+): TaskChangeScope {
   assertTaskCheckout(input);
   const checkout = { ...input };
   const ref = taskCheckpointRef(checkout);
@@ -167,6 +315,12 @@ export function beginTaskChangeScope(input: TaskCheckoutInput): TaskChangeScope 
       foreignFingerprint(checkout.worktreePath, path),
     ]),
   );
+  if (options.requireClean && foreign.size !== 0) {
+    throw new TaskCheckoutError(
+      "scope_overlap",
+      "A new execution workspace must be clean before its first scope is recorded.",
+    );
+  }
   const token = Object.freeze({ [scopeBrand]: true as const });
   scopes.set(token, { checkout, foreign, ref, previousRef });
   return token;
@@ -176,12 +330,12 @@ export type TaskCommitResult =
   | { status: "no_changes"; commitSha: null; paths: string[] }
   | { status: "committed"; commitSha: string; parentSha: string; ref: string; paths: string[] };
 
-/** Create a local checkpoint object and CAS only refs/aif/tasks/... . HEAD,
- * branches, index and all checkout files remain byte-for-byte untouched.
+/** Build a local checkpoint object and publication intent without advancing refs.
+ * Persist the intent before publishTaskCommit(); HEAD, branches, index and files stay untouched.
  * This is snapshot plumbing, not a general git-commit replacement: no project
  * hooks, runtime, filters, push, or PR publication execute here.
  */
-export function commitTaskChanges(scope: TaskChangeScope, message: string): TaskCommitResult {
+export function prepareTaskCommit(scope: TaskChangeScope, message: string): TaskCommitIntent {
   const state = scopes.get(scope);
   if (!state)
     throw new TaskCheckoutError(
@@ -211,7 +365,12 @@ export function commitTaskChanges(scope: TaskChangeScope, message: string): Task
     );
   }
   const paths = dirtyPaths(root).filter((path) => !foreign.has(path));
-  if (paths.length === 0) return { status: "no_changes", commitSha: null, paths: [] };
+  const emptyIntent = (files: [string, string][] = []): TaskCommitIntent =>
+    saveIntent(
+      { version: 1, scope: scopeRecord(state), commitSha: null, treeSha: null, paths: [], files },
+      scope,
+    );
+  if (paths.length === 0) return emptyIntent();
   const files = new Map(paths.map((path) => [path, fileState(root, path)]));
   return withTaskIndex(root, (indexFile) => {
     taskGit(root, ["read-tree", checkout.snapshotCommit], { indexFile });
@@ -244,7 +403,8 @@ export function commitTaskChanges(scope: TaskChangeScope, message: string): Task
         "--",
       ]).output,
     ).sort();
-    if (actualPaths.length === 0) return { status: "no_changes", commitSha: null, paths: [] };
+    if (actualPaths.length === 0)
+      return emptyIntent([...files].map(([path, file]) => [path, file.fingerprint]));
     if (actualPaths.some((path) => !files.has(path))) {
       throw new TaskCheckoutError(
         "scope_changed",
@@ -274,29 +434,125 @@ export function commitTaskChanges(scope: TaskChangeScope, message: string): Task
           `Pre-existing edit changed while checkpointing: ${path}`,
         );
     }
-    const publish = taskGit(
+    return saveIntent(
+      {
+        version: 1,
+        scope: scopeRecord(state),
+        commitSha,
+        treeSha: tree,
+        paths: actualPaths,
+        files: [...files].map(([path, file]) => [path, file.fingerprint]),
+      },
+      scope,
+    );
+  });
+}
+
+/** Persist the prepared intent before this call. Retrying the same journalled
+ * intent accepts its already-published ref, but never advances a different head. */
+export function publishTaskCommit(intent: TaskCommitIntent): TaskCommitResult {
+  const state = intents.get(intent);
+  if (!state) throw new TaskCheckoutError("invalid_scope", "Unknown checkpoint intent.");
+  const { stored } = state;
+  const { checkout, foreign, ref, previousRef } = validateStoredScope(
+    stored.scope,
+    stored.scope.checkout,
+  );
+  const root = checkout.worktreePath;
+  for (const [path, fingerprint] of foreign) {
+    if (foreignFingerprint(root, path) !== fingerprint)
+      throw new TaskCheckoutError(
+        "scope_overlap",
+        `Pre-existing changes differ from the saved scope: ${path}`,
+      );
+  }
+  const owned = dirtyPaths(root).filter((path) => !foreign.has(path));
+  if (owned.some((path) => !stored.files.some(([file]) => file === path))) {
+    throw new TaskCheckoutError(
+      "scope_changed",
+      "New task changes appeared after checkpoint preparation.",
+    );
+  }
+  for (const [path, fingerprint] of stored.files) {
+    if (fileState(root, path).fingerprint !== fingerprint)
+      throw new TaskCheckoutError(
+        "scope_changed",
+        `Task changes differ from the prepared checkpoint: ${path}`,
+      );
+  }
+  const current = currentRef(checkout, ref);
+  if (stored.commitSha === null) {
+    if (current !== previousRef)
+      throw new TaskCheckoutError(
+        "checkpoint_conflict",
+        "The task ref advanced during an empty checkpoint.",
+      );
+    return { status: "no_changes", commitSha: null, paths: [] };
+  }
+  const parents = taskGit(root, ["rev-list", "--parents", "-n", "1", stored.commitSha])
+    .output.toString()
+    .trim()
+    .split(" ");
+  const tree = taskGit(root, ["rev-parse", `${stored.commitSha}^{tree}`])
+    .output.toString()
+    .trim();
+  const actualPaths = nulPaths(
+    taskGit(root, [
+      "diff-tree",
+      "--no-commit-id",
+      "--no-renames",
+      "--name-only",
+      "-r",
+      "-z",
+      checkout.snapshotCommit,
+      stored.commitSha,
+      "--",
+    ]).output,
+  ).sort();
+  if (
+    parents.length !== 2 ||
+    parents[1] !== checkout.snapshotCommit ||
+    tree !== stored.treeSha ||
+    JSON.stringify(actualPaths) !== JSON.stringify(stored.paths)
+  ) {
+    throw new TaskCheckoutError(
+      "invalid_scope",
+      "The saved checkpoint does not match its parent, tree or whitelist.",
+    );
+  }
+  if (current !== stored.commitSha) {
+    if (current !== previousRef)
+      throw new TaskCheckoutError(
+        "checkpoint_conflict",
+        "The checkpoint ref advanced to another commit.",
+      );
+    const published = taskGit(
       root,
       [
         "update-ref",
         "--no-deref",
         ref,
-        commitSha,
+        stored.commitSha,
         previousRef ?? "0".repeat(checkout.snapshotCommit.length),
       ],
       { allowFailure: true },
     );
-    if (publish.status !== 0)
+    if (published.status !== 0)
       throw new TaskCheckoutError(
         "checkpoint_conflict",
-        "The checkpoint ref could not be advanced atomically. Inspect the task ref before retrying.",
+        "The checkpoint ref could not be advanced atomically.",
       );
-    scopes.delete(scope);
-    return {
-      status: "committed",
-      commitSha,
-      parentSha: checkout.snapshotCommit,
-      ref,
-      paths: actualPaths,
-    };
-  });
+  }
+  if (state.sourceScope) scopes.delete(state.sourceScope);
+  return {
+    status: "committed",
+    commitSha: stored.commitSha,
+    parentSha: checkout.snapshotCommit,
+    ref,
+    paths: stored.paths,
+  };
+}
+
+export function commitTaskChanges(scope: TaskChangeScope, message: string): TaskCommitResult {
+  return publishTaskCommit(prepareTaskCommit(scope, message));
 }

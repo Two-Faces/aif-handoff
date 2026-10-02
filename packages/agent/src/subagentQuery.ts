@@ -838,8 +838,10 @@ function buildExecutionIntent(
 export async function executeSubagentQuery(
   options: SubagentQueryOptions,
 ): Promise<SubagentQueryResult> {
-  const { taskId, projectRoot, agentName } = options;
-  assertTaskExecutionAllowed(taskId);
+  const { taskId, agentName } = options;
+  const projectRoot =
+    assertTaskExecutionAllowed(taskId, options.projectRoot) ?? options.projectRoot;
+  options = { ...options, projectRoot };
   assertAiExecutionOwner(taskId);
   const stderrCollector = createStderrCollector();
   const heartbeatTimer = startHeartbeat(taskId);

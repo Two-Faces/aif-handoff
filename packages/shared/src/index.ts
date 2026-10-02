@@ -20,6 +20,7 @@ export {
   syncPeers,
   syncPeerProjects,
   syncInvitations,
+  taskExecutionWorkspaces,
   appSettings,
   participants,
   participantSessions,
@@ -275,7 +276,14 @@ export {
 export {
   beginTaskChangeScope,
   commitTaskChanges,
+  prepareTaskCommit,
+  publishTaskCommit,
+  serializeTaskChangeScope,
+  restoreTaskChangeScope,
+  serializeTaskCommitIntent,
+  restoreTaskCommitIntent,
   type TaskChangeScope,
+  type TaskCommitIntent,
   type TaskCommitResult,
 } from "./taskCommit.js";
 

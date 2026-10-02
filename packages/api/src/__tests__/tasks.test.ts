@@ -1916,7 +1916,8 @@ describe("tasks API", () => {
         mockRunApiRuntimeOneShot.mock.calls[mockRunApiRuntimeOneShot.mock.calls.length - 1][0];
       expect(callArgs.workflowKind).toBe("commit");
       expect(callArgs.fallbackSlashCommand).toBe("/aif-commit");
-      expect(callArgs.prompt).toContain("git add -A");
+      expect(callArgs.prompt).toContain("already staged by the user");
+      expect(callArgs.prompt).not.toContain("git add -A");
     });
 
     it("should broadcast task:commit_failed when runtime throws", async () => {

@@ -24,7 +24,17 @@ import {
   TaskCheckoutError,
   type TaskCheckoutInput,
 } from "../taskCheckout.js";
-import { beginTaskChangeScope, commitTaskChanges, type TaskChangeScope } from "../taskCommit.js";
+import {
+  beginTaskChangeScope,
+  commitTaskChanges,
+  prepareTaskCommit,
+  publishTaskCommit,
+  serializeTaskChangeScope,
+  restoreTaskChangeScope,
+  serializeTaskCommitIntent,
+  restoreTaskCommitIntent,
+  type TaskChangeScope,
+} from "../taskCommit.js";
 
 const TIMEOUT = 20_000;
 function git(root: string, ...args: string[]): string {
@@ -99,6 +109,94 @@ describe("exact task checkouts and scoped checkpoint commits", () => {
     expect(resolve(directory).startsWith(realpathSync.native(tmpdir()))).toBe(true);
     rmSync(directory, { recursive: true, force: true });
   });
+
+  it(
+    "restores the pre-execution whitelist instead of adopting the current dirty tree",
+    () => {
+      prepareTaskCheckout(checkout);
+      write(checkout.worktreePath, "foreign.txt", "preexisting edit\n");
+      const json = serializeTaskChangeScope(beginTaskChangeScope(checkout));
+      write(checkout.worktreePath, "task.txt", "owned after baseline\n");
+      const restored = restoreTaskChangeScope(json, checkout);
+      const result = commitTaskChanges(restored, "restored scope");
+      if (result.status !== "committed") throw new Error("Expected checkpoint");
+      expect(result.paths).toEqual(["task.txt"]);
+      expect(git(source, "show", `${result.commitSha}:foreign.txt`)).toBe("base foreign");
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "persists intent before publication and recovers the same commit after a lost acknowledgement",
+    () => {
+      prepareTaskCheckout(checkout);
+      const scope = beginTaskChangeScope(checkout);
+      write(checkout.worktreePath, "task.txt", "durable task\n");
+      const intent = prepareTaskCommit(scope, "durable checkpoint");
+      const json = serializeTaskCommitIntent(intent);
+      expect(git(source, "for-each-ref", "refs/aif")).toBe("");
+      const first = publishTaskCommit(restoreTaskCommitIntent(json, checkout));
+      const recovered = publishTaskCommit(restoreTaskCommitIntent(json, checkout));
+      expect(recovered).toEqual(first);
+      if (first.status !== "committed") throw new Error("Expected checkpoint");
+      expect(
+        git(source, "rev-list", "--count", `${checkout.snapshotCommit}..${first.commitSha}`),
+      ).toBe("1");
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "rejects corrupt, cross-task and overlapping saved provenance",
+    () => {
+      prepareTaskCheckout(checkout);
+      const scopeJson = serializeTaskChangeScope(beginTaskChangeScope(checkout));
+      expectCode(() => restoreTaskChangeScope("null", checkout), "invalid_scope");
+      expectCode(
+        () => restoreTaskChangeScope(scopeJson, { ...checkout, taskId: "other" }),
+        "identity_mismatch",
+      );
+      const invalid = JSON.parse(scopeJson);
+      invalid.version = 2;
+      expectCode(() => restoreTaskChangeScope(JSON.stringify(invalid), checkout), "invalid_scope");
+      write(checkout.worktreePath, "task.txt", "prepared\n");
+      const intentJson = serializeTaskCommitIntent(
+        prepareTaskCommit(restoreTaskChangeScope(scopeJson, checkout), "prepare"),
+      );
+      const duplicated = JSON.parse(intentJson);
+      duplicated.paths.push(duplicated.paths[0]);
+      expectCode(
+        () => restoreTaskCommitIntent(JSON.stringify(duplicated), checkout),
+        "invalid_scope",
+      );
+      const tampered = JSON.parse(intentJson);
+      tampered.treeSha = "0".repeat(40);
+      expectCode(
+        () => publishTaskCommit(restoreTaskCommitIntent(JSON.stringify(tampered), checkout)),
+        "invalid_scope",
+      );
+      expect(git(source, "for-each-ref", "refs/aif")).toBe("");
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "does not publish an old intent after further task writes or overlapping foreign edits",
+    () => {
+      prepareTaskCheckout(checkout);
+      write(checkout.worktreePath, "foreign.txt", "foreign\n");
+      const scope = beginTaskChangeScope(checkout);
+      write(checkout.worktreePath, "task.txt", "prepared\n");
+      const intent = prepareTaskCommit(scope, "prepared");
+      write(checkout.worktreePath, "later.txt", "arrived too late\n");
+      expectCode(() => publishTaskCommit(intent), "scope_changed");
+      unlinkSync(join(checkout.worktreePath, "later.txt"));
+      write(checkout.worktreePath, "foreign.txt", "overlapped\n");
+      expectCode(() => publishTaskCommit(intent), "scope_overlap");
+      expect(git(source, "for-each-ref", "refs/aif")).toBe("");
+    },
+    TIMEOUT,
+  );
 
   it(
     "creates a detached exact snapshot without touching dirty source state or copying mutable context",

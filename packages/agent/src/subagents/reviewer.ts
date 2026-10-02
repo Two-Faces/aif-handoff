@@ -58,7 +58,7 @@ async function runSidecar(
 }
 
 export async function runReviewer(taskId: string, projectRoot: string): Promise<void> {
-  assertTaskExecutionAllowed(taskId);
+  projectRoot = assertTaskExecutionAllowed(taskId, projectRoot) ?? projectRoot;
   const env = getEnv();
   const task = findTaskById(taskId);
 

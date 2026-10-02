@@ -1,3 +1,6 @@
+export * from "./taskWorkspaces.js";
+import { getTaskExecutionWorkspace, resolveRegisteredTaskRoot } from "./taskWorkspaces.js";
+
 import {
   and,
   asc,
@@ -2226,12 +2229,16 @@ export function persistTaskPlanForTask(input: {
           .run();
         return { updatedAt };
       }
+      const workspace = getTaskExecutionWorkspace(input.taskId);
+      const executionRoot = workspace
+        ? resolveRegisteredTaskRoot(input.taskId, input.projectRoot ?? workspace.worktreePath)
+        : input.projectRoot;
       return persistTaskPlan({
         db: getDb(),
         taskId: input.taskId,
         planText: input.planText,
         updatedAt: input.updatedAt,
-        projectRoot: input.projectRoot,
+        projectRoot: executionRoot,
         isFix: input.isFix,
         planPath: input.planPath,
       });

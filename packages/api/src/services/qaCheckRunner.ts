@@ -1,6 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { findTaskById, updateTask, getPersonalExecutionBlock } from "@aif/data";
+import {
+  findTaskById,
+  updateTask,
+  getPersonalExecutionBlock,
+  assertTaskExecutionAllowed,
+} from "@aif/data";
 import { createRuntimeWorkflowSpec, RuntimeExecutionError, UsageSource } from "@aif/runtime";
 import { getEnv, logger } from "@aif/shared";
 import { toTaskBroadcastPayload } from "../repositories/tasks.js";
@@ -133,7 +138,8 @@ export function buildQaCheckPrompt(input: {
 
 /** Execute ready aif-qa test cases and persist qa-check.md. Never throws. */
 export async function runQaCheckQuery(input: RunQaCheckQueryInput): Promise<RunQaCheckQueryResult> {
-  const { projectId, taskId, executionRoot } = input;
+  const { projectId, taskId } = input;
+  let executionRoot = input.executionRoot;
   const blocked = getPersonalExecutionBlock(projectId, taskId);
   if (blocked) return { ok: false, ...blocked };
   const task = findTaskById(taskId);
@@ -156,6 +162,7 @@ export async function runQaCheckQuery(input: RunQaCheckQueryInput): Promise<RunQ
   }
 
   try {
+    executionRoot = assertTaskExecutionAllowed(taskId, executionRoot) ?? executionRoot;
     const { artifactDir, branch, branchSlug } = resolveQaArtifactDir(
       task.branchName,
       executionRoot,
@@ -168,7 +175,7 @@ export async function runQaCheckQuery(input: RunQaCheckQueryInput): Promise<RunQ
       log.info({ taskId, testCasesPath }, "Restored missing QA test-cases artifact from task");
     }
 
-    const playwrightMcp = await checkPlaywrightMcp(input);
+    const playwrightMcp = await checkPlaywrightMcp({ ...input, executionRoot });
     updateTask(taskId, { qaCheckPlaywrightConfigured: playwrightMcp.configured });
     broadcastTaskUpdate(taskId);
     rmSync(reportPath, { force: true });

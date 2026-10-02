@@ -62,7 +62,10 @@ function formatLatestCommentForPrompt(comment: FastFixComment): string {
 }
 
 export async function runFastFixQuery(input: RunFastFixQueryInput): Promise<string> {
-  assertTaskExecutionAllowed(input.taskId);
+  input = {
+    ...input,
+    projectRoot: assertTaskExecutionAllowed(input.taskId, input.projectRoot) ?? input.projectRoot,
+  };
   const task = findTaskById(input.taskId);
   if (!task) {
     throw new Error(`Task ${input.taskId} not found for fast fix runtime resolution`);

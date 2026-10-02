@@ -39,7 +39,7 @@ function extractVerifyGateResult(resultText: string): VerifyGateResult | null {
 }
 
 export async function runVerifier(taskId: string, projectRoot: string): Promise<void> {
-  assertTaskExecutionAllowed(taskId);
+  projectRoot = assertTaskExecutionAllowed(taskId, projectRoot) ?? projectRoot;
   const task = findTaskById(taskId);
 
   if (!task) {

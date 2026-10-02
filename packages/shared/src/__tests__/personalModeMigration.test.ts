@@ -10,10 +10,12 @@ describe("personal policy migration", () => {
     const root = mkdtempSync(join(tmpdir(), "aif-personal-migrate-"));
     const path = join(root, "db.sqlite");
     closeDb();
+    const connections: Database.Database[] = [];
     try {
       getDb(path);
       closeDb();
       const old = new Database(path);
+      connections.push(old);
       old.exec("ALTER TABLE projects DROP COLUMN personal_mode");
       old.exec("ALTER TABLE projects DROP COLUMN publication_policy");
       old
@@ -27,7 +29,8 @@ describe("personal policy migration", () => {
       getDb(path);
       closeDb();
       const migrated = new Database(path);
-      expect(migrated.pragma("user_version", { simple: true })).toBe(33);
+      connections.push(migrated);
+      expect(migrated.pragma("user_version", { simple: true })).toBe(34);
       expect(
         migrated
           .prepare("SELECT personal_mode, publication_policy FROM projects WHERE id = ?")
@@ -45,6 +48,7 @@ describe("personal policy migration", () => {
       getDb(path);
       closeDb();
       const restored = new Database(path, { readonly: true });
+      connections.push(restored);
       expect(
         restored
           .prepare("SELECT personal_mode, publication_policy FROM projects WHERE id = ?")
@@ -53,6 +57,7 @@ describe("personal policy migration", () => {
       restored.close();
     } finally {
       closeDb();
+      for (const connection of connections) if (connection.open) connection.close();
       rmSync(root, { recursive: true, force: true });
     }
   });

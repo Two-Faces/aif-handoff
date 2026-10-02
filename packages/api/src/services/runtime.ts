@@ -634,7 +634,12 @@ export async function runApiRuntimeOneShot(input: {
   result: RuntimeRunResult;
   context: RuntimeExecutionContext;
 }> {
-  assertProjectExecutionAllowed(input.projectId, input.taskId);
+  input = {
+    ...input,
+    projectRoot:
+      assertProjectExecutionAllowed(input.projectId, input.taskId, input.projectRoot) ??
+      input.projectRoot,
+  };
   const env = getEnv();
   const workflow = createRuntimeWorkflowSpec({
     workflowKind: input.workflowKind ?? "oneshot",

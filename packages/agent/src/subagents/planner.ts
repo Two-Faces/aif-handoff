@@ -130,7 +130,7 @@ function buildFixCommandText(taskContext: string): string {
 }
 
 export async function runPlanner(taskId: string, projectRoot: string): Promise<void> {
-  assertTaskExecutionAllowed(taskId);
+  projectRoot = assertTaskExecutionAllowed(taskId, projectRoot) ?? projectRoot;
   const task = findTaskById(taskId);
   const comments = listTaskComments(taskId).sort(
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
