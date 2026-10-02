@@ -33,6 +33,9 @@ import {
   restoreTaskChangeScope,
   serializeTaskCommitIntent,
   restoreTaskCommitIntent,
+  preparedTaskCommitSha,
+  preparedTaskCheckpointRefTarget,
+  adoptTransferredTaskCheckpoint,
   type TaskChangeScope,
 } from "../taskCommit.js";
 
@@ -79,6 +82,72 @@ describe("exact task checkouts and scoped checkpoint commits", () => {
   let directory: string;
   let source: string;
   let checkout: TaskCheckoutInput;
+  it(
+    "adopts a received checkpoint by CAS without user ref/index changes and repeats after a lost acknowledgement",
+    () => {
+      prepareTaskCheckout(checkout);
+      const empty = prepareTaskCommit(beginTaskChangeScope(checkout), "empty");
+      expect(preparedTaskCommitSha(empty)).toBe(checkout.snapshotCommit);
+      expect(preparedTaskCheckpointRefTarget(empty)).toBeNull();
+      expectCode(() => preparedTaskCommitSha({} as never), "invalid_scope");
+      expectCode(() => preparedTaskCheckpointRefTarget({} as never), "invalid_scope");
+      const scope = beginTaskChangeScope(checkout);
+      write(checkout.worktreePath, "task.txt", "received change\n");
+      const intent = prepareTaskCommit(scope, "received checkpoint");
+      const received = {
+        ...checkout,
+        worktreePath: join(directory, "received"),
+        snapshotCommit: preparedTaskCommitSha(intent),
+      };
+      prepareTaskCheckout(received);
+      const before = state(source);
+      write(source, ".git/hooks/reference-transaction", "#!/bin/sh\nexit 19\n");
+      chmodSync(join(source, ".git/hooks/reference-transaction"), 0o755);
+      adoptTransferredTaskCheckpoint(received, null, checkout.snapshotCommit);
+      adoptTransferredTaskCheckpoint(received, null, checkout.snapshotCommit);
+      expect(git(source, "rev-parse", taskCheckpointRef(received))).toBe(received.snapshotCommit);
+      expect(state(source)).toEqual(before);
+      expect(() => beginTaskChangeScope(received, { requireClean: true })).not.toThrow();
+    },
+    TIMEOUT,
+  );
+  it(
+    "rejects unrelated checkpoint ancestry, aliases and an unexpected local checkpoint",
+    () => {
+      prepareTaskCheckout(checkout);
+      const tree = git(source, "rev-parse", `${checkout.snapshotCommit}^{tree}`);
+      const orphan = git(
+        source,
+        "-c",
+        "commit.gpgsign=false",
+        "commit-tree",
+        tree,
+        "-m",
+        "unrelated",
+      );
+      const received = {
+        ...checkout,
+        worktreePath: join(directory, "received"),
+        snapshotCommit: orphan,
+      };
+      prepareTaskCheckout(received);
+      const ref = taskCheckpointRef(checkout);
+      git(source, "update-ref", ref, checkout.snapshotCommit);
+      expectCode(
+        () => adoptTransferredTaskCheckpoint(received, checkout.snapshotCommit),
+        "checkpoint_conflict",
+      );
+      expectCode(() => adoptTransferredTaskCheckpoint(received, null), "checkpoint_conflict");
+      expectCode(() => adoptTransferredTaskCheckpoint(received, "invalid"), "invalid_scope");
+      git(source, "symbolic-ref", ref, "refs/heads/main");
+      expectCode(
+        () => adoptTransferredTaskCheckpoint(received, checkout.snapshotCommit),
+        "checkpoint_conflict",
+      );
+      expect(git(source, "rev-parse", "main")).toBe(checkout.snapshotCommit);
+    },
+    TIMEOUT,
+  );
   beforeEach(() => {
     directory = realpathSync.native(mkdtempSync(join(tmpdir(), "aif-task-checkpoint-")));
     source = join(directory, "source");

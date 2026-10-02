@@ -14,6 +14,7 @@ import {
   projects,
   localDevice,
   taskExecutionWorkspaces,
+  taskDeviceHandoffs,
   type TaskDeviceGrant,
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
@@ -57,7 +58,7 @@ function requireTask(taskId: string) {
   if (!task?.projectId) return fail("grant_invalid");
   return task;
 }
-function inputDigest(task: typeof tasks.$inferSelect): string {
+export function taskExecutionInputDigest(task: typeof tasks.$inferSelect): string {
   const keys = [
     "title",
     "description",
@@ -80,6 +81,25 @@ function inputDigest(task: typeof tasks.$inferSelect): string {
   return createHash("sha256")
     .update(canonicalJson(Object.fromEntries(keys.map((key) => [key, task[key]]))))
     .digest("hex");
+}
+const inputDigest = taskExecutionInputDigest;
+
+/** A requested handoff fences old callbacks and new starts, without changing
+ * the grant owner or inventing a stop acknowledgement. */
+function assertNoHandoff(taskId: string, grant: string): void {
+  const row = getDb()
+    .select({ id: taskDeviceHandoffs.id })
+    .from(taskDeviceHandoffs)
+    .where(
+      and(
+        eq(taskDeviceHandoffs.taskId, taskId),
+        eq(taskDeviceHandoffs.expectedGrantId, grant),
+        eq(taskDeviceHandoffs.direction, "outgoing"),
+        sql`${taskDeviceHandoffs.phase} IN ('requested','quiescing','checkpointed')`,
+      ),
+    )
+    .get();
+  if (row) fail("run_handoff_pending");
 }
 function assertUnconflictedInputs(projectId: string, taskId: string): void {
   const versions = readSyncVersions(projectId, "task", taskId);
@@ -331,6 +351,7 @@ export function receiveTaskDeviceSuccessor(peerDeviceId: string, value: unknown)
 }
 
 function assertRun(run: Readonly<Run>, taskId: string, root?: string, completion = false): void {
+  assertNoHandoff(taskId, run.grantId);
   const head = getTaskDeviceGrant(taskId);
   const saved = getTaskDeviceRun(run.id);
   const task = requireTask(taskId);
@@ -465,6 +486,7 @@ export async function withTaskDeviceExecution<T>(
   const inherited = execution.getStore();
   if (inherited) assertRun(inherited.run, task.id);
   else if (head) {
+    if (head.state === "accepted") return fail("run_continuation_required");
     if (head.state !== "owned") return fail("grant_not_ready");
     if (head.ownerDeviceId !== getLocalDevice().deviceId) return fail("grant_not_owned");
     if (head.activeRunId) return fail("run_busy");
@@ -487,10 +509,12 @@ export async function withTaskDeviceExecution<T>(
   const run = getDb().transaction(() => {
     const current = getTaskDeviceGrant(task.id);
     if (!current) return fail("grant_missing");
+    if (current.state === "accepted") return fail("run_continuation_required");
     if (current.state !== "owned") return fail("grant_not_ready");
     if (current.ownerDeviceId !== getLocalDevice().deviceId) return fail("grant_not_owned");
     if (current.activeRunId) return fail("run_busy");
     assertHeadAuthority(current);
+    assertNoHandoff(task.id, current.grantId);
     assertUnconflictedInputs(current.projectId, task.id);
     const fresh = requireTask(task.id);
     if (fresh.projectId !== current.projectId || fresh.executionOwner !== "ai")
@@ -774,6 +798,11 @@ export function availableTaskDeviceFilter() {
       AND ${taskDeviceGrantHeads.ownerDeviceId} = (SELECT ${localDevice.deviceId} FROM ${localDevice} WHERE ${localDevice.slot} = 1)
       AND ${taskExecutionWorkspaces.state} = 'active'
       AND ${taskExecutionWorkspaces.worktreePath} = ${tasks.worktreePath} AND ${tasks.branchName} IS NULL
+      AND NOT EXISTS (SELECT 1 FROM ${taskDeviceHandoffs}
+        WHERE ${taskDeviceHandoffs.taskId} = ${tasks.id}
+          AND ${taskDeviceHandoffs.expectedGrantId} = ${taskDeviceGrantHeads.grantId}
+          AND ${taskDeviceHandoffs.direction} = 'outgoing'
+          AND ${taskDeviceHandoffs.phase} IN ('requested','quiescing','checkpointed'))
   ))`;
 }
 export function currentTaskDeviceFilter(allowAvailable = false) {

@@ -149,6 +149,17 @@ task, grant, checkout and runtime identity; project warmups are not reused.
 Personal AI remains disabled. Do not expose enrollment/release/accept as REST/MCP
 actions or enable personal AI before P14 and native M2 acceptance are complete.
 
+P14 foundation adds `handoff/deviceHandoff.ts`, data `deviceHandoff.ts` /
+`deviceHandoffScope.ts` and local migration v39. Manual handoff freezes checkpoint
+intent/context before acknowledgement, atomically relinquishes authority, stages
+pinned-peer offers, and accepts a verified local snapshot in a fresh checkout.
+The new grant-head `accepted` state is deliberately non-executable (including to
+older runners); only a future explicit P15 continuation may promote it to `owned`.
+Manual confirmation requires a local admin, human ownership and no managed run
+history for the current grant. It cannot substitute for runtime process-tree stop.
+Native supervisor/recovery remains open in P14; there are no browser/MCP handoff
+actions or automatic delivery/acceptance/runtime launches in this increment.
+
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |
 | `packages/api/src/index.ts`             | API server entry (Hono, port 3009)    |

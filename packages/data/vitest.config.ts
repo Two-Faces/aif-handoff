@@ -2,6 +2,9 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    // Native Git fixture files compete for Windows process startup resources.
+    // Serialize files, retaining all explicit concurrent-process scenarios.
+    fileParallelism: process.platform !== "win32",
     exclude: ["dist/**", "**/node_modules/**", "**/.git/**", "**/*SFConflict*"],
     coverage: {
       provider: "v8",

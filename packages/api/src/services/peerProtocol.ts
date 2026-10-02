@@ -6,6 +6,7 @@ import {
   peerIdentitySchema,
   syncOperationSchema,
   snapshotDigestSchema,
+  taskDeviceHandoffOfferSchema,
 } from "@aif/shared";
 
 const scope = { projectId: z.uuid() };
@@ -16,6 +17,8 @@ export const checkpointEntriesSchema = z
   )
   .max(100);
 export const peerRequestSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("handoffOffer"), offer: taskDeviceHandoffOfferSchema }).strict(),
+  z.object({ kind: z.literal("handoffStatus"), ...scope, id: z.uuid() }).strict(),
   z
     .object({ kind: z.literal("snapshotManifest"), ...scope, snapshotId: snapshotDigestSchema })
     .strict(),

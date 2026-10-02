@@ -1823,3 +1823,31 @@ are inaccessible unless their digest is in that published manifest. Manifest
 version is 1; the envelope remains protocol/schema 1 and existing M1 hello/board
 messages are unchanged. Older peers reject these new request kinds explicitly.
 Bounds and native acceptance status are in [local device sync](local-device-sync.md).
+
+## Device handoff protocol (P14 foundation)
+
+The existing pinned TLS `/sync` listener additionally accepts `handoffOffer`
+with `{offer: {version: 1, id, grant}}` and `handoffStatus` with `{projectId, id}`.
+The offer is an exact P13 successor grant whose `transferId` equals `id`; it binds
+the predecessor, epoch, issuer, destination and immutable snapshot. Both requests
+require a paired, non-revoked peer and project permission. Only the direct issuer
+can deliver or read its receipt. Responses are `{id, grantId, state}`, where state
+is `received` or `accepted`. Duplicate deliveries are idempotent; a fork is durably
+quarantined. Envelope protocol/schema remain 1; older peers reject unknown kinds.
+
+These messages never carry checkout paths, local accounts, stop confirmations,
+runtime commands or an acceptance request. Receipt stages a pending grant. Explicit
+local acceptance verifies P12 code/context readiness and leaves a non-executable
+`accepted` grant head; it cannot start AI even when board state is runnable.
+Host runner preflight reports `run_handoff_pending` during outgoing preparation
+or `run_continuation_required` for an accepted task awaiting explicit continuation.
+
+There are no browser REST/MCP handoff actions in this increment. The internal
+`createDeviceHandoffService` delivers an already released offer or refreshes its
+receipt. It rechecks peer authorization after awaits. Offline/incompatible peers,
+missing code or a lost ACK do not restore source ownership. Manual stop confirmation
+is a separate local-admin data action, limited to human tasks with no managed run
+history. Runtime process-tree proof, supervisor recovery and P15 continuation/UI
+remain open. Structured failures include `handoff_stop_unproven`,
+`handoff_input_changed`, `handoff_snapshot_pending`, `handoff_conflict`,
+`handoff_wrong_phase` and `handoff_irreversible`.

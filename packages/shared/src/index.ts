@@ -1,5 +1,6 @@
 export * from "./personalMode.js";
 export * from "./deviceExecution.js";
+export * from "./handoff/deviceHandoff.js";
 export * from "./existingCheckout.js";
 export * from "./sync/contracts.js";
 export * from "./sync/causality.js";
@@ -26,6 +27,7 @@ export {
   taskDeviceGrantHeads,
   taskDeviceRuns,
   taskDeviceSessions,
+  taskDeviceHandoffs,
   codeSnapshots,
   contextSnapshotBlobs,
   codeSnapshotLocations,
@@ -299,6 +301,9 @@ export {
   serializeTaskChangeScope,
   restoreTaskChangeScope,
   serializeTaskCommitIntent,
+  preparedTaskCommitSha,
+  preparedTaskCheckpointRefTarget,
+  adoptTransferredTaskCheckpoint,
   restoreTaskCommitIntent,
   type TaskChangeScope,
   type TaskCommitIntent,

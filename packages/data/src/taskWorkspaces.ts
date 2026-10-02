@@ -23,11 +23,8 @@ import {
 import { getDb } from "@aif/shared/server";
 import { getPersonalExecutionBlock } from "./personalMode.js";
 import { verifyLocalCodeSnapshot } from "./codeSnapshots.js";
-import {
-  assertTaskDeviceExecution,
-  assertTaskDeviceWorkspaceMutable,
-  withTaskDeviceMutation,
-} from "./deviceExecution.js";
+import { assertTaskDeviceWorkspaceMutable } from "./deviceExecution.js";
+import { withWorkspaceCheckpointMutation } from "./deviceHandoffScope.js";
 
 export class TaskWorkspaceError extends Error {
   constructor(
@@ -226,83 +223,73 @@ export function prepareTaskExecutionWorkspace(input: TaskCheckoutInput): Workspa
 }
 
 export function prepareTaskWorkspaceCheckpoint(taskId: string, message: string): Workspace {
-  return withTaskDeviceMutation(
-    taskId,
-    () => {
-      assertTaskDeviceExecution(taskId);
-      const row = requireWorkspace(taskId);
-      if (row.state === "checkpoint_prepared" || row.state === "checkpointed") return row;
-      if (row.state !== "active" || !row.scopeJson)
-        throw new TaskWorkspaceError(
-          "workspace_not_ready",
-          "No saved pre-execution scope is available.",
-        );
-      const scope = restoreTaskChangeScope(row.scopeJson, checkout(row));
-      const intent = prepareTaskCommit(scope, message);
-      const changed = getDb()
-        .update(taskExecutionWorkspaces)
-        .set({
-          state: "checkpoint_prepared",
-          intentJson: serializeTaskCommitIntent(intent),
-          revision: row.revision + 1,
-        })
-        .where(
-          and(
-            eq(taskExecutionWorkspaces.taskId, taskId),
-            eq(taskExecutionWorkspaces.revision, row.revision),
-            eq(taskExecutionWorkspaces.state, "active"),
-          ),
-        )
-        .run();
-      if (changed.changes !== 1)
-        throw new TaskWorkspaceError(
-          "workspace_conflict",
-          "Another writer prepared the task checkpoint first.",
-        );
-      return requireWorkspace(taskId);
-    },
-    true,
-  );
+  return withWorkspaceCheckpointMutation(taskId, () => {
+    const row = requireWorkspace(taskId);
+    if (row.state === "checkpoint_prepared" || row.state === "checkpointed") return row;
+    if (row.state !== "active" || !row.scopeJson)
+      throw new TaskWorkspaceError(
+        "workspace_not_ready",
+        "No saved pre-execution scope is available.",
+      );
+    const scope = restoreTaskChangeScope(row.scopeJson, checkout(row));
+    const intent = prepareTaskCommit(scope, message);
+    const changed = getDb()
+      .update(taskExecutionWorkspaces)
+      .set({
+        state: "checkpoint_prepared",
+        intentJson: serializeTaskCommitIntent(intent),
+        revision: row.revision + 1,
+      })
+      .where(
+        and(
+          eq(taskExecutionWorkspaces.taskId, taskId),
+          eq(taskExecutionWorkspaces.revision, row.revision),
+          eq(taskExecutionWorkspaces.state, "active"),
+        ),
+      )
+      .run();
+    if (changed.changes !== 1)
+      throw new TaskWorkspaceError(
+        "workspace_conflict",
+        "Another writer prepared the task checkpoint first.",
+      );
+    return requireWorkspace(taskId);
+  });
 }
 
 export function publishTaskWorkspaceCheckpoint(taskId: string): TaskCommitResult {
-  return withTaskDeviceMutation(
-    taskId,
-    () => {
-      assertTaskDeviceExecution(taskId);
-      const row = requireWorkspace(taskId);
-      if ((row.state !== "checkpoint_prepared" && row.state !== "checkpointed") || !row.intentJson)
-        throw new TaskWorkspaceError(
-          "workspace_not_ready",
-          "A durable prepared checkpoint is required before publishing its Git ref.",
-        );
-      const intent = restoreTaskCommitIntent(row.intentJson, checkout(row));
-      const result = publishTaskCommit(intent);
-      if (row.state === "checkpointed") return result;
-      const changed = getDb()
-        .update(taskExecutionWorkspaces)
-        .set({
-          state: "checkpointed",
-          resultJson: JSON.stringify(result),
-          revision: row.revision + 1,
-        })
-        .where(
-          and(
-            eq(taskExecutionWorkspaces.taskId, taskId),
-            eq(taskExecutionWorkspaces.revision, row.revision),
-            eq(taskExecutionWorkspaces.state, "checkpoint_prepared"),
-          ),
-        )
-        .run();
-      if (changed.changes !== 1)
-        throw new TaskWorkspaceError(
-          "workspace_conflict",
-          "The Git checkpoint is published; reload its journal before acknowledging completion.",
-        );
-      return result;
-    },
-    true,
-  );
+  return withWorkspaceCheckpointMutation(taskId, () => {
+    const row = requireWorkspace(taskId);
+    if ((row.state !== "checkpoint_prepared" && row.state !== "checkpointed") || !row.intentJson)
+      throw new TaskWorkspaceError(
+        "workspace_not_ready",
+        "A durable prepared checkpoint is required before publishing its Git ref.",
+      );
+    const intent = restoreTaskCommitIntent(row.intentJson, checkout(row));
+    const result = publishTaskCommit(intent);
+    if (row.state === "checkpointed") return result;
+    const changed = getDb()
+      .update(taskExecutionWorkspaces)
+      .set({
+        state: "checkpointed",
+        resultJson: JSON.stringify(result),
+        revision: row.revision + 1,
+      })
+      .where(
+        and(
+          eq(taskExecutionWorkspaces.taskId, taskId),
+          eq(taskExecutionWorkspaces.revision, row.revision),
+          eq(taskExecutionWorkspaces.state, "checkpoint_prepared"),
+        ),
+      )
+      .run();
+    if (changed.changes !== 1)
+      throw new TaskWorkspaceError(
+        "workspace_conflict",
+        "The Git checkpoint is published; reload its journal before acknowledging completion.",
+      );
+    return result;
+  });
 }
 
 export function checkpointTaskExecutionWorkspace(

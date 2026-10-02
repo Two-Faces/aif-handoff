@@ -49,7 +49,9 @@ export class DeviceExecutionError extends Error {
       | "run_scope_required"
       | "run_root_mismatch"
       | "taskless_execution_denied"
-      | "run_session_mismatch",
+      | "run_session_mismatch"
+      | "run_handoff_pending"
+      | "run_continuation_required",
   ) {
     super(code);
     this.name = "DeviceExecutionError";

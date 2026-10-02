@@ -822,7 +822,7 @@ export const taskDeviceGrantHeads = sqliteTable("task_device_grant_heads", {
   ownerDeviceId: text("owner_device_id").notNull(),
   executionEpoch: integer("execution_epoch").notNull(),
   state: text("state", {
-    enum: ["owned", "observed", "released", "pending", "conflicted"],
+    enum: ["owned", "observed", "released", "pending", "accepted", "conflicted"],
   }).notNull(),
   activeRunId: text("active_run_id"),
   // Only P14's verified stop/checkpoint transaction may populate these fields.
@@ -858,6 +858,39 @@ export const taskDeviceSessions = sqliteTable("task_device_sessions", {
   snapshotCommit: text("snapshot_commit").notNull(),
   nativeSessionId: text("native_session_id"),
   runtimeKey: text("runtime_key"),
+});
+
+/** Local durable handoff journal. Authority survives UI/task deletion. */
+export const taskDeviceHandoffs = sqliteTable("task_device_handoffs", {
+  id: text("id").primaryKey(),
+  direction: text("direction", { enum: ["outgoing", "incoming"] }).notNull(),
+  projectId: text("project_id").notNull(),
+  taskId: text("task_id").notNull(),
+  sourceDeviceId: text("source_device_id").notNull(),
+  targetDeviceId: text("target_device_id").notNull(),
+  expectedGrantId: text("expected_grant_id").notNull(),
+  phase: text("phase", {
+    enum: [
+      "requested",
+      "quiescing",
+      "checkpointed",
+      "released",
+      "received",
+      "accepted",
+      "cancelled",
+    ],
+  }).notNull(),
+  revision: integer("revision").notNull().default(0),
+  inputDigest: text("input_digest"),
+  requestJson: text("request_json"),
+  stopJson: text("stop_json"),
+  snapshotId: text("snapshot_id"),
+  successorJson: text("successor_json"),
+  successorGrantId: text("successor_grant_id"),
+  previousWorkspaceJson: text("previous_workspace_json"),
+  localTransferId: text("local_transfer_id"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
 });
 
 export const codeSnapshots = sqliteTable("handoff_code_snapshots", {

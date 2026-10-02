@@ -487,8 +487,90 @@ tested from v37 with existing data. REST request schemas/WS events, packages,
 dependencies, runtime capabilities and UI components did not change; Docker,
 adapter and Pencil synchronization does not apply. No push or M2→M1 merge occurred.
 
+## Durable manual handoff (P14 foundation; process supervision pending)
+
+Migration v39 adds a local handoff journal and extends grant heads with `accepted`.
+The head-table rebuild preserves all existing ownership, epoch, active-run and
+release fields; migrations 1–38 are unchanged. Ordinary board sync never carries
+this journal or local stop attestations.
+
+The host path is `requested → quiescing → checkpointed → released → received → accepted`.
+Request closes new runs and fences callbacks before quiescence. A manual stop
+confirmation requires an active local admin, a human-owned task, no active claim
+or native session, and no managed run history for that grant. Even a previously
+settled adapter call is not proof that background children stopped. There is no
+manual force-override for autonomous runs.
+
+Confirmation saves the prepared Git intent and immutable context/blobs in one DB
+transaction, before publishing refs or acknowledging the action. Later source
+edits cannot become a new checkpoint after restart; portable context comes from
+the frozen package. Relinquish, single successor issuance and the released offer
+commit together. After release, cancellation is refused; a return requires a new
+handoff and higher epoch. Revoked/offline destinations and lost ACK leave source
+authority relinquished. Before release, a local manual cancellation is possible
+only when the same manual-stop safety conditions hold.
+
+Explicit local acceptance requires the exact verified P12 transfer and matching,
+unconflicted board plan. It reserves the local checkout before adopting the task's
+private Git ref by CAS. On a return trip, only that ref advances after verifying
+ancestry; user branches, index, dirty roots and earlier task checkouts remain intact.
+Root/scope activation, native-session reset and the new `accepted` head commit
+together. A crash after ref publication can repeat the same acceptance. `accepted`
+does not authorize a runner: P15 must provide a separate explicit continuation.
+Using a head state distinct from `owned` also keeps older P13 runners from launching
+an accepted task during a staggered upgrade.
+
+The pinned peer protocol transfers offers/receipts only. Host delivery and receipt
+refresh are explicit, with authorization rechecked after network waits. There are
+no public browser/MCP actions, automatic acceptance, new runtime transports, or
+changes to the personal execution ban.
+
+Tests cover two local SQLite/Git replicas, a round trip with higher epochs, dirty
+user roots, stale input/actors, revocation, a fork over real loopback TLS, and fresh
+process recovery after confirmation, Git publication, release and target acceptance
+without DB acknowledgement. These are fixtures, not physical Windows↔Mac or native
+runtime stop acceptance.
+
+Windows `ai:validate` completed with exit 0: **3386 passed / 1 existing skip**,
+lint and tests/coverage 10/10, build 7/7, Chromium 8/8, k6 3/3, protocol check with
+CLI 0.145.0 and checklist. Minimum coverage metrics: shared 75.46%, data 78.13%,
+API 70.57%, agent 76.17%, runtime 73.25%, web 74.49%, MCP 86.27%.
+The isolated driver used a fixture database and ports 3309/5480; evidence is in
+`.codex/m2/logs/p14-validate.log`. Only documentation changed after the run.
+Root/shared/data/API checklists were reviewed; shared consumers build and the
+DB boundary remains enforced. No new packages/dependencies, adapter capabilities
+or UI components require Docker/adapter/Pencil changes. New Mac fixture smoke
+remains pending:
+
+```sh
+npm test --workspace @aif/shared -- deviceHandoff.test.ts db.test.ts taskCheckout.test.ts
+npm test --workspace @aif/data -- deviceHandoff.test.ts deviceExecution.test.ts taskWorkspaces.test.ts
+npm test --workspace @aif/api -- deviceHandoff.test.ts peerHandoff.test.ts
+```
+
+Expected counts: shared 61, data 50, API 9 (120 total), after pulling and building.
+Shared/data Git fixture files run serially on Windows to avoid process-startup
+contention; all explicit concurrency scenarios, timeouts, assertions, coverage
+thresholds and exclusions remain intact.
+
+**P14 remains open:** actual process-tree supervision, durable native stop proof,
+orphan recovery and runtime-backed release are not implemented by this foundation.
+`quiescing` requests cancellation; it never certifies exit. The adapter inventory
+includes Claude, Codex, OpenRouter and OpenCode; their current cancellation paths
+must not be treated as portable tree-stop proofs. Native supervision must account
+for startup races, descendants, process identity reuse and host death before any
+autonomous release path is enabled. Windows job objects and POSIX process groups
+have different containment contracts; see the primary references below.
+The user reported macOS 27.0.1 as the current test environment. Record versions for
+diagnostics, but determine supervisor support by checking actual OS capabilities
+and behavior at startup. An OS update must not require editing a version allowlist;
+unavailable or unverified stop mechanisms must continue to block runtime release.
+
 ## Implementation references
 
 - [ADR](decisions/personal-lan-sync.md)
 - [Node 22 TLS API](https://nodejs.org/docs/latest-v22.x/api/tls.html)
 - [Ed25519 X.509 identifiers, RFC 8410](https://www.rfc-editor.org/rfc/rfc8410.html)
+- [Windows job objects and child-process membership](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+- [Apple setsid: new sessions/process groups](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/setsid.2.html)
+- [Apple XNU: deprecated NOTE_TRACK/NOTE_CHILD support](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/event.h)

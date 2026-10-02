@@ -1299,6 +1299,36 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX task_device_native_session ON task_device_sessions(native_session_id);
     `,
   },
+  {
+    version: 39,
+    description: "Durable explicit device handoff journal",
+    sql: `
+      ALTER TABLE task_device_grant_heads RENAME TO task_device_grant_heads_v38;
+      CREATE TABLE task_device_grant_heads (
+        task_id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
+        grant_id TEXT NOT NULL REFERENCES task_device_grants(id),
+        owner_device_id TEXT NOT NULL, execution_epoch INTEGER NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('owned','observed','released','pending','accepted','conflicted')),
+        active_run_id TEXT, released_transfer_id TEXT, released_snapshot_id TEXT
+      );
+      INSERT INTO task_device_grant_heads SELECT * FROM task_device_grant_heads_v38;
+      DROP TABLE task_device_grant_heads_v38;
+      CREATE TABLE task_device_handoffs (
+        id TEXT PRIMARY KEY, direction TEXT NOT NULL CHECK(direction IN ('outgoing','incoming')),
+        project_id TEXT NOT NULL, task_id TEXT NOT NULL,
+        source_device_id TEXT NOT NULL, target_device_id TEXT NOT NULL, expected_grant_id TEXT NOT NULL,
+        phase TEXT NOT NULL CHECK(phase IN ('requested','quiescing','checkpointed','released','received','accepted','cancelled')),
+        revision INTEGER NOT NULL DEFAULT 0, input_digest TEXT, request_json TEXT, stop_json TEXT,
+        snapshot_id TEXT, successor_json TEXT, successor_grant_id TEXT,
+        previous_workspace_json TEXT, local_transfer_id TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX task_device_handoff_active ON task_device_handoffs(task_id)
+        WHERE direction='outgoing' AND phase IN ('requested','quiescing','checkpointed');
+      CREATE INDEX task_device_handoff_project ON task_device_handoffs(project_id);
+      CREATE INDEX task_device_handoff_task ON task_device_handoffs(task_id, direction, phase);
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {

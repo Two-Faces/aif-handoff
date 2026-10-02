@@ -1,4 +1,5 @@
 export * from "./taskWorkspaces.js";
+export * from "./deviceHandoff.js";
 export {
   assertTaskDeviceChatSession,
   assertTaskDeviceChatProject,

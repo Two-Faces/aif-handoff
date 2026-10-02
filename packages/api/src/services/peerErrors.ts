@@ -1,11 +1,21 @@
-import { PeerError, SyncError, SnapshotTransferError } from "@aif/shared";
+import {
+  PeerError,
+  SyncError,
+  SnapshotTransferError,
+  DeviceHandoffError,
+  DeviceExecutionError,
+} from "@aif/shared";
 
 /** Preserve structured storage failures without exposing SQL, paths or payloads. */
-export function diagnosePeerError(error: unknown): PeerError | SyncError | SnapshotTransferError {
+export function diagnosePeerError(
+  error: unknown,
+): PeerError | SyncError | SnapshotTransferError | DeviceHandoffError | DeviceExecutionError {
   if (
     error instanceof PeerError ||
     error instanceof SyncError ||
-    error instanceof SnapshotTransferError
+    error instanceof SnapshotTransferError ||
+    error instanceof DeviceHandoffError ||
+    error instanceof DeviceExecutionError
   )
     return error;
   const code = error && typeof error === "object" && "code" in error ? error.code : null;

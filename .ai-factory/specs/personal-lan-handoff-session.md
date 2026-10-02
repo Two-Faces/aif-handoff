@@ -57,8 +57,17 @@ Windows ai:validate lifecycle прошёл: 3358 passed / 1 existing skip, cover
 03.10.2026 пользователь подтвердил native Mac smoke: shared 30, data 41,
 API 16, agent 19 — всего 106 passed. P13 закрыт в объёме grants/fencing/lifecycle;
 полный Mac ai:validate и физический handoff этими тестами не подтверждены.
-Детали — в плане и docs/local-device-sync.md. Далее P14: подтверждённый process-tree stop и
-persisted handoff; P15: onboarding, local session existence и continuation UI.
+P14 начат: v39/deviceHandoff.ts добавляет durable journal, ручную остановку
+для human tasks без managed run history, frozen code/context и atomic release.
+Pinned offers/receipts и explicit acceptance сохраняют root/scope/epoch после crash;
+grant head accepted не исполняется до отдельного явного продолжения P15.
+Windows ai:validate первого блока прошёл: 3386 passed / 1 existing skip,
+coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3.
+Native Mac smoke журнала ещё не принят: ожидаются 61 shared + 50 data + 9 API tests.
+Полный P14 ещё открыт: нужен настоящий process-tree supervisor, stop proof,
+orphan recovery и native Win/Mac acceptance. Manual confirmation не заменяет их.
+Детали и текущие проверки — в плане и docs/local-device-sync.md.
+P15: onboarding, local session existence и continuation UI.
 M3/M4 не отмечай готовыми после M2.
 Сохраняй прогресс в указанном плане, не заменяя другие планы.
 
@@ -82,6 +91,8 @@ accounts. Разные participant UUID не должны ломать авто�
 Эти M1 проверки уже пройдены на двух устройствах; сохраняй регрессии.
 Mac пользователь запускает сам, SSH не требуется. Его Handoff checkout:
 /Users/aries/Projects/aif-handoff; fixture: /Users/aries/Projects/handoff-lan-test.
+Текущая macOS по сообщению пользователя — 27.0.1. Версия нужна для диагностики;
+supervisor проверяет реальные возможности ОС, без привязки разрешения к номеру версии.
 M1 native acceptance не означает приёмку новых M2 Git/stop/fencing сценариев.
 Остальные Mac project paths и toolchains пока неизвестны: не выдумывай их.
 Для quality gate используй отдельную БД и свободные порты. Учитывай не только

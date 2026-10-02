@@ -178,6 +178,18 @@ export function serializeTaskCommitIntent(intent: TaskCommitIntent): string {
   return JSON.stringify(state.stored);
 }
 
+/** Exact immutable object prepared by the host; does not publish any ref. */
+export function preparedTaskCommitSha(intent: TaskCommitIntent): string {
+  const state = intents.get(intent);
+  if (!state) throw new TaskCheckoutError("invalid_scope", "Unknown checkpoint intent.");
+  return state.stored.commitSha ?? state.stored.scope.checkout.snapshotCommit;
+}
+export function preparedTaskCheckpointRefTarget(intent: TaskCommitIntent): string | null {
+  const state = intents.get(intent);
+  if (!state) throw new TaskCheckoutError("invalid_scope", "Unknown checkpoint intent.");
+  return state.stored.commitSha ?? state.stored.scope.previousRef;
+}
+
 export function restoreTaskCommitIntent(
   json: string,
   expected: TaskCheckoutInput,
@@ -318,6 +330,58 @@ function currentRef(checkout: TaskCheckoutInput, ref: string): string | null {
   if (result.status !== 0)
     throw new TaskCheckoutError("git_failed", "Cannot read the task checkpoint ref.");
   return result.output.toString().trim();
+}
+
+/** Host-only adoption after a durable handoff acceptance intent. Advances only
+ * this task's internal ref by CAS; user HEAD/branches/index/files stay untouched.
+ * Repeating after publication without DB acknowledgement is safe. */
+export function adoptTransferredTaskCheckpoint(
+  checkout: TaskCheckoutInput,
+  expectedRef: string | null,
+  previousCommit: string | null = expectedRef,
+): void {
+  assertTaskCheckout(checkout);
+  if (
+    (expectedRef !== null && !oidSchema.safeParse(expectedRef).success) ||
+    (previousCommit !== null && !oidSchema.safeParse(previousCommit).success)
+  )
+    throw new TaskCheckoutError("invalid_scope", "Invalid checkpoint predecessor.");
+  const ref = taskCheckpointRef(checkout),
+    current = currentRef(checkout, ref);
+  if (
+    previousCommit &&
+    taskGit(
+      checkout.worktreePath,
+      ["merge-base", "--is-ancestor", previousCommit, checkout.snapshotCommit],
+      { allowFailure: true },
+    ).status !== 0
+  )
+    throw new TaskCheckoutError(
+      "checkpoint_conflict",
+      "The received snapshot does not extend the local checkpoint.",
+    );
+  if (current === checkout.snapshotCommit) return;
+  if (current !== expectedRef)
+    throw new TaskCheckoutError(
+      "checkpoint_conflict",
+      "The local task checkpoint changed before acceptance.",
+    );
+  const result = taskGit(
+    checkout.worktreePath,
+    [
+      "update-ref",
+      "--no-deref",
+      ref,
+      checkout.snapshotCommit,
+      expectedRef ?? "0".repeat(checkout.snapshotCommit.length),
+    ],
+    { allowFailure: true },
+  );
+  if (result.status !== 0)
+    throw new TaskCheckoutError(
+      "checkpoint_conflict",
+      "The received checkpoint could not be adopted atomically.",
+    );
 }
 
 /** Call before the task writes. Existing dirty/staged/untracked paths are foreign.

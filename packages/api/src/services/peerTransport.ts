@@ -22,6 +22,8 @@ import {
   resetPeerBootstrap,
   readPeerSnapshotManifest,
   readPeerSnapshotChunk,
+  receiveTaskDeviceHandoff,
+  readTaskHandoffReceipt,
 } from "@aif/data";
 import { certificateFingerprint, type PeerTlsIdentity } from "./peerIdentity.js";
 import { peerEnvelopeSchema, type PeerRequest } from "./peerProtocol.js";
@@ -163,6 +165,10 @@ export function dispatchPeerRequest(peerId: string, request: PeerRequest, finger
   }
   requireSyncPeer(peerId, fingerprint);
   switch (request.kind) {
+    case "handoffOffer":
+      return receiveTaskDeviceHandoff(peerId, request.offer);
+    case "handoffStatus":
+      return readTaskHandoffReceipt(peerId, request.projectId, request.id);
     case "snapshotManifest":
       return readPeerSnapshotManifest(peerId, request.projectId, request.snapshotId);
     case "snapshotChunk":

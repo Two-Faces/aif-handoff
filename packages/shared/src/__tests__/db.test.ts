@@ -7,7 +7,71 @@ import { eq } from "drizzle-orm";
 import { chatSessions } from "../schema.js";
 import { closeDb, createTestDb, getDb } from "../db.js";
 
-const CURRENT_SCHEMA_VERSION = 38;
+const CURRENT_SCHEMA_VERSION = 39;
+
+it("upgrades v38 without manufacturing handoffs or restoring relinquished device authority", () => {
+  closeDb();
+  const path = join(tmpdir(), `aif-handoff-upgrade-${crypto.randomUUID()}.sqlite`);
+  const connections: Database.Database[] = [];
+  try {
+    getDb(path);
+    closeDb();
+    const old = new Database(path);
+    connections.push(old);
+    old.exec("DROP TABLE task_device_handoffs");
+    old.exec("DROP TABLE task_device_grant_heads");
+    old.exec(`CREATE TABLE task_device_grant_heads (
+      task_id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
+      grant_id TEXT NOT NULL REFERENCES task_device_grants(id), owner_device_id TEXT NOT NULL,
+      execution_epoch INTEGER NOT NULL,
+      state TEXT NOT NULL CHECK(state IN ('owned','observed','released','pending','conflicted')),
+      active_run_id TEXT, released_transfer_id TEXT, released_snapshot_id TEXT
+    )`);
+    old
+      .prepare(
+        "INSERT INTO task_device_grants (id,task_id,project_id,execution_epoch,grant_json) VALUES ('successor','task','project',1,'{}')",
+      )
+      .run();
+    old
+      .prepare(
+        "INSERT INTO task_device_grant_heads (task_id,project_id,grant_id,owner_device_id,execution_epoch,state) VALUES ('task','project','successor','other-device',1,'observed')",
+      )
+      .run();
+    old
+      .prepare(
+        "INSERT INTO task_device_sessions (key,kind,task_id,project_id,grant_id,worktree_path,snapshot_commit,native_session_id,runtime_key) VALUES ('native:key','native','task','project','old-grant','old-root','old-commit','old-session','runtime')",
+      )
+      .run();
+    old.pragma("user_version = 38");
+    old.close();
+    getDb(path);
+    closeDb();
+    const upgraded = new Database(path);
+    connections.push(upgraded);
+    expect(upgraded.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
+    expect(
+      upgraded
+        .prepare("SELECT owner_device_id,state,execution_epoch FROM task_device_grant_heads")
+        .get(),
+    ).toEqual({ owner_device_id: "other-device", state: "observed", execution_epoch: 1 });
+    expect(upgraded.prepare("SELECT native_session_id FROM task_device_sessions").get()).toEqual({
+      native_session_id: "old-session",
+    });
+    expect(upgraded.prepare("SELECT count(*) AS count FROM task_device_handoffs").get()).toEqual({
+      count: 0,
+    });
+    upgraded
+      .prepare("UPDATE task_device_grant_heads SET state='accepted' WHERE task_id='task'")
+      .run();
+    expect(upgraded.prepare("SELECT state FROM task_device_grant_heads").get()).toEqual({
+      state: "accepted",
+    });
+  } finally {
+    closeDb();
+    for (const connection of connections) if (connection.open) connection.close();
+    removeSqliteArtifacts(path);
+  }
+});
 
 it("upgrades v37 without adopting legacy sessions or altering an unresolved run", () => {
   closeDb();
