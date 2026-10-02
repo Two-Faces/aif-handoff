@@ -60,6 +60,10 @@ packages/
 │       ├── taskOwnership.ts # Atomic handoff, assignments, executor history
 │       ├── taskTransitions.ts # Actor-aware atomic task transitions
 │       ├── audit.ts         # Immutable audit persistence
+│       ├── personalMode.ts  # Persisted personal execution/publication restrictions
+│       ├── devices.ts       # Local device identity and API process ownership
+│       ├── projectBindings.ts # Explicit local checkout registration
+│       ├── participantBindings.ts # Logical attribution vs local account bindings
 │       └── index.ts         # Public repository API
 ├── api/                 # @aif/api — Hono REST + WebSocket server (port 3009)
 │   └── src/

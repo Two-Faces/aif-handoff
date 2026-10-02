@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, primaryKey } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, primaryKey, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import type {
   AuditActorKind,
@@ -205,6 +205,8 @@ export const taskComments = sqliteTable("task_comments", {
   participantId: text("participant_id").references(() => participants.id, {
     onDelete: "set null",
   }),
+  logicalAuthorId: text("logical_author_id"),
+  authorDisplayNameSnapshot: text("author_display_name_snapshot"),
   message: text("message").notNull(),
   attachments: text("attachments").notNull().default("[]"),
   createdAt: text("created_at")
@@ -597,3 +599,76 @@ export const codexIndexCursors = sqliteTable("codex_index_cursors", {
 
 export type CodexIndexCursorRow = typeof codexIndexCursors.$inferSelect;
 export type NewCodexIndexCursorRow = typeof codexIndexCursors.$inferInsert;
+
+/** Device identity and process ownership are local, never part of a checkpoint. */
+export const localDevice = sqliteTable("handoff_local_device", {
+  slot: integer("slot").primaryKey().notNull(),
+  deviceId: text("device_id").notNull().unique(),
+  incarnation: text("incarnation").notNull(),
+  name: text("name").notNull(),
+  installationId: text("installation_id"),
+  ownerPid: integer("owner_pid"),
+  ownerToken: text("owner_token"),
+});
+
+export const projectCheckouts = sqliteTable(
+  "handoff_project_checkouts",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    deviceId: text("device_id").notNull(),
+    localRoot: text("local_root").notNull(),
+    executionEnvironment: text("execution_environment").notNull(),
+    head: text("head"),
+    branch: text("branch"),
+  },
+  (table) => [
+    uniqueIndex("handoff_checkout_root").on(
+      table.projectId,
+      table.deviceId,
+      table.localRoot,
+      table.executionEnvironment,
+    ),
+  ],
+);
+
+export const logicalParticipants = sqliteTable(
+  "handoff_participants",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    displayName: text("display_name").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.projectId, table.id] })],
+);
+
+/** A logical identity may bind to only one local account; no name-based inference. */
+export const participantBindings = sqliteTable(
+  "handoff_participant_bindings",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    logicalParticipantId: text("logical_participant_id").notNull(),
+    participantId: text("participant_id")
+      .notNull()
+      .references(() => participants.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.projectId, table.logicalParticipantId] })],
+);
+
+export const logicalTaskAssignments = sqliteTable(
+  "handoff_task_assignments",
+  {
+    taskId: text("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    logicalParticipantId: text("logical_participant_id").notNull(),
+    displayNameSnapshot: text("display_name_snapshot").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.taskId, table.logicalParticipantId] })],
+);

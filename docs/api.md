@@ -279,6 +279,23 @@ project, or `null` when the project has no tasks.
 
 ### Create Project
 
+Personal project registration also exposes these local metadata endpoints:
+
+| Endpoint                             | Contract                                                                                                                         |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /projects/attach-preview`      | `{checkouts: [{localRoot, executionEnvironment}]}`; up to 50 read-only inspections, no registrations                             |
+| `GET /projects/:id/checkouts`        | Local device descriptor and checkout bindings; paths are device-local                                                            |
+| `POST /projects/:id/checkouts`       | `{localRoot, executionEnvironment, confirmProjectIdentity: true}`; explicitly attach to an existing personal board               |
+| `GET /projects/:id/identities`       | Logical participant identities with nullable local account bindings; no credentials                                              |
+| `POST /projects/:id/identities/bind` | `{logicalParticipantId, participantId, confirmIdentity: true}`; bind to an active local account; conflicting bindings return 409 |
+| `POST /projects/:id/manifest`        | `{checkoutId, confirmWrite: true}`; explicitly create `.ai-factory/handoff-project.json`, never overwrite it                     |
+
+Execution environments are `native_windows`, `native_macos`, `native_linux`,
+`wsl`, `container` or `unknown`. They label bindings; runtime/toolchain readiness
+is a separate check. Matching names or remotes do not automatically join boards
+or accounts. These mutations use the existing project-administrator permission
+boundary when participant authentication is enabled.
+
 For an existing local checkout, pass `registrationMode: "attach_existing"` with
 `rootPath`. This registers a personal project without initialization, package
 installation, branch changes or context writes. Git linked worktrees are

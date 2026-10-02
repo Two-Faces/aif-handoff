@@ -29,6 +29,14 @@ and safe handoff must be implemented and verified before personal execution can
 be enabled. Peer synchronization itself is a later part of M1; this switch alone
 does not enable a listener or connect devices.
 
+Personal API nodes bind their browser API to `127.0.0.1` at startup. Local device
+identity and checkout bindings live in SQLite; the installation marker lives
+separately at `~/.aif-handoff/installation-id`. Copying the database to a different
+installation is rejected rather than silently reusing its writer identity.
+Do not copy that marker to a second device. A second API instance with the same
+identity is rejected while the recorded process is alive; no heartbeat timeout
+can take the lock. Mac paths are selected explicitly on the Mac.
+
 ## Environment Variables
 
 | Variable                                               | Type    | Default                        | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |

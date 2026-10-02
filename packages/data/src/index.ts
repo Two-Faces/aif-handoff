@@ -97,6 +97,9 @@ import { createAuditEventValues } from "./audit.js";
 import { isPersonalProject, isPersonalTask } from "./personalMode.js";
 
 export * from "./personalMode.js";
+export * from "./devices.js";
+export * from "./projectBindings.js";
+export * from "./participantBindings.js";
 
 export * from "./normalizeBacklogPositions.js";
 export * from "./github.js";

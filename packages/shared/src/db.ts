@@ -5,6 +5,7 @@ import { drizzle, BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema.js";
 import { logger } from "./logger.js";
 import { findMonorepoRootFromUrl } from "./monorepoRoot.js";
+import { backfillPersonalIdentity } from "./personalIdentityMigration.js";
 
 const log = logger("db");
 
@@ -1103,6 +1104,44 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE projects ADD COLUMN personal_mode INTEGER NOT NULL DEFAULT 0;
       ALTER TABLE projects ADD COLUMN publication_policy TEXT NOT NULL DEFAULT 'standard';
     `,
+  },
+  {
+    version: 31,
+    description: "Local device/checkouts and portable participant identity",
+    sql: `
+      CREATE TABLE handoff_local_device (
+        slot INTEGER PRIMARY KEY CHECK (slot = 1), device_id TEXT NOT NULL UNIQUE,
+        incarnation TEXT NOT NULL, name TEXT NOT NULL, installation_id TEXT,
+        owner_pid INTEGER, owner_token TEXT
+      );
+      CREATE TABLE handoff_project_checkouts (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        device_id TEXT NOT NULL, local_root TEXT NOT NULL, execution_environment TEXT NOT NULL,
+        head TEXT, branch TEXT
+      );
+      CREATE UNIQUE INDEX handoff_checkout_root ON handoff_project_checkouts (project_id, device_id, local_root, execution_environment);
+      CREATE TABLE handoff_participants (
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        id TEXT NOT NULL, display_name TEXT NOT NULL, PRIMARY KEY (project_id, id)
+      );
+      CREATE TABLE handoff_participant_bindings (
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        logical_participant_id TEXT NOT NULL,
+        participant_id TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+        PRIMARY KEY (project_id, logical_participant_id)
+      );
+      CREATE TABLE handoff_task_assignments (
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        logical_participant_id TEXT NOT NULL, display_name_snapshot TEXT NOT NULL,
+        PRIMARY KEY (task_id, logical_participant_id)
+      );
+      ALTER TABLE task_comments ADD COLUMN logical_author_id TEXT;
+      ALTER TABLE task_comments ADD COLUMN author_display_name_snapshot TEXT;
+    `,
+    backfill: (sqlite) => {
+      backfillPersonalIdentity(sqlite);
+      return {};
+    },
   },
 ];
 

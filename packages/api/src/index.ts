@@ -1,12 +1,16 @@
 import { Hono } from "hono";
+import { hostname } from "node:os";
 import { getEnv, logger } from "@aif/shared";
 import {
   listProjects,
+  acquireLocalDeviceLock,
   listStaleInProgressTasks,
   resetStaleQaCheckRuns,
   resetStaleQaRuns,
 } from "@aif/data";
 import { projectsRouter } from "./routes/projects.js";
+import { personalProjectsRouter } from "./routes/personal.js";
+import { readDeviceInstallationId } from "./services/deviceInstallation.js";
 import { tasksRouter } from "./routes/tasks.js";
 import { chatRouter } from "./routes/chat.js";
 import { buildSettingsOverview, settingsRoutes } from "./routes/settings.js";
@@ -88,6 +92,7 @@ app.get("/settings", async (c) => {
 app.route("/auth", authRouter);
 app.route("/participants", participantsRouter);
 app.route("/projects", projectsRouter);
+app.route("/projects", personalProjectsRouter);
 app.route("/projects", githubRouter);
 app.route("/tasks", tasksRouter);
 app.route("/chat", chatRouter);
@@ -112,7 +117,11 @@ if (getEnv().AIF_ENABLE_CODEX_LOGIN_PROXY) {
 const port = Number(process.env.PORT) || 3009;
 
 // Ensure data layer / DB is ready
-listProjects();
+const personalNode =
+  getEnv().AIF_PERSONAL_MODE || listProjects().some((project) => project.personalMode);
+const releaseDeviceLock = personalNode
+  ? acquireLocalDeviceLock(readDeviceInstallationId(), hostname())
+  : null;
 
 // Recover tasks orphaned in qaStatus:"running" by a crash/restart mid-run —
 // the atomic QA claim (tryStartQaRun) would otherwise block QA for them forever.
@@ -129,6 +138,7 @@ const codexIndexService = createCodexIndexService();
 const server = startServer({
   fetch: app.fetch,
   port,
+  hostname: personalNode ? "127.0.0.1" : undefined,
   webSocketServer,
   injectWebSocket,
   onStarted() {
@@ -151,6 +161,7 @@ const onShutdown = createGracefulShutdownHandler({
     server.close();
   },
   exitProcess: (code) => {
+    releaseDeviceLock?.();
     process.exit(code);
   },
 });

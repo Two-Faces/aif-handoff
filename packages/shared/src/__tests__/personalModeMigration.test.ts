@@ -27,7 +27,7 @@ describe("personal policy migration", () => {
       getDb(path);
       closeDb();
       const migrated = new Database(path);
-      expect(migrated.pragma("user_version", { simple: true })).toBe(30);
+      expect(migrated.pragma("user_version", { simple: true })).toBe(31);
       expect(
         migrated
           .prepare("SELECT personal_mode, publication_policy FROM projects WHERE id = ?")

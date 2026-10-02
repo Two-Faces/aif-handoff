@@ -1,6 +1,36 @@
 import { z } from "zod";
 import { TASK_EVENTS, TASK_STATUSES, getEnv } from "@aif/shared";
 
+export const personalCheckoutSchema = z
+  .object({
+    localRoot: z.string().min(1).max(4096),
+    executionEnvironment: z.enum([
+      "native_windows",
+      "native_macos",
+      "native_linux",
+      "wsl",
+      "container",
+      "unknown",
+    ]),
+  })
+  .strict();
+export const personalInventoryPreviewSchema = z
+  .object({ checkouts: z.array(personalCheckoutSchema).min(1).max(50) })
+  .strict();
+export const personalCheckoutBindingSchema = personalCheckoutSchema.extend({
+  confirmProjectIdentity: z.literal(true),
+});
+export const personalParticipantBindingSchema = z
+  .object({
+    logicalParticipantId: z.uuid(),
+    participantId: z.string().min(1),
+    confirmIdentity: z.literal(true),
+  })
+  .strict();
+export const personalManifestSchema = z
+  .object({ checkoutId: z.uuid(), confirmWrite: z.literal(true) })
+  .strict();
+
 export const participantLoginSchema = z.object({
   username: z.string().trim().min(1).max(200),
   password: z.string().min(1).max(10_000),

@@ -4,6 +4,11 @@ export * from "./existingCheckout.js";
 // Schema
 export {
   projects,
+  localDevice,
+  projectCheckouts,
+  logicalParticipants,
+  participantBindings,
+  logicalTaskAssignments,
   appSettings,
   participants,
   participantSessions,

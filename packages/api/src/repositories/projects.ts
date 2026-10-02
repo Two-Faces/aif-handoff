@@ -13,6 +13,8 @@ import type { CreateProjectInput, UpdateProjectOrganizationInput } from "@aif/sh
 import { getApiRuntimeRegistry } from "../services/runtime.js";
 import {
   createProject as createProjectRecord,
+  registerPersonalCheckout,
+  ProjectBindingError,
   deleteProject as deleteProjectRecord,
   findProjectById,
   listProjectTaskOverviews,
@@ -194,14 +196,24 @@ async function createPathProject(input: CreateProjectInput & { rootPath: string 
   if (input.registrationMode === "attach_existing" || getEnv().AIF_PERSONAL_MODE) {
     try {
       const checkout = inspectExistingCheckout(rootPath);
-      const project = createProjectRecord({
+      const project = registerPersonalCheckout({
         ...projectRecordInput(input, checkout.rootPath),
-        personalMode: true,
+        head: checkout.head,
+        branch: checkout.branch,
+        executionEnvironment:
+          process.platform === "win32"
+            ? "native_windows"
+            : process.platform === "darwin"
+              ? "native_macos"
+              : "native_linux",
       });
       return project
         ? ({ ok: true, project } as const)
         : ({ ok: false, status: 500, error: "Failed to attach project" } as const);
     } catch (error) {
+      if (error instanceof ProjectBindingError) {
+        return { ok: false, status: 409, error: error.message, code: error.code } as const;
+      }
       if (!(error instanceof ExistingCheckoutError)) throw error;
       return { ok: false, status: 400, error: error.message, code: error.code } as const;
     }
