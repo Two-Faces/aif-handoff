@@ -11,6 +11,9 @@ import {
   serializeTaskChangeScope,
   serializeTaskCommitIntent,
   taskExecutionWorkspaces,
+  taskWorkspaceContinuations,
+  taskCheckoutFilePath,
+  installContextSnapshot,
   tasks,
   projects,
   PersonalExecutionDisabledError,
@@ -19,6 +22,7 @@ import {
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
 import { getPersonalExecutionBlock } from "./personalMode.js";
+import { verifyLocalCodeSnapshot } from "./codeSnapshots.js";
 
 export class TaskWorkspaceError extends Error {
   constructor(
@@ -283,4 +287,213 @@ export function checkpointTaskExecutionWorkspace(
 ): TaskCommitResult {
   prepareTaskWorkspaceCheckpoint(taskId, message);
   return publishTaskWorkspaceCheckpoint(taskId);
+}
+
+/** Reserve one successor path for one sealed workspace revision. The current
+ * workspace stays sealed until code, context and the new scope are all ready. */
+export function beginTaskWorkspaceContinuation(input: {
+  id: string;
+  taskId: string;
+  snapshotId: string;
+  worktreePath: string;
+}) {
+  const row = requireWorkspace(input.taskId);
+  const db = getDb();
+  const existing = db
+    .select()
+    .from(taskWorkspaceContinuations)
+    .where(eq(taskWorkspaceContinuations.id, input.id))
+    .get();
+  if (existing) {
+    if (
+      existing.taskId !== input.taskId ||
+      existing.snapshotId !== input.snapshotId ||
+      existing.worktreePath !== input.worktreePath
+    )
+      throw new TaskWorkspaceError(
+        "workspace_conflict",
+        "Continuation ID was already used with different arguments",
+      );
+    return existing;
+  }
+  if (!input.id || input.id.length > 200 || row.state !== "checkpointed")
+    throw new TaskWorkspaceError(
+      "workspace_not_ready",
+      "Continue only from a completed checkpoint",
+    );
+  if (samePath(input.worktreePath, row.worktreePath))
+    throw new TaskWorkspaceError("workspace_conflict", "Continuation requires a new checkout path");
+  const result = publishTaskWorkspaceCheckpoint(row.taskId);
+  const pack = verifyLocalCodeSnapshot(input.snapshotId, row.projectId, row.projectRoot);
+  if (
+    pack.descriptor.taskId !== row.taskId ||
+    pack.descriptor.commitSha !== (result.commitSha ?? row.snapshotCommit)
+  )
+    throw new TaskWorkspaceError(
+      "workspace_conflict",
+      "The snapshot does not describe this workspace checkpoint",
+    );
+  return db.transaction((tx) => {
+    const current = tx
+      .select()
+      .from(taskExecutionWorkspaces)
+      .where(eq(taskExecutionWorkspaces.taskId, row.taskId))
+      .get();
+    if (!current || current.revision !== row.revision || current.state !== "checkpointed")
+      throw new TaskWorkspaceError(
+        "workspace_conflict",
+        "Workspace changed before continuation reservation",
+      );
+    const reserved = tx
+      .select()
+      .from(taskWorkspaceContinuations)
+      .where(
+        and(
+          eq(taskWorkspaceContinuations.taskId, row.taskId),
+          eq(taskWorkspaceContinuations.fromRevision, row.revision),
+        ),
+      )
+      .get();
+    if (reserved)
+      throw new TaskWorkspaceError(
+        "workspace_conflict",
+        "This checkpoint already has a reserved continuation",
+      );
+    const values = {
+      ...input,
+      fromRevision: row.revision,
+      previousWorkspaceJson: JSON.stringify(row),
+    };
+    tx.insert(taskWorkspaceContinuations).values(values).run();
+    return { ...values, activatedRevision: null };
+  });
+}
+
+export function activateTaskWorkspaceContinuation(id: string): Workspace {
+  const db = getDb();
+  const continuation = db
+    .select()
+    .from(taskWorkspaceContinuations)
+    .where(eq(taskWorkspaceContinuations.id, id))
+    .get();
+  if (!continuation)
+    throw new TaskWorkspaceError("workspace_missing", "Continuation journal was not found");
+  const row = requireWorkspace(continuation.taskId);
+  if (continuation.activatedRevision !== null) {
+    if (
+      row.worktreePath !== continuation.worktreePath ||
+      row.sourceSnapshotId !== continuation.snapshotId
+    )
+      throw new TaskWorkspaceError(
+        "workspace_conflict",
+        "This continuation has already been superseded",
+      );
+    assertTaskCheckout(checkout(row));
+    return row;
+  }
+  if (row.revision !== continuation.fromRevision || row.state !== "checkpointed")
+    throw new TaskWorkspaceError("workspace_conflict", "Continuation source changed");
+  const result = publishTaskWorkspaceCheckpoint(row.taskId);
+  const pack = verifyLocalCodeSnapshot(continuation.snapshotId, row.projectId, row.projectRoot);
+  if (
+    pack.descriptor.taskId !== row.taskId ||
+    pack.descriptor.commitSha !== (result.commitSha ?? row.snapshotCommit)
+  )
+    throw new TaskWorkspaceError(
+      "workspace_conflict",
+      "The snapshot is not the sealed task checkpoint",
+    );
+  const next: TaskCheckoutInput = {
+    ...checkout(row),
+    worktreePath: continuation.worktreePath,
+    snapshotCommit: pack.descriptor.commitSha,
+  };
+  const task = db.select().from(tasks).where(eq(tasks.id, row.taskId)).get();
+  if (!task || task.lockedBy || task.plan !== pack.context.plan.text)
+    throw new TaskWorkspaceError(
+      "workspace_not_ready",
+      "Task must be idle and its plan must match the context snapshot",
+    );
+  const planPath = task.planPath
+    ? relative(row.worktreePath, taskCheckoutFilePath(row.worktreePath, task.planPath))
+        .split("\\")
+        .join("/")
+    : task.planPath;
+  prepareTaskCheckout(next);
+  installContextSnapshot({ checkout: next, package: pack });
+  const scope = beginTaskChangeScope(next, {
+    requireClean: true,
+    contextPaths: pack.context.files
+      .filter((file) => file.source === "portable")
+      .map((file) => file.path),
+  });
+  publishTaskWorkspaceCheckpoint(row.taskId);
+  db.transaction((tx) => {
+    const currentTask = tx.select().from(tasks).where(eq(tasks.id, row.taskId)).get();
+    if (
+      !currentTask ||
+      currentTask.projectId !== row.projectId ||
+      currentTask.worktreePath !== row.worktreePath ||
+      currentTask.branchName !== null ||
+      currentTask.lockedBy ||
+      currentTask.plan !== pack.context.plan.text
+    )
+      throw new TaskWorkspaceError(
+        "workspace_conflict",
+        "Task changed while preparing the continuation",
+      );
+    const revision = row.revision + 1;
+    const changed = tx
+      .update(taskExecutionWorkspaces)
+      .set({
+        worktreePath: next.worktreePath,
+        snapshotCommit: next.snapshotCommit,
+        sourceSnapshotId: pack.id,
+        state: "active",
+        scopeJson: serializeTaskChangeScope(scope),
+        intentJson: null,
+        resultJson: null,
+        revision,
+      })
+      .where(
+        and(
+          eq(taskExecutionWorkspaces.taskId, row.taskId),
+          eq(taskExecutionWorkspaces.revision, row.revision),
+          eq(taskExecutionWorkspaces.state, "checkpointed"),
+        ),
+      )
+      .run();
+    if (changed.changes !== 1)
+      throw new TaskWorkspaceError(
+        "workspace_conflict",
+        "Another process activated this continuation",
+      );
+    tx.update(taskWorkspaceContinuations)
+      .set({ activatedRevision: revision })
+      .where(eq(taskWorkspaceContinuations.id, id))
+      .run();
+    tx.update(tasks)
+      .set({
+        worktreePath: next.worktreePath,
+        planPath,
+        sessionId: null,
+        activeRuntimeStatus: null,
+        activeRuntimeSelectionJson: null,
+        autoQueueCommitStatus: null,
+        autoQueueCommitBaseSha: next.snapshotCommit,
+        commitSha: null,
+        autoQueueCommitError: null,
+        autoQueueCommitCompletedAt: null,
+      })
+      .where(eq(tasks.id, row.taskId))
+      .run();
+  });
+  return requireWorkspace(row.taskId);
+}
+
+export function continueTaskExecutionWorkspace(
+  input: Parameters<typeof beginTaskWorkspaceContinuation>[0],
+): Workspace {
+  beginTaskWorkspaceContinuation(input);
+  return activateTaskWorkspaceContinuation(input.id);
 }

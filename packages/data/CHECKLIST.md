@@ -10,3 +10,4 @@ Run through this list whenever you touch anything under `packages/data/`.
 - [ ] `npm test`
 - [ ] Shared personal-board mutations journal the whitelist delta in the same transaction; remote apply never calls source writers or emits an outbox echo. Plans/workflow require field revisions.
 - [ ] Execution workspace scopes persist before writes; prepared checkpoint intents persist before Git ref publication. Process-restart tests cover Git publication without SQLite acknowledgement. Scope/intent records stay local and never bypass personal execution guards.
+- [ ] Continuing a checkpoint reserves the successor before filesystem preparation and activates its root/scope atomically. Restart uses the immutable saved package, clears native session reuse, and never adopts unclaimed target edits or recaptures source context.

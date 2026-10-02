@@ -7,5 +7,6 @@ Run through this list whenever you touch anything under `packages/shared/`.
 - [ ] If you changed `stateMachine.ts`, verify every subagent and API route that drives stage transitions still honours the new rules.
 - [ ] Keep `browser.ts` free of Node-only imports — the web package depends on it.
 - [ ] Task checkpoint changes preserve source/task HEAD, branches, index and unrelated files in native Git fixtures. Begin scopes before writes; reject overlapping pre-existing edits and stale checkpoint refs. Snapshot plumbing must not execute repository hooks or external filters.
+- [ ] Context packages verify descriptor/manifest bindings and every blob. Portable paths are explicit, bounded and collision-free; edited existing context, local credentials/settings and unsafe role configuration must not be silently copied or overwritten.
 - [ ] `npm run lint`
 - [ ] `npm test`

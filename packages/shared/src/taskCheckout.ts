@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
+import { isPortableSnapshotPath } from "./handoff/contracts.js";
 
 export class TaskCheckoutError extends Error {
   constructor(
@@ -366,4 +367,30 @@ export function taskCheckpointRef(input: Pick<TaskCheckoutInput, "projectId" | "
     .update(JSON.stringify([input.projectId, input.taskId]))
     .digest("hex");
   return `refs/aif/tasks/${key}/checkpoint`;
+}
+
+/** Host writes must remain inside their registered checkout, including when a
+ * plan/config path is absolute or contains a symlink/junction. */
+export function taskCheckoutFilePath(root: string, requested: string): string {
+  const target = resolve(root, requested);
+  const path = relative(root, target);
+  if (!path || !contains(root, target) || !isPortableSnapshotPath(path.split(sep).join("/")))
+    throw new TaskCheckoutError("invalid_path", "Task file path must stay inside the checkout");
+  let cursor = root;
+  for (const part of path.split(sep)) {
+    cursor = join(cursor, part);
+    try {
+      const stat = lstatSync(cursor);
+      if (stat.isSymbolicLink())
+        throw new TaskCheckoutError(
+          "invalid_path",
+          "Task file path contains a symlink or junction",
+        );
+      if (cursor === target && !stat.isFile())
+        throw new TaskCheckoutError("invalid_path", "Task file path is not a regular file");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  return target;
 }

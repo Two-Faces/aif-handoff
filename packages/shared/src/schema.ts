@@ -793,4 +793,42 @@ export const taskExecutionWorkspaces = sqliteTable("task_execution_workspaces", 
   scopeJson: text("scope_json"),
   intentJson: text("intent_json"),
   resultJson: text("result_json"),
+  sourceSnapshotId: text("source_snapshot_id"),
 });
+
+export const codeSnapshots = sqliteTable("handoff_code_snapshots", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  taskId: text("task_id").notNull(),
+  descriptorJson: text("descriptor_json").notNull(),
+  contextJson: text("context_json").notNull(),
+});
+export const contextSnapshotBlobs = sqliteTable("handoff_context_blobs", {
+  digest: text("digest").primaryKey(),
+  base64: text("base64").notNull(),
+});
+export const codeSnapshotLocations = sqliteTable("handoff_code_snapshot_locations", {
+  snapshotId: text("snapshot_id")
+    .primaryKey()
+    .references(() => codeSnapshots.id),
+  projectRoot: text("project_root").notNull(),
+});
+export const taskWorkspaceContinuations = sqliteTable(
+  "task_workspace_continuations",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    fromRevision: integer("from_revision").notNull(),
+    snapshotId: text("snapshot_id")
+      .notNull()
+      .references(() => codeSnapshots.id),
+    worktreePath: text("worktree_path").notNull().unique(),
+    previousWorkspaceJson: text("previous_workspace_json").notNull(),
+    activatedRevision: integer("activated_revision"),
+  },
+  (table) => [
+    uniqueIndex("task_workspace_continuation_revision").on(table.taskId, table.fromRevision),
+  ],
+);

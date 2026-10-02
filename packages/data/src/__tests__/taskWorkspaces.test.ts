@@ -19,6 +19,11 @@ import {
   resetEnvCache,
   PersonalExecutionDisabledError,
   prepareTaskCheckout,
+  continuationNotesSchema,
+  contextSnapshotBlobs,
+  codeSnapshots,
+  taskWorkspaceContinuations,
+  projects,
 } from "@aif/shared";
 import { eq } from "drizzle-orm";
 
@@ -29,6 +34,10 @@ vi.mock("@aif/shared/server", async (original) => ({
 }));
 const data = await import("../index.js");
 const TIMEOUT = 30_000;
+const notes = continuationNotesSchema.parse({
+  goal: "Continue this task",
+  nextStep: "Verify native behavior",
+});
 const repository = fileURLToPath(new URL("../../../../", import.meta.url));
 const worker = fileURLToPath(new URL("fixtures/workspaceRecovery.ts", import.meta.url));
 function git(root: string, ...args: string[]) {
@@ -105,6 +114,288 @@ function runWorker(mode: string): string {
 }
 
 describe("local execution workspace journal", () => {
+  it(
+    "continues a sealed snapshot in a new root, retaining the old checkout and a linear code/context history",
+    () => {
+      const input = seed();
+      data.prepareTaskExecutionWorkspace(input);
+      data.persistTaskPlanForTask({
+        taskId: input.taskId,
+        planText: "# Continue plan",
+        planPath: "plan.md",
+      });
+      writeFileSync(join(input.worktreePath, "task.txt"), "first checkpoint\n");
+      const checkpoint = data.checkpointTaskExecutionWorkspace(input.taskId, "first checkpoint");
+      const contextPath = ".ai-factory/RULES.md";
+      mkdirSync(join(input.worktreePath, ".ai-factory"));
+      // Make this portable file ignored only on the source machine; the next root
+      // must exclude it from code scopes even without this local ignore rule.
+      writeFileSync(join(source, ".git/info/exclude"), ".ai-factory/\n");
+      writeFileSync(join(input.worktreePath, contextPath), "AIF 2.19 context\n");
+      const pack = data.captureTaskCodeSnapshot({
+        taskId: input.taskId,
+        notes,
+        portablePaths: [contextPath],
+      });
+      expect(pack.descriptor.commitSha).toBe(checkpoint.commitSha);
+      expect(data.loadCodeSnapshotPackage(pack.id, input.projectId)).toEqual(pack);
+      const sourceIndex = readFileSync(join(source, ".git/index"));
+      const oldIndex = readFileSync(
+        join(git(input.worktreePath, "rev-parse", "--absolute-git-dir"), "index"),
+      );
+      db.current
+        .update(tasks)
+        .set({
+          sessionId: "local-session-must-not-resume",
+          activeRuntimeSelectionJson: "{}",
+          planPath: join(input.worktreePath, "plan.md"),
+        })
+        .where(eq(tasks.id, input.taskId))
+        .run();
+      const continuation = {
+        id: "next-step",
+        taskId: input.taskId,
+        snapshotId: pack.id,
+        worktreePath: join(directory, "next"),
+      };
+      const next = data.continueTaskExecutionWorkspace(continuation);
+      expect(next).toMatchObject({
+        state: "active",
+        sourceSnapshotId: pack.id,
+        snapshotCommit: checkpoint.commitSha,
+      });
+      expect(data.continueTaskExecutionWorkspace(continuation)).toEqual(next);
+      expect(data.findTaskById(input.taskId)).toMatchObject({
+        worktreePath: continuation.worktreePath,
+        planPath: "plan.md",
+        sessionId: null,
+        activeRuntimeSelectionJson: null,
+      });
+      expect(readFileSync(join(continuation.worktreePath, contextPath), "utf8")).toBe(
+        "AIF 2.19 context\n",
+      );
+      expect(readFileSync(join(continuation.worktreePath, "plan.md"), "utf8")).toContain(
+        "# Continue plan",
+      );
+      // The new scope persists its explicit exclusions, independently of ignores.
+      writeFileSync(join(source, ".git/info/exclude"), "");
+      writeFileSync(join(continuation.worktreePath, contextPath), "Updated next-step context\n");
+      writeFileSync(join(continuation.worktreePath, "task.txt"), "second checkpoint\n");
+      const second = data.checkpointTaskExecutionWorkspace(input.taskId, "second checkpoint");
+      expect(second.paths).toEqual(["task.txt"]);
+      expect(git(source, "rev-parse", `${second.commitSha}^`)).toBe(checkpoint.commitSha);
+      const nextPack = data.captureTaskCodeSnapshot({ taskId: input.taskId, notes });
+      expect(nextPack.descriptor.parentSnapshotId).toBe(pack.id);
+      expect(nextPack.context.files.map((file) => file.path)).toContain(contextPath);
+      expect(nextPack.descriptor.contextDigest).not.toBe(pack.descriptor.contextDigest);
+      const explicitEmpty = data.captureTaskCodeSnapshot({
+        taskId: input.taskId,
+        notes,
+        portablePaths: [],
+      });
+      expect(explicitEmpty.context.files.map((file) => file.path)).not.toContain(contextPath);
+      expect(git(source, "rev-parse", "main")).toBe(input.snapshotCommit);
+      expect(readFileSync(join(source, ".git/index"))).toEqual(sourceIndex);
+      expect(
+        readFileSync(join(git(input.worktreePath, "rev-parse", "--absolute-git-dir"), "index")),
+      ).toEqual(oldIndex);
+      expect(readFileSync(join(input.worktreePath, "task.txt"), "utf8")).toBe("first checkpoint\n");
+      expect(
+        db.current.select().from(taskWorkspaceContinuations).get()?.previousWorkspaceJson,
+      ).toContain('"state":"checkpointed"');
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "validates complete immutable packages on ingress and on project-scoped load",
+    () => {
+      const input = seed();
+      expect(() => data.captureTaskCodeSnapshot({ taskId: input.taskId, notes })).toThrow();
+      data.prepareTaskExecutionWorkspace(input);
+      expect(() => data.captureTaskCodeSnapshot({ taskId: input.taskId, notes })).toThrow();
+      data.persistTaskPlanForTask({
+        taskId: input.taskId,
+        planText: "# Context",
+        planPath: "AGENTS.md",
+      });
+      data.checkpointTaskExecutionWorkspace(input.taskId, "context");
+      const pack = data.captureTaskCodeSnapshot({ taskId: input.taskId, notes });
+      expect(data.storeCodeSnapshotPackage(pack)).toEqual(pack);
+      expect(() => data.storeCodeSnapshotPackage({ ...pack, blobs: [] })).toThrow();
+      expect(() => data.loadCodeSnapshotPackage(pack.id, "different-project")).toThrow();
+      const blob = pack.blobs[0];
+      db.current
+        .update(contextSnapshotBlobs)
+        .set({ base64: "Y29ycnVwdA==" })
+        .where(eq(contextSnapshotBlobs.digest, blob.digest))
+        .run();
+      expect(() => data.storeCodeSnapshotPackage(pack)).toThrow();
+      expect(() => data.loadCodeSnapshotPackage(pack.id, input.projectId)).toThrow();
+      db.current
+        .delete(contextSnapshotBlobs)
+        .where(eq(contextSnapshotBlobs.digest, blob.digest))
+        .run();
+      expect(() => data.loadCodeSnapshotPackage(pack.id, input.projectId)).toThrow();
+      data.storeCodeSnapshotPackage(pack);
+      db.current
+        .update(codeSnapshots)
+        .set({ contextJson: "{}" })
+        .where(eq(codeSnapshots.id, pack.id))
+        .run();
+      expect(() => data.storeCodeSnapshotPackage(pack)).toThrow();
+      expect(() => data.loadCodeSnapshotPackage(pack.id, input.projectId)).toThrow();
+      db.current
+        .update(codeSnapshots)
+        .set({ contextJson: "invalid-json" })
+        .where(eq(codeSnapshots.id, pack.id))
+        .run();
+      expect(() => data.loadCodeSnapshotPackage(pack.id, input.projectId)).toThrow();
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "reserves a single continuation and blocks conflicting requests, changed plans, running tasks and personal policy",
+    () => {
+      const input = seed();
+      data.prepareTaskExecutionWorkspace(input);
+      data.checkpointTaskExecutionWorkspace(input.taskId, "no change");
+      const pack = data.captureTaskCodeSnapshot({ taskId: input.taskId, notes });
+      const request = {
+        id: "next",
+        taskId: input.taskId,
+        snapshotId: pack.id,
+        worktreePath: join(directory, "next"),
+      };
+      expect(() =>
+        data.beginTaskWorkspaceContinuation({ ...request, worktreePath: input.worktreePath }),
+      ).toThrow();
+      const reserved = data.beginTaskWorkspaceContinuation(request);
+      expect(data.beginTaskWorkspaceContinuation(request)).toEqual(reserved);
+      expect(() => data.beginTaskWorkspaceContinuation({ ...request, id: "duplicate" })).toThrow();
+      expect(() =>
+        data.beginTaskWorkspaceContinuation({ ...request, worktreePath: join(directory, "other") }),
+      ).toThrow();
+      expect(() => data.activateTaskWorkspaceContinuation("missing")).toThrow();
+      db.current
+        .update(tasks)
+        .set({ lockedBy: "running-process" })
+        .where(eq(tasks.id, input.taskId))
+        .run();
+      expect(() => data.activateTaskWorkspaceContinuation(request.id)).toThrow();
+      expect(existsSync(request.worktreePath)).toBe(false);
+      db.current
+        .update(tasks)
+        .set({ lockedBy: null, plan: "changed after capture" })
+        .where(eq(tasks.id, input.taskId))
+        .run();
+      expect(() => data.activateTaskWorkspaceContinuation(request.id)).toThrow();
+      expect(existsSync(request.worktreePath)).toBe(false);
+      db.current
+        .update(projects)
+        .set({ personalMode: true })
+        .where(eq(projects.id, input.projectId))
+        .run();
+      expect(() => data.activateTaskWorkspaceContinuation(request.id)).toThrow(
+        PersonalExecutionDisabledError,
+      );
+      expect(() => data.captureTaskCodeSnapshot({ taskId: input.taskId, notes })).toThrow(
+        PersonalExecutionDisabledError,
+      );
+      expect(existsSync(request.worktreePath)).toBe(false);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "refuses to adopt unclaimed target edits after a crash and rejects plan paths outside the owned root",
+    () => {
+      const input = seed();
+      data.prepareTaskExecutionWorkspace(input);
+      expect(() =>
+        data.persistTaskPlanForTask({
+          taskId: input.taskId,
+          planText: "escape",
+          planPath: join(directory, "outside.md"),
+        }),
+      ).toThrow();
+      expect(existsSync(join(directory, "outside.md"))).toBe(false);
+      db.current
+        .update(tasks)
+        .set({ planPath: "owned-plan.md" })
+        .where(eq(tasks.id, input.taskId))
+        .run();
+      mkdirSync(join(input.worktreePath, ".ai-factory"));
+      writeFileSync(
+        join(input.worktreePath, ".ai-factory", "config.yaml"),
+        "paths:\n  plan: ../outside.md\n  fix_plan: ../outside-fix.md\n",
+      );
+      data.persistTaskPlanForTask({ taskId: input.taskId, planText: "# Owned plan", isFix: false });
+      expect(readFileSync(join(input.worktreePath, "owned-plan.md"), "utf8")).toBe(
+        "# Owned plan\n",
+      );
+      expect(existsSync(join(directory, "outside.md"))).toBe(false);
+      expect(() =>
+        data.persistTaskPlanForTask({
+          taskId: input.taskId,
+          planText: "# Escape fix",
+          isFix: true,
+        }),
+      ).toThrow();
+      expect(existsSync(join(directory, "outside-fix.md"))).toBe(false);
+      data.checkpointTaskExecutionWorkspace(input.taskId, "no change");
+      const pack = data.captureTaskCodeSnapshot({ taskId: input.taskId, notes });
+      const request = {
+        id: "next",
+        taskId: input.taskId,
+        snapshotId: pack.id,
+        worktreePath: join(directory, "next"),
+      };
+      data.beginTaskWorkspaceContinuation(request);
+      prepareTaskCheckout({
+        ...input,
+        worktreePath: request.worktreePath,
+        snapshotCommit: pack.descriptor.commitSha,
+      });
+      writeFileSync(join(request.worktreePath, "task.txt"), "unclaimed after process death\n");
+      expect(() => data.activateTaskWorkspaceContinuation(request.id)).toThrow();
+      expect(data.getTaskExecutionWorkspace(input.taskId)?.state).toBe("checkpointed");
+      expect(data.findTaskById(input.taskId)?.worktreePath).toBe(input.worktreePath);
+      expect(readFileSync(join(request.worktreePath, "task.txt"), "utf8")).toBe(
+        "unclaimed after process death\n",
+      );
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "recovers prepared code/context files in a new process without rereading mutable source notes",
+    () => {
+      runWorker("initialize");
+      runWorker("prepare");
+      runWorker("recover");
+      const reserved = JSON.parse(runWorker("reserve-continuation"));
+      runWorker("materialize-continuation");
+      writeFileSync(
+        join(directory, "task", ".ai-factory", "RULES.md"),
+        "changed source after capture\n",
+      );
+      const activated = JSON.parse(runWorker("activate-continuation"));
+      expect(activated).toMatchObject({
+        state: "active",
+        sourceSnapshotId: reserved.snapshotId,
+        worktreePath: join(directory, "next"),
+      });
+      expect(JSON.parse(runWorker("activate-continuation"))).toEqual(activated);
+      expect(readFileSync(join(directory, "next", ".ai-factory", "RULES.md"), "utf8")).toBe(
+        "frozen context before restart\n",
+      );
+      expect(JSON.parse(runWorker("root"))).toBe(join(directory, "next"));
+    },
+    TIMEOUT,
+  );
+
   it(
     "persists scope before execution, redirects the source root, and blocks other roots or task bindings",
     () => {

@@ -1214,6 +1214,27 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 35,
+    description: "Immutable code/context snapshots and local workspace continuation journal",
+    sql: `
+      ALTER TABLE task_execution_workspaces ADD COLUMN source_snapshot_id TEXT;
+      CREATE TABLE handoff_code_snapshots (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, task_id TEXT NOT NULL,
+        descriptor_json TEXT NOT NULL, context_json TEXT NOT NULL
+      );
+      CREATE TABLE handoff_context_blobs (digest TEXT PRIMARY KEY, base64 TEXT NOT NULL);
+      CREATE TABLE handoff_code_snapshot_locations (
+        snapshot_id TEXT PRIMARY KEY REFERENCES handoff_code_snapshots(id), project_root TEXT NOT NULL
+      );
+      CREATE TABLE task_workspace_continuations (
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        from_revision INTEGER NOT NULL, snapshot_id TEXT NOT NULL REFERENCES handoff_code_snapshots(id),
+        worktree_path TEXT NOT NULL UNIQUE, previous_workspace_json TEXT NOT NULL, activated_revision INTEGER,
+        UNIQUE (task_id, from_revision)
+      );
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {

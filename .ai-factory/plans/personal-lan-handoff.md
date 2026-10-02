@@ -105,16 +105,18 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
 ## M2. Снимки кода и продолжение задачи
 
 - [ ] **P10. Сделать commits scoped и task checkouts воспроизводимыми.**
-  - **В работе, первый блок M2:** `codex/personal-lan-handoff-m2` от принятого M1 `b523143`; отдельный worktree сохраняет работающие нативные M1-узлы. Добавлены exact-commit checkout и host-controlled checkpoint primitives в shared; текущие runners ещё не переведены на них, P10 не закрыта.
+  - **В работе:** `codex/personal-lan-handoff-m2` от принятого M1 `b523143`, теперь в основном checkout/IDEA. Готовы exact-commit checkout, host-controlled checkpoints, registered root guards и local continuation; P10 остаётся открытой до onboarding/run gates и native Mac acceptance. Нативные M1-узлы сохраняются, quality gates изолированы.
   - Зависимости: P02, P03.
   - Файлы: `packages/shared/src/commitWorkflow.ts`, `gitIsolation.ts`, `packages/agent/src/autoQueueCommit.ts`, `subagents/planner.ts`, остальные mutating stage root resolution.
   - Детерминированный ownership/whitelist diff helper; убрать требование prompt `git add -A`; сохранить index/unrelated files. Exact-snapshot root для implementation/fix/QA/commit, а не только условного planner worktree.
   - Context overlay не переписывает mutable reused worktree. Local-only guard протестировать на worker, API helper и GitHub workflow.
   - Проверка: чужие staged hunks/untracked/dirty files, чужая ветка, одинаковое имя ветки с другим HEAD, глобально грязный root, один commit или корректная последовательность task commits. Failure сохраняет исходное состояние.
   - **Второй блок:** append-only v34 хранит local workspace, исходный scope и prepared commit intent. Подключены stage/API/chat root guards, запись планов и детерминированные API/auto-queue checkpoints; legacy prompt больше не выполняет `git add -A`. Проверяется восстановление в новом процессе после Git publication до SQLite ACK.
-  - Остались onboarding/rotation checkout между checkpoint и новым run вместе с P13–P15 и native Mac acceptance. До P13/P14 API и worker personal-проектов остаются закрыты прежними guards; внутренний журнал сам по себе не останавливает текущий процесс и не выдаёт execution grant.
+  - **Третий блок:** local continuation journal v35 резервирует новую рабочую копию из immutable code/context snapshot и атомарно активирует root/scope. Retry после materialization до activation использует сохранённый пакет; старые файлы/index остаются неизменны, session ID очищается, plan path ограничен новым root.
+  - Остались onboarding/подключение нового run вместе с P13–P15 и native Mac acceptance. До P13/P14 API и worker personal-проектов остаются закрыты прежними guards; внутренний журнал сам по себе не останавливает текущий процесс и не выдаёт execution grant.
 
-- [ ] **P11. Добавить immutable code/context snapshot contract.**
+- [x] **P11. Добавить immutable code/context snapshot contract.**
+  - **Код и quality gate готовы.** Строгие descriptor/manifest/blobs, immutable SQLite storage, exact Git context + explicit portable paths, новый context digest при изменениях, idempotent installation без перезаписи. Context scripts/commands не выполняются; local machine/auth/session configs исключены. Registered coordinator не запускает повторный AIF init. Native Mac acceptance M2 остаётся открытой.
   - Зависимости: P10, P04.
   - Предлагаемые модули: `packages/shared/src/handoff/contracts.ts`, `packages/data/src/codeSnapshots.ts`, `packages/api/src/services/contextSnapshot.ts`.
   - Snapshot commit/object format, digest, portable allowlist manifest; goal/plan/next steps/test outcomes. Поддержать ignored portable context без копирования machine configs/session history/secrets.
@@ -211,6 +213,16 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
 | AC-16 | P20/P21 | CRM pilot и manifest подключённых checkout |
 
 В планировании проверки кода и native scenarios не выполнялись: функциональности пока нет. При реализации записывать точные команды, результаты и ограничения, а не только отметки checkbox. Ошибки baseline и недоступные среды отделять от регрессий; не ослаблять assertions ради зелёной проверки.
+
+## Третий блок M2 — 02.10.2026
+
+- P11 реализован в shared `handoff/`, data `codeSnapshots.ts`, API `services/contextSnapshot.ts`. Metadata и все blobs проверяются перед записью и при чтении; tracked context берётся из точного Git commit, ignored/untracked — только из explicit portable allowlist. Новый контекст меняет digest, неполный/повреждённый пакет не ready. Portable Codex role TOML ограничен документированным подмножеством без локального MCP/auth и повышения разрешений.
+- Append-only v35 добавляет immutable snapshots/blobs и local continuation journal. Один successor резервируется для sealed revision; exact checkout и контекст готовятся до atomic root/scope activation. Native task session очищается, plan path переносится внутрь нового root, portable context исключён из code commit независимо от локальных ignore rules. Старые workspace files/index/HEAD и пользовательские ветки сохраняются.
+- Проверены повторная установка и конфликт с изменённым контекстом, traversal/case/Unicode/junction guards, отсутствие запуска внешних Git filters, scoped последовательность двух commits, отсутствие повторного AIF init, upgrade v34 без изменения старого журнала. Отдельные Node-процессы восстанавливают continuation после materialization до activation, используя frozen blobs даже после изменения исходных заметок.
+- При review исправлено расхождение выбора plan path при явно заданном `isFix`: в shared helper передаётся уже проверенный путь. Регрессия прошла отдельно, затем все 309 data tests повторно прошли с coverage на итоговом коде; итоговый lint 10/10 также повторён после исправления.
+- `npm run ai:validate` через isolated driver завершился **exit 0**: format, lint 10/10, tests/coverage 10/10, build 7/7, Chromium 8/8, k6 3/3, protocol CLI 0.145.0, checklist. Unit/integration: **3273 passed / 1 existing skipped**. Минимальные coverage metrics: shared 76.33%, data 74.72%, API 70.92%, agent 76.31%, runtime 73.25%, web 74.49%, MCP 86.27%. Лог: `.codex/m2/logs/context-validate.log`; финальный lint: `context-final-lint.log`.
+- Checklists shared/data/api/agent пройдены по применимым пунктам: DB boundary, upgrade/rollback/restart cases, source/index preservation, shared consumers build, browser-safe exports, coordinator regression. Новых REST/WS endpoints, UI components, runtime adapter capabilities, packages/dependencies нет; соответствующие API/UI/Pencil/adapter/Docker checks неприменимы.
+- P12 transfer, P13 grants, P14 stop/fencing и P15 UI/onboarding ещё не реализованы; M2 не объявлен готовым. Mac tests новых Git/context/continuation helpers ожидают ручного запуска пользователя после публикации M2. M1 native API/peer/UI и их данные сохранены; реальные проекты не изменялись. Push, PR и merge M2→M1 не выполнялись.
 
 ## Второй блок M2 — 02.10.2026
 

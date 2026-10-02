@@ -1,4 +1,5 @@
 export * from "./taskWorkspaces.js";
+export * from "./codeSnapshots.js";
 import { getTaskExecutionWorkspace, resolveRegisteredTaskRoot } from "./taskWorkspaces.js";
 
 import {
@@ -30,6 +31,7 @@ import {
   generatePlanPath,
   getEnv,
   getProjectConfig,
+  taskCheckoutFilePath,
   isRuntimeTransport,
   logger as createLogger,
   normalizeRuntimeLimitSnapshot,
@@ -2233,14 +2235,27 @@ export function persistTaskPlanForTask(input: {
       const executionRoot = workspace
         ? resolveRegisteredTaskRoot(input.taskId, input.projectRoot ?? workspace.worktreePath)
         : input.projectRoot;
+      let effectiveIsFix = input.isFix;
+      let effectivePlanPath = input.planPath;
+      if (workspace && executionRoot) {
+        const task = getDb().select().from(tasks).where(eq(tasks.id, input.taskId)).get();
+        const config = getProjectConfig(executionRoot);
+        effectiveIsFix = input.isFix ?? task?.isFix;
+        const path = effectiveIsFix
+          ? config.paths.fix_plan
+          : input.planPath || task?.planPath || config.paths.plan;
+        // Pass the checked path through: supplying isFix can suppress the shared
+        // helper's metadata lookup, otherwise it could select a different path.
+        effectivePlanPath = taskCheckoutFilePath(executionRoot, path);
+      }
       return persistTaskPlan({
         db: getDb(),
         taskId: input.taskId,
         planText: input.planText,
         updatedAt: input.updatedAt,
         projectRoot: executionRoot,
-        isFix: input.isFix,
-        planPath: input.planPath,
+        isFix: effectiveIsFix,
+        planPath: effectivePlanPath,
       });
     },
     { expected: input.expectedSyncRevisions, actor: input.actor },

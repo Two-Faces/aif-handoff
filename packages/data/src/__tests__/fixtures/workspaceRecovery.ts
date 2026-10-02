@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   createProject,
@@ -8,8 +8,19 @@ import {
   prepareTaskWorkspaceCheckpoint,
   publishTaskWorkspaceCheckpoint,
   assertTaskExecutionAllowed,
+  captureTaskCodeSnapshot,
+  beginTaskWorkspaceContinuation,
+  activateTaskWorkspaceContinuation,
+  loadCodeSnapshotPackage,
 } from "../../index.js";
-import { getHeadCommitSha, publishTaskCommit, restoreTaskCommitIntent } from "@aif/shared";
+import {
+  continuationNotesSchema,
+  getHeadCommitSha,
+  installContextSnapshot,
+  prepareTaskCheckout,
+  publishTaskCommit,
+  restoreTaskCommitIntent,
+} from "@aif/shared";
 
 const [mode, directory] = process.argv.slice(2);
 const idsPath = join(directory, "ids.json");
@@ -60,6 +71,47 @@ if (mode === "initialize") {
     process.stdout.write(
       `${JSON.stringify(assertTaskExecutionAllowed(taskId, join(directory, "source")))}\n`,
     );
+  } else if (mode === "reserve-continuation") {
+    writeFileSync(join(directory, "source", ".git", "info", "exclude"), ".ai-factory/\n");
+    mkdirSync(join(directory, "task", ".ai-factory"));
+    writeFileSync(
+      join(directory, "task", ".ai-factory", "RULES.md"),
+      "frozen context before restart\n",
+    );
+    const pack = captureTaskCodeSnapshot({
+      taskId,
+      notes: continuationNotesSchema.parse({ goal: "Recover", nextStep: "Continue" }),
+      portablePaths: [".ai-factory/RULES.md"],
+    });
+    const continuation = beginTaskWorkspaceContinuation({
+      id: "recover-next",
+      taskId,
+      snapshotId: pack.id,
+      worktreePath: join(directory, "next"),
+    });
+    writeFileSync(join(directory, "continuation.json"), JSON.stringify(continuation));
+    process.stdout.write(`${JSON.stringify(continuation)}\n`);
+  } else if (mode === "materialize-continuation") {
+    const continuation = JSON.parse(readFileSync(join(directory, "continuation.json"), "utf8")) as {
+      snapshotId: string;
+      worktreePath: string;
+    };
+    const row = getTaskExecutionWorkspace(taskId)!;
+    const pack = loadCodeSnapshotPackage(continuation.snapshotId, row.projectId);
+    const checkout = {
+      projectRoot: row.projectRoot,
+      projectId: row.projectId,
+      taskId,
+      worktreePath: continuation.worktreePath,
+      snapshotCommit: pack.descriptor.commitSha,
+    };
+    prepareTaskCheckout(checkout);
+    installContextSnapshot({ checkout, package: pack });
+    process.stdout.write('"materialized without activation"\n');
+    // Exit after the filesystem phase; the next process must use the durable
+    // reservation and frozen blobs, without capturing the source again.
+  } else if (mode === "activate-continuation") {
+    process.stdout.write(`${JSON.stringify(activateTaskWorkspaceContinuation("recover-next"))}\n`);
   } else if (mode !== "report") throw new Error("Unknown recovery fixture mode");
   if (mode === "prepare" || mode === "report") {
     const row = getTaskExecutionWorkspace(taskId);

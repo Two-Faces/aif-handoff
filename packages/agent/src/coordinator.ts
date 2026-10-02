@@ -1,4 +1,8 @@
-import { isPersonalProject, assertTaskExecutionAllowed } from "@aif/data";
+import {
+  isPersonalProject,
+  assertTaskExecutionAllowed,
+  getTaskExecutionWorkspace,
+} from "@aif/data";
 import {
   clearTaskActiveRuntimeSelection,
   clearTaskRuntimeLimitSnapshot,
@@ -564,7 +568,7 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
     return false;
   }
 
-  if (_runtimeRegistry) {
+  if (_runtimeRegistry && !getTaskExecutionWorkspace(task.id)) {
     const initResult = initProject({
       projectRoot: executionRoot,
       registry: _runtimeRegistry,

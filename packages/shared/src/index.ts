@@ -21,6 +21,10 @@ export {
   syncPeerProjects,
   syncInvitations,
   taskExecutionWorkspaces,
+  codeSnapshots,
+  contextSnapshotBlobs,
+  codeSnapshotLocations,
+  taskWorkspaceContinuations,
   appSettings,
   participants,
   participantSessions,
@@ -265,11 +269,14 @@ export {
 } from "./gitIsolation.js";
 
 export { buildCommitPrompt } from "./commitWorkflow.js";
+export * from "./handoff/contracts.js";
+export * from "./handoff/contextSnapshot.js";
 
 export {
   assertTaskCheckout,
   prepareTaskCheckout,
   taskCheckpointRef,
+  taskCheckoutFilePath,
   TaskCheckoutError,
   type TaskCheckoutInput,
 } from "./taskCheckout.js";

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
+import { portableContextPathSchema } from "./handoff/contracts.js";
 import {
   assertTaskCheckout,
   assertTaskFileAttributes,
@@ -26,6 +27,7 @@ interface ScopeState {
   foreign: Map<string, string>;
   ref: string;
   previousRef: string | null;
+  contextPaths: string[];
 }
 const scopes = new WeakMap<TaskChangeScope, ScopeState>();
 
@@ -50,6 +52,7 @@ const scopeSchema = z
     checkout: checkoutSchema,
     foreign: z.array(foreignSchema).max(100_000),
     previousRef: oidSchema.nullable(),
+    contextPaths: z.array(portableContextPathSchema).max(512).default([]),
   })
   .strict();
 type StoredScope = z.infer<typeof scopeSchema>;
@@ -87,6 +90,7 @@ function scopeRecord(state: ScopeState): StoredScope {
     checkout: { ...state.checkout },
     foreign: [...state.foreign],
     previousRef: state.previousRef,
+    contextPaths: state.contextPaths,
   };
 }
 
@@ -117,12 +121,34 @@ function validateStoredScope(stored: StoredScope, expected: TaskCheckoutInput): 
     throw new TaskCheckoutError("invalid_scope", "Invalid pre-execution scope baseline.");
   }
   assertTaskCheckout(expected);
+  validateContextExclusions(expected, stored.contextPaths);
   return {
     checkout: stored.checkout,
     foreign: new Map(stored.foreign),
     ref: taskCheckpointRef(expected),
     previousRef: stored.previousRef,
+    contextPaths: stored.contextPaths,
   };
+}
+
+function validateContextExclusions(checkout: TaskCheckoutInput, paths: string[]): void {
+  if (paths.length === 0) return;
+  if (paths.length > 512 || new Set(paths.map((path) => path.toLowerCase())).size !== paths.length)
+    throw new TaskCheckoutError("invalid_scope", "Too many or duplicate portable context paths");
+  const tracked = new Set(
+    nulPaths(
+      taskGit(checkout.worktreePath, ["ls-tree", "-rz", "--name-only", checkout.snapshotCommit])
+        .output,
+    ).map((path) => path.toLowerCase()),
+  );
+  for (const path of paths) {
+    if (!portableContextPathSchema.safeParse(path).success || tracked.has(path.toLowerCase())) {
+      throw new TaskCheckoutError(
+        "invalid_scope",
+        "Only allowlisted, untracked portable context may be excluded from code commits",
+      );
+    }
+  }
 }
 
 /** Host-only persistence interface. Never accept this JSON from an API, peer or
@@ -163,7 +189,11 @@ export function restoreTaskCommitIntent(
     filePaths.size !== stored.files.length ||
     new Set(stored.paths).size !== stored.paths.length ||
     stored.paths.some((path) => !filePaths.has(path)) ||
-    stored.files.some(([path]) => stored.scope.foreign.some(([foreign]) => foreign === path))
+    stored.files.some(
+      ([path]) =>
+        stored.scope.foreign.some(([foreign]) => foreign === path) ||
+        stored.scope.contextPaths.includes(path),
+    )
   ) {
     throw new TaskCheckoutError(
       "invalid_scope",
@@ -297,12 +327,14 @@ function currentRef(checkout: TaskCheckoutInput, ref: string): string | null {
  */
 export function beginTaskChangeScope(
   input: TaskCheckoutInput,
-  options: { requireClean?: boolean } = {},
+  options: { requireClean?: boolean; contextPaths?: string[] } = {},
 ): TaskChangeScope {
   assertTaskCheckout(input);
   const checkout = { ...input };
   const ref = taskCheckpointRef(checkout);
   const previousRef = currentRef(checkout, ref);
+  const contextPaths = [...(options.contextPaths ?? [])].sort();
+  validateContextExclusions(checkout, contextPaths);
   if (previousRef !== null && previousRef !== checkout.snapshotCommit) {
     throw new TaskCheckoutError(
       "checkpoint_conflict",
@@ -310,10 +342,9 @@ export function beginTaskChangeScope(
     );
   }
   const foreign = new Map(
-    dirtyPaths(checkout.worktreePath).map((path) => [
-      path,
-      foreignFingerprint(checkout.worktreePath, path),
-    ]),
+    dirtyPaths(checkout.worktreePath)
+      .filter((path) => !contextPaths.includes(path))
+      .map((path) => [path, foreignFingerprint(checkout.worktreePath, path)]),
   );
   if (options.requireClean && foreign.size !== 0) {
     throw new TaskCheckoutError(
@@ -322,7 +353,7 @@ export function beginTaskChangeScope(
     );
   }
   const token = Object.freeze({ [scopeBrand]: true as const });
-  scopes.set(token, { checkout, foreign, ref, previousRef });
+  scopes.set(token, { checkout, foreign, ref, previousRef, contextPaths });
   return token;
 }
 
@@ -364,7 +395,9 @@ export function prepareTaskCommit(scope: TaskChangeScope, message: string): Task
       "The task checkpoint advanced after this scope began.",
     );
   }
-  const paths = dirtyPaths(root).filter((path) => !foreign.has(path));
+  const paths = dirtyPaths(root).filter(
+    (path) => !foreign.has(path) && !state.contextPaths.includes(path),
+  );
   const emptyIntent = (files: [string, string][] = []): TaskCommitIntent =>
     saveIntent(
       { version: 1, scope: scopeRecord(state), commitSha: null, treeSha: null, paths: [], files },
@@ -454,7 +487,7 @@ export function publishTaskCommit(intent: TaskCommitIntent): TaskCommitResult {
   const state = intents.get(intent);
   if (!state) throw new TaskCheckoutError("invalid_scope", "Unknown checkpoint intent.");
   const { stored } = state;
-  const { checkout, foreign, ref, previousRef } = validateStoredScope(
+  const { checkout, foreign, ref, previousRef, contextPaths } = validateStoredScope(
     stored.scope,
     stored.scope.checkout,
   );
@@ -466,7 +499,9 @@ export function publishTaskCommit(intent: TaskCommitIntent): TaskCommitResult {
         `Pre-existing changes differ from the saved scope: ${path}`,
       );
   }
-  const owned = dirtyPaths(root).filter((path) => !foreign.has(path));
+  const owned = dirtyPaths(root).filter(
+    (path) => !foreign.has(path) && !contextPaths.includes(path),
+  );
   if (owned.some((path) => !stored.files.some(([file]) => file === path))) {
     throw new TaskCheckoutError(
       "scope_changed",

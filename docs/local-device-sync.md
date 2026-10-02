@@ -214,11 +214,16 @@ code transfer or personal AI execution.
   Registered API/auto-queue commits use the journal directly and GitHub automation
   declines publication. Legacy interactive commit now uses only user-staged files;
   its prompt no longer stages the entire checkout.
-- To continue a checkpoint sequence, prepare a fresh checkout from the returned
-  commit. Automatic workspace rotation/onboarding and exclusive execution remain
-  P10/P13–P15 integration work. The local journal does not stop a process already
-  running, issue a device grant, or replace stop/fencing checks. These helpers are
-  not a filesystem sandbox; M1 execution denial remains until those gates pass.
+- `continueTaskExecutionWorkspace` now reserves one successor for a sealed
+  workspace revision, prepares a fresh checkout from its code/context snapshot,
+  and atomically activates the new root and original change scope. Retrying after
+  a process restart uses that reservation; unclaimed target edits block adoption.
+  Old checkout files/indexes remain intact. The task's old session ID is cleared,
+  and an absolute plan path is converted to a bounded path in the new root.
+  Onboarding and exclusive execution remain P13–P15 integration work. The local
+  journal does not stop a process already running, issue a device grant, or replace
+  stop/fencing checks. These helpers are not a filesystem sandbox; M1 execution
+  denial remains until those gates pass.
 
 The existing standalone worktree helper also stops replaying context on reuse,
 preserves tracked context on creation, and rejects an unrelated repository that
@@ -229,6 +234,50 @@ hunks, foreign untracked files, binary and UTF-8 paths, HEAD drift, ref contenti
 linear checkpoint chains, hook/filter non-execution, and independent Node process
 recovery after Git publication but before SQLite acknowledgement. Native macOS validation
 of these new primitives remains open, independently of the completed M1 acceptance.
+
+## Immutable code/context packages (P11)
+
+`captureTaskCodeSnapshot` seals context against the verified task checkpoint.
+The descriptor includes full commit/base IDs, Git object format, project/task/device
+identity, parent snapshot and a SHA-256 context digest. The manifest contains the
+goal, acceptance criteria, completed work, next step, decisions, open questions,
+plan revision and check outcomes with referenced context artifacts. Check commands
+are data and are never executed during capture, validation or installation.
+
+Tracked context comes from Git blobs at that exact commit, not dirty working files.
+Ignored/untracked context requires explicit `portablePaths`. The bounded allowlist
+includes `AGENTS.md`, `CLAUDE.md`, Markdown/text under `.ai-factory`, documents under
+`docs/agent-context`, portable skills under `.agents/skills`, and role definitions
+under `.codex/agents`. Machine settings, `.codex/config.toml`, auth/session files,
+user-home context, hidden nested paths and credentials are excluded from this
+context overlay. This does not remove files already committed as project code.
+Codex TOML roles accept a conservative subset of textual role/model/instruction
+fields and read-only/workspace-write sandbox settings; local MCP, commands and
+permission escalation require local configuration. Unsupported role syntax blocks
+the package instead of being silently rewritten.
+
+Limits are 512 files, 1 MiB per file, 8 MiB total file bytes and 1 MiB manifest JSON.
+Paths must be relative, portable across Windows/macOS, and free of case/Unicode or
+file/directory collisions. Blob contents, lengths and hashes, plan revision, and
+descriptor/manifest bindings are verified on both store and load. Missing blobs
+never become ready by referencing another project's cached digest.
+
+Migration v35 appends immutable metadata/blobs and a **local-only** continuation
+journal; v34 scopes/intents retain their original values. Snapshot refs are pinned
+under `refs/aif/snapshots/<id>` without changing user branches. Installation checks
+all existing files before writing missing portable files; existing edited context,
+symlink/junction paths and external Git filters block it. Identical retries are
+accepted. Portable files remain outside task code commits and their explicit
+selection carries forward to the next snapshot unless replaced by the caller.
+Registered snapshot execution skips implicit AI Factory initialization, preserving
+existing AIF 2.19 project context. Resuming uses a new local session.
+
+These are internal host APIs, not new REST endpoints or a runnable handoff UI.
+Board replication does not carry these packages yet. Git/blob LAN transfer and
+target readiness are P12; execution grants and confirmed process stop are P13/P14.
+Windows process-restart tests cover interruption after filesystem materialization
+but before activation, with later source-context changes. Native M2 Mac acceptance
+remains pending.
 
 ## Implementation references
 

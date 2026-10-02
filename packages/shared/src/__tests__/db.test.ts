@@ -7,7 +7,72 @@ import { eq } from "drizzle-orm";
 import { chatSessions } from "../schema.js";
 import { closeDb, createTestDb, getDb } from "../db.js";
 
-const CURRENT_SCHEMA_VERSION = 34;
+const CURRENT_SCHEMA_VERSION = 35;
+
+it("upgrades a v34 journal without changing its saved scope or revision", () => {
+  closeDb();
+  const path = join(tmpdir(), `aif-context-upgrade-${crypto.randomUUID()}.sqlite`);
+  const connections: Database.Database[] = [];
+  try {
+    getDb(path);
+    closeDb();
+    const old = new Database(path);
+    connections.push(old);
+    old.exec("DROP TABLE task_workspace_continuations");
+    old.exec("DROP TABLE handoff_code_snapshot_locations");
+    old.exec("DROP TABLE handoff_context_blobs");
+    old.exec("DROP TABLE handoff_code_snapshots");
+    old.exec("ALTER TABLE task_execution_workspaces DROP COLUMN source_snapshot_id");
+    old
+      .prepare("INSERT INTO projects (id, name, root_path) VALUES (?, ?, ?)")
+      .run("keep", "Existing", "source-root");
+    old
+      .prepare("INSERT INTO tasks (id, project_id, title) VALUES (?, ?, ?)")
+      .run("task", "keep", "Existing task");
+    old
+      .prepare(
+        "INSERT INTO task_execution_workspaces (task_id, project_id, project_root, worktree_path, snapshot_commit, state, revision, scope_json, intent_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        "task",
+        "keep",
+        "source-root",
+        "owned-root",
+        "a".repeat(40),
+        "checkpoint_prepared",
+        3,
+        '{"saved":"scope"}',
+        '{"saved":"intent"}',
+      );
+    old.pragma("user_version = 34");
+    old.close();
+    getDb(path);
+    closeDb();
+    const upgraded = new Database(path, { readonly: true });
+    connections.push(upgraded);
+    expect(upgraded.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
+    expect(
+      upgraded
+        .prepare(
+          "SELECT state, revision, scope_json, intent_json, source_snapshot_id FROM task_execution_workspaces WHERE task_id = 'task'",
+        )
+        .get(),
+    ).toEqual({
+      state: "checkpoint_prepared",
+      revision: 3,
+      scope_json: '{"saved":"scope"}',
+      intent_json: '{"saved":"intent"}',
+      source_snapshot_id: null,
+    });
+    expect(upgraded.prepare("SELECT count(*) AS count FROM handoff_code_snapshots").get()).toEqual({
+      count: 0,
+    });
+  } finally {
+    closeDb();
+    for (const connection of connections) if (connection.open) connection.close();
+    removeSqliteArtifacts(path);
+  }
+});
 
 it("upgrades a populated v33 database with the local checkpoint journal", () => {
   closeDb();
@@ -28,7 +93,7 @@ it("upgrades a populated v33 database with the local checkpoint journal", () => 
     closeDb();
     const upgraded = new Database(path, { readonly: true });
     connections.push(upgraded);
-    expect(upgraded.pragma("user_version", { simple: true })).toBe(34);
+    expect(upgraded.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
     expect(
       upgraded.prepare("SELECT count(*) AS count FROM task_execution_workspaces").get(),
     ).toEqual({ count: 0 });

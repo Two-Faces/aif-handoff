@@ -125,6 +125,10 @@ M2 work in progress adds shared `taskCheckout.ts` / `taskCommit.ts` and data
 prepared checkpoint intents in local migration v34. Registered task roots are
 enforced at stage/API/chat boundaries; their commits use host-controlled snapshot
 plumbing. Restore the original scope after restart; never recapture dirty files.
+Shared `handoff/` and data `codeSnapshots.ts` add immutable code/context packages,
+explicit portable-file manifests and verified blobs. Local migration v35 journals
+checkpoint continuation into a new checkout before atomic root/scope activation.
+Existing context is never overwritten and registered roots skip implicit AIF init.
 Workspace registration is internal pending M2 onboarding/grants. Keep M1 personal
 execution guards until the grant and stop/fencing gates are complete.
 
