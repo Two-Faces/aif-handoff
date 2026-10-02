@@ -416,8 +416,23 @@ with one existing skip, all seven workspace builds passed, Chromium 8/8, k6 3/3,
 and protocol artifacts matched CLI 0.145.0. Minimum coverage across the four
 metrics per package: shared 75.03%, data 77.66%, API 70.15%, agent 76.31%, runtime
 73.25%, web 74.49%, MCP 86.27%. Coverage thresholds/exclusions were unchanged.
-The targeted P13 fixture commands above comprise 53 tests; native Mac results
-for this increment are still pending. Package checklists were reviewed: no new
+The initial targeted P13 fixture commands above comprised 53 tests. The user
+reported native Mac passes for shared 9/9, data 20/20 and agent 15/15. API passed
+8/9: its bare-router revision test inherited `PARTICIPANTS_MODE_ENABLED=true`
+and correctly received an anonymous-access 403 before revision validation.
+The same failure was reproduced on Windows with that environment flag enabled.
+The fixture now sets its access mode explicitly and tests the revision workflow
+both with legacy access and a real admin session/CSRF token. Anonymous denial
+and missing/stale revision checks remain strict. `start_ai` uses a backlog fixture
+in both modes so its personal execution gate is not masked by a wrong-stage error.
+The API fixture now has 10 tests (54 across the four commands); both inherited
+login settings pass locally. Only the corrected API suite needs a native Mac
+rerun; these results still do not close the P13 lifecycle or P14 native-stop gates.
+After the fixture correction, the complete Windows `ai:validate` gate passed
+again: 3337 tests, one existing skip, coverage above 70% in every package
+(API minimum 70.18%), builds 7/7, Chromium 8/8, k6 3/3 and protocol check.
+Only tests, the API checklist and acceptance documentation changed.
+Package checklists were reviewed: no new
 request bodies/events, dependencies/packages, UI components or adapter capability
 changes; Docker/Pencil/adapter synchronization does not apply to this increment.
 

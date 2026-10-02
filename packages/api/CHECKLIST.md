@@ -9,6 +9,7 @@ Run through this list whenever you touch anything under `packages/api/`.
 - [ ] Validate every new request body/query with Zod via the `zodValidator` middleware.
 - [ ] Add integration tests for new routes (happy path + one error path minimum).
 - [ ] Filesystem fixtures use `mkdtemp` under the OS temporary directory and clean up afterwards. Tests that assume default paths explicitly stub and restore environment settings; include absolute-path coverage for spawned MCP configuration.
+- [ ] Bare-router tests explicitly set and restore `PARTICIPANTS_MODE_ENABLED`. Permission-sensitive scenarios cover an authenticated session separately so a developer's enabled login cannot mask revision/validation assertions with a 403.
 - [ ] `npm run lint`
 - [ ] `npm test`
 - [ ] Peer traffic uses the dedicated pinned TLS listener and project allowlists. Browser/MCP credentials never authenticate peers; personal runtime guards run before Git/filesystem preparation.

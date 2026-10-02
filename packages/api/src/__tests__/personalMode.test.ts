@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { createTestDb } from "@aif/shared/server";
 import { resetEnvCache } from "@aif/shared";
 import { UsageSource, initProject } from "@aif/runtime";
+import { participantAuth, type ParticipantApiEnv } from "../middleware/participantAuth.js";
+import { participantCsrf } from "../middleware/csrf.js";
 
 const testDb = { current: createTestDb() };
 const roots: string[] = [];
@@ -39,6 +41,8 @@ const { runApiRuntimeOneShot } = await import("../services/runtime.js");
 beforeEach(() => {
   vi.stubEnv("AIF_PERSONAL_MODE", "false");
   vi.stubEnv("AIF_GITHUB_ISSUE_PR_ENABLED", "true");
+  // Bare-router fixtures use legacy access; never inherit the host's login mode.
+  vi.stubEnv("PARTICIPANTS_MODE_ENABLED", "false");
   resetEnvCache();
   testDb.current.$client.close();
   testDb.current = createTestDb();
@@ -155,41 +159,88 @@ describe("personal project API", () => {
     expect(data.listChatSessions(projectId)).toEqual([]);
     expect(data.getTaskDeviceGrant(taskId)?.activeRunId).toBeNull();
   });
-  it("uses plan revisions through REST and handles board transitions without touching checkout", async () => {
-    const { taskId } = personal();
-    const app = new Hono().route("/tasks", tasksRouter);
-    const send = (method: string, suffix: string, body: unknown) =>
-      app.request(`/tasks/${taskId}${suffix}`, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+  it.each([false, true])(
+    "uses plan revisions and board transitions without touching checkout (participants=%s)",
+    async (participantsEnabled) => {
+      vi.stubEnv("PARTICIPANTS_MODE_ENABLED", String(participantsEnabled));
+      vi.stubEnv("PARTICIPANT_SESSION_COOKIE_NAME", "personal_test_session");
+      vi.stubEnv("PARTICIPANT_ALLOWED_ORIGINS", "http://localhost:5180");
+      resetEnvCache();
+      const { taskId } = personal();
+      const app = new Hono<ParticipantApiEnv>();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (participantsEnabled) {
+        // Authorization must reject an anonymous bare-router request before the
+        // revision gate, reproducing the Mac failure without accepting it as success.
+        const bare = new Hono().route("/tasks", tasksRouter);
+        const denied = await bare.request(`/tasks/${taskId}`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({ plan: "Unauthorized edit" }),
+        });
+        expect(denied.status).toBe(403);
+        expect(await denied.json()).toMatchObject({ code: "forbidden" });
+        expect(data.findTaskById(taskId)?.plan).toBeNull();
+
+        const account = await data.createParticipant({
+          username: "fixture-admin",
+          displayName: "Fixture Admin",
+          password: "local fixture password",
+          role: "admin",
+        });
+        if (!account.ok) throw new Error("Fixture participant creation failed");
+        const session = data.createParticipantSession(account.participant.id, { ttlMs: 60_000 });
+        if (!session) throw new Error("Fixture session creation failed");
+        headers.cookie = `personal_test_session=${session.token}`;
+        headers.origin = "http://localhost:5180";
+        headers["x-csrf-token"] = session.csrfToken;
+        app.use("*", participantAuth);
+        app.use("*", participantCsrf());
+      }
+      app.route("/tasks", tasksRouter);
+      const send = (method: string, suffix: string, body: unknown) =>
+        app.request(`/tasks/${taskId}${suffix}`, {
+          method,
+          headers,
+          body: JSON.stringify(body),
+        });
+      const fetched = await app.request(`/tasks/${taskId}`, { headers });
+      expect(fetched.status).toBe(200);
+      const task = await fetched.json();
+      expect(task.syncRevisions.plan).toHaveLength(1);
+      expect((await send("PUT", "", { plan: "Missing revision" })).status).toBe(409);
+      const saved = await send("PUT", "", {
+        plan: "Saved on board",
+        expectedSyncRevisions: task.syncRevisions,
       });
-    const fetched = await app.request(`/tasks/${taskId}`);
-    const task = await fetched.json();
-    expect(task.syncRevisions.plan).toHaveLength(1);
-    expect((await send("PUT", "", { plan: "Missing revision" })).status).toBe(409);
-    const saved = await send("PUT", "", {
-      plan: "Saved on board",
-      expectedSyncRevisions: task.syncRevisions,
-    });
-    expect(saved.status).toBe(200);
-    expect(
-      (await send("PUT", "", { plan: "Stale", expectedSyncRevisions: task.syncRevisions })).status,
-    ).toBe(409);
-    const current = await saved.json();
-    const accepted = await send("POST", "/events", {
-      event: "accept_existing_plan",
-      expectedSyncRevisions: current.syncRevisions,
-    });
-    expect(accepted.status).toBe(200);
-    expect(data.findTaskById(taskId)?.status).toBe("plan_ready");
-    for (const body of [{ event: "fast_fix" }, { event: "start_ai", deletePlanFile: true }]) {
-      const result = await send("POST", "/events", body);
-      expect(result.status).toBe(403);
-      expect(await result.json()).toMatchObject({ code: "personal_execution_disabled" });
-    }
-    expect((await send("POST", "/sync-plan", {})).status).toBe(403);
-  });
+      expect(saved.status).toBe(200);
+      expect(
+        (await send("PUT", "", { plan: "Stale", expectedSyncRevisions: task.syncRevisions }))
+          .status,
+      ).toBe(409);
+      const current = await saved.json();
+      const accepted = await send("POST", "/events", {
+        event: "accept_existing_plan",
+        expectedSyncRevisions: current.syncRevisions,
+      });
+      expect(accepted.status).toBe(200);
+      expect(data.findTaskById(taskId)?.status).toBe("plan_ready");
+      const backlogTaskId = personal().taskId;
+      for (const [targetId, body] of [
+        [taskId, { event: "fast_fix" }],
+        [backlogTaskId, { event: "start_ai", deletePlanFile: true }],
+      ] as const) {
+        const result = await app.request(`/tasks/${targetId}/events`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        });
+        expect(result.status).toBe(403);
+        expect(await result.json()).toMatchObject({ code: "personal_execution_disabled" });
+      }
+      expect((await send("POST", "/sync-plan", {})).status).toBe(403);
+    },
+  );
   it("attaches a dirty checkout without init or changing HEAD/index/context", async () => {
     const root = mkdtempSync(join(tmpdir(), "aif-personal-api-"));
     roots.push(root);
