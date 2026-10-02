@@ -48,13 +48,16 @@ build/Chromium/k6/protocol зелёные. Двухпроцессные TLS/cras
 data 4 passed, API 12 passed (включая два процесса и loopback TLS), всего 22.
 Реальный Win↔Mac code transfer и полный handoff ещё открыты.
 P13 v37 grants/run fencing foundation прошла 54 native Mac tests 03.10.2026.
-Следующий блок подключает scopes к полному lifecycle coordinator/API/chat,
+Реализованный блок 29e718d подключает scopes к полному lifecycle coordinator/API/chat,
 runtime promises/callbacks, timeout/abort и finalization. v38/deviceSessions.ts
 сохраняет provenance native/chat sessions по task/grant/root/runtime, без sync.
 Не используй project warmup или произвольный native session в managed checkout.
 Uncertain run нельзя очистить по TTL; personal AI по-прежнему запрещён.
-Актуальный quality gate и Mac smoke этого блока сверяй с планом и
-docs/local-device-sync.md. Далее P14: подтверждённый process-tree stop и
+Windows ai:validate lifecycle прошёл: 3358 passed / 1 existing skip, coverage ≥70%.
+03.10.2026 пользователь подтвердил native Mac smoke: shared 30, data 41,
+API 16, agent 19 — всего 106 passed. P13 закрыт в объёме grants/fencing/lifecycle;
+полный Mac ai:validate и физический handoff этими тестами не подтверждены.
+Детали — в плане и docs/local-device-sync.md. Далее P14: подтверждённый process-tree stop и
 persisted handoff; P15: onboarding, local session existence и continuation UI.
 M3/M4 не отмечай готовыми после M2.
 Сохраняй прогресс в указанном плане, не заменяя другие планы.

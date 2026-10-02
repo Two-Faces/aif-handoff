@@ -456,7 +456,7 @@ changes; Docker/Pencil/adapter synchronization does not apply to this increment.
 The subsequent lifecycle integration adds real SQLite/Git fixtures around a
 controllable runtime adapter: coordinator stage completion, delayed stage timeout,
 chat cancellation/resume, background QA, checkpoint and snapshot-scoped roadmap
-input. No provider/model is called by these tests. New Mac smoke remains pending:
+input. No provider/model is called by these tests. The lifecycle Mac smoke commands are:
 
 ```sh
 npm test --workspace @aif/shared -- db.test.ts deviceExecution.test.ts
@@ -468,6 +468,13 @@ npm test --workspace @aif/agent -- deviceExecutionLifecycle.test.ts personalMode
 Expected passed counts: shared 30, data 41, API 16, agent 19. Run these after pulling the
 lifecycle commit and `npm ci` / `npm run build`; an empty test selection is not
 acceptance. Native process-tree stop and physical Windows↔Mac handoff remain P14/M2.
+
+On 2026-10-03 the user confirmed that all four commands passed on native Mac with
+the expected counts: shared 30, data 41, API 16, agent 19, **106 passed** in total.
+This accepts the P13 grant/fencing/lifecycle increment from `29e718d`. Evidence is
+user-reported; the Mac was not accessed remotely. It does not establish a complete
+Mac `ai:validate`, actual runtime process-tree termination or physical device handoff.
+P14 and the M2 execution gate remain open; personal AI stays disabled.
 
 Windows lifecycle validation on 2026-10-03 passed the isolated `ai:validate` gate:
 3358 tests and one existing skip, seven builds, Chromium 8/8, k6 3/3 and protocol
