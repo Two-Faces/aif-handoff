@@ -2,7 +2,7 @@
 
 > [ТЗ](../specs/personal-lan-handoff.md) · [Запуск сессии](../specs/personal-lan-handoff-session.md) · [Проекты](../specs/personal-lan-handoff-projects.json)
 
-Статус: код M1 P01–P09 реализован; локальный quality gate закрыт полным `ai:validate`, включая k6. Общий gate M1 и checkbox P09 остаются открытыми до нативной приёмки Windows ↔ Mac, перенесённой пользователем на следующий день. M2–M4 не реализовывались. Исследованная база: `Two-Faces/aif-handoff`, `main@3d982ef344aaa2fb72f99d5603a1fea0051206ea`, 02.10.2026. Ветка: `codex/personal-lan-handoff` от `51df656`. Ветки/файлы подключаемых проектов не менялись; реальные checkout не регистрировались.
+Статус: код M1 P01–P09 реализован; локальный quality gate закрыт полным `ai:validate`, включая k6. Начата нативная приёмка Windows ↔ Mac: Windows запущен с тестовой доской, пользователь устанавливает Mac. Общий gate M1 и checkbox P09 остаются открытыми до проверки обмена на обоих устройствах. M2–M4 не реализовывались. Исследованная база: `Two-Faces/aif-handoff`, `main@3d982ef344aaa2fb72f99d5603a1fea0051206ea`, 02.10.2026. Ветка: `codex/personal-lan-handoff` от `51df656`. Рабочие пользовательские checkout не менялись и не регистрировались; отдельно создан тестовый `E:\Projects\handoff-lan-test`.
 
 Новые пути модулей ниже — предложение; существующие точки расширения проверены по исходной ревизии. Не создавать отдельный пакет только ради transport: начать с модулей в текущих workspaces. Если пакет окажется необходимым, выполнить Docker Sync Rule.
 
@@ -245,6 +245,15 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
 - k6: chat-sessions — 26 537 запросов, p95 9.17 ms; runtime-profiles — 107 336, p95 6.95 ms; tasks — 10 026, p95 46.54 ms. HTTP error rate 0 для всех трёх, исходные thresholds пройдены. Это проверка локальных API endpoints, а не измерение скорости LAN replication. Отчёты: `packages/api/perf/reports/`.
 - CHECKLIST root/api/runtime проверены; повторяющиеся правила переносимости fixtures и env isolation добавлены в package checklists. REST-схемы и WS-контракты не менялись, DB boundary сохранена. Adapter capabilities/контракты и зависимости не менялись, поэтому parity/docs registration/Docker sync неприменимы. Временные dev servers завершены.
 - Открыта только нативная часть M1: установка Mac, его checkout paths/toolchain/firewall, pairing и двусторонний сценарий на тестовом репозитории. Personal execution guards сохранены до M2. Push/PR не выполнялись; M2–M4 остаются следующими этапами.
+
+## Начало нативной приёмки — 02.10.2026
+
+- Пользователь запускает Mac самостоятельно, без SSH: `/Users/aries/Projects/aif-handoff`, ветка `codex/personal-lan-handoff` на `640e400`, Node v22.22.2. Пользователь подтвердил выполнение `npm ci` и `npm run build`; stdout этих команд не проверялся здесь.
+- Windows: Node v22.22.3, LAN `192.168.1.35`, browser `http://localhost:5180`, API `127.0.0.1:3009`, pinned peer TLS `3010`. Отдельные БД/ключи в `.git/native-acceptance/`; launcher сохраняет PID + start time, stop проверяет оба. Для нативного запуска `PROJECTS_DIR`/`PROJECTS_MOUNT` очищены: host/container mapping здесь не нужен. Coordinator не запускается.
+- Создан независимый Git fixture `E:\Projects\handoff-lan-test`, initial commit `d52fc06`, `npm test` passed. Через реальный API зарегистрирована personal board `d1c9902d-f366-4dcb-b733-ae857e7bb5b1`; задача `483a9322-eb21-47df-b62c-47eec4b6f5b4` создана paused/manual. Checkout сохранил исходный commit и чистое дерево.
+- Живой запуск выявил пропуск `/peers` в Vite proxy: возвращался HTML вместо JSON. Маршрут добавлен, новый Playwright integration test проверяет GET и validation error POST через настоящий dev proxy без mocks. `ai:validate` после исправления exit 0: 3213 passed / 1 skipped, coverage ≥70% во всех пакетах, build 7/7, browser 8 passed, k6 3/3, protocol check passed. Лог `.git/native-acceptance/proxy-validation.log`. UI primitives/styles, REST/WS contracts и зависимости не менялись.
+- Для уже скачанного Mac commit подготовлен запуск Vite через `createServer` с дополнительным `/peers` proxy в runtime-конфигурации; эта команда проверена на Windows через настоящий peer API. Она не меняет файлы Mac checkout. Исправление в исходниках пока сохранено локально, push не выполнялся.
+- Ожидаются Mac startup/health и fingerprint. Pairing, Mac binding, двусторонний обмен, offline/reconnect и participant mapping на двух нативных устройствах ещё **не проверены**. Firewall не менялся. Автопроверка отклонила запуск дополнительного HTTP download server; он не запущен, тестовую папку Mac можно создать локально.
 
 ## Предыдущий срез M1 — до стабилизации quality gate
 

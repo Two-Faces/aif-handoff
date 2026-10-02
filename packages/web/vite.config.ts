@@ -82,6 +82,7 @@ export default defineConfig(async () => {
         "/settings": apiTarget,
         "/auth": apiTarget,
         "/participants": apiTarget,
+        "/peers": apiTarget,
         "/health": apiTarget,
         "/ws": {
           target: `ws://localhost:${API_PORT}`,
