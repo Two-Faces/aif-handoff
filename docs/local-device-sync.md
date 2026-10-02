@@ -68,6 +68,12 @@ incarnations while sharing that database.
    automatically. Roles and credentials stay local. Administration requires a local
    admin when participants mode is enabled.
 
+Participant login accounts are local to each installation. Bootstrap an administrator
+against that device's own `DATABASE_URL`, then restart its API with
+`PARTICIPANTS_MODE_ENABLED=true` (see [Getting Started](getting-started.md)). Matching
+usernames or display names do not share passwords or permissions. Confirming a mapping
+recognizes task attribution and assignments while preserving the selected local role.
+
 No real projects from the inventory are automatically attached. A portable manifest
 can be written only through the separate confirmed manifest endpoint.
 
@@ -143,14 +149,25 @@ a committed delta reply before killing/restarting the receiver. `personal-lan.sp
 checks settings and conflict resolution in Chromium in both themes. Test fixtures are
 synthetic; none of the inventoried working copies is modified.
 
-The native Windows/macOS pilot has verified pinned pairing, automatic board exchange,
-offline edits across a Windows API restart, conflict retention, and resolution through
-the Windows UI with a peer ACK and user confirmation of the updated Mac UI. The user
-also confirmed the Mac checkout binding and a clean working tree after attach; its
-pre-attach commit hash was not captured for a strict before/after comparison. Native
-acceptance remains open, including participant mapping and local authorization on both
-devices. The Windows process harness does not substitute for those checks.
-Current validation results and the remaining native acceptance are recorded in the
+M1 native acceptance completed on 2026-10-02 with Windows and macOS installations:
+pinned pairing, automatic board exchange, offline edits across a Windows API restart,
+conflict retention/resolution, and updates visible on the Mac without reloading.
+The user's native Mac diagnostic confirmed its checkout's current HEAD and branch
+match the values recorded at attach, and the working tree remains clean.
+
+Separate local participant UUIDs and explicit mappings were exercised in both
+directions. An unmapped Mac assignment granted no task participation on Windows;
+mapping it to a local member enabled that assignment while admin routes continued
+to return 403. Login account counts and local roles remained unchanged by peer sync.
+Both devices returned 401 for anonymous board access. The Mac evidence was provided
+by the user; Windows API/UI checks were run directly in the acceptance session.
+
+The Comments tab currently displays existing discussion without a standalone comment
+composer. Comment creation is available through REST; native attribution acceptance
+used a human-owned task with an assigned participant. Code transfer and AI execution
+remain outside M1 and disabled for personal projects until M2's execution gates pass.
+
+Validation results and the acceptance evidence are recorded in the
 [implementation plan](../.ai-factory/plans/personal-lan-handoff.md).
 
 ## Implementation references
