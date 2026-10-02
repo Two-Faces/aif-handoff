@@ -43,8 +43,10 @@ network code/blob transfer и stop/fencing этими тестами ещё не
 не подменяй grants/fencing журналом: он не останавливает уже запущенный процесс.
 P12 добавляет explicit Git/context transfer через pinned TLS, durable chunks v36
 и Git quarantine. Итоговый Windows ai:validate прошёл: 3296 passed, coverage ≥70%,
-build/Chromium/k6/protocol зелёные. Двухпроцессные TLS/crash tests прошли;
-native Mac smoke P12 и реальный Win↔Mac code transfer ещё открыты.
+build/Chromium/k6/protocol зелёные. Двухпроцессные TLS/crash tests прошли.
+Пользователь подтвердил native Mac smoke P12 02.10.2026: shared 6 passed,
+data 4 passed, API 12 passed (включая два процесса и loopback TLS), всего 22.
+Реальный Win↔Mac code transfer и полный handoff ещё открыты.
 Далее следуй зависимостям P13–P15. M3/M4 не отмечай готовыми после M2.
 Сохраняй прогресс в указанном плане, не заменяя другие планы.
 

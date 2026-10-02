@@ -124,7 +124,7 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
   - Проверка: manifest привязан к commit, чужие local paths/auth config не переносится, изменённый контекст создаёт новый digest, неполный пакет не ready.
 
 - [x] **P12. Реализовать Git snapshot и blob transfer.**
-  - **Код и Windows quality gate готовы.** Explicit publish/pull через pinned TLS, immutable chunks и local reservation v36, SHA verification, Git quarantine/fsck, full fallback при неполной базе, сохранность user refs/index/dirty files, отдельная readiness. Двухпроцессный TLS round trip с restart/fault injection прошёл; native Win↔Mac transfer ещё не принят, M2 gate остаётся открытым.
+  - **Код, Windows quality gate и Mac smoke готовы.** Explicit publish/pull через pinned TLS, immutable chunks и local reservation v36, SHA verification, Git quarantine/fsck, full fallback при неполной базе, сохранность user refs/index/dirty files, отдельная readiness. Двухпроцессный TLS round trip с restart/fault injection прошёл на Windows и Mac; пользователь прислал 22 passed на Mac. Передача между физическими Windows и Mac ещё не принята, M2 gate остаётся открытым.
   - Зависимости: P08, P11.
   - Предлагаемый модуль: `packages/api/src/services/gitSnapshotTransfer.ts`; data descriptors; `attachmentStorage.ts`/blob storage.
   - Проверка Git bundle/prerequisites, namespaced refs, full fallback, resumable content-addressed blobs. Source/target ветки и origin refs не меняются; создать exact-commit task checkout.
@@ -215,6 +215,12 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
 
 В планировании проверки кода и native scenarios не выполнялись: функциональности пока нет. При реализации записывать точные команды, результаты и ограничения, а не только отметки checkbox. Ошибки baseline и недоступные среды отделять от регрессий; не ослаблять assertions ради зелёной проверки.
 
+## Нативный Mac smoke P12 — 02.10.2026
+
+- Пользователь прислал stdout Vitest 4.1.5 из `/Users/aries/Projects/aif-handoff`: shared `gitSnapshot.test.ts` — **6 passed** (1 file, 5.69 s, старт 22:50:52); data `snapshotTransfers.test.ts` — **4 passed** (1 file, 797 ms, старт 22:51:01); API `gitSnapshotTransfer.test.ts` — **10 passed**, `peerProcesses.test.ts` — **2 passed** (2 files, 12 tests, 9.57 s, старт 22:51:08). Итого **22 passed**, ошибок в предоставленных итогах нет.
+- Подтверждены на нативном Mac: SHA-1/SHA-256 bundle import, full fallback, отказ для повреждённого пакета и несовместимых путей, сохранность dirty root/index/веток, durable chunks и quota/scope guards. API-тест с двумя независимыми БД/процессами прошёл реальный loopback TLS, обрывы/restart, передачу кода и контекста, recovery после создания checkout до durable completion, re-export и отзыв peer. M1 board bootstrap/offline/lost-ACK regression также прошёл.
+- Evidence получено от пользователя; Mac удалённо не запускался. Это завершает целевой native Mac smoke P12, но не подтверждает полный Mac `ai:validate` или передачу между физическими Windows и Mac. Native Win↔Mac code transfer и полный handoff остаются открытыми; следующий блок реализации — P13, затем P14/P15. Запрет personal AI execution сохранён.
+
 ## Четвёртый блок M2: P12 — 02.10.2026
 
 - Shared `handoff/gitSnapshot.ts` и `transferContracts.ts`, data `snapshotTransfers.ts`, API `gitSnapshotTransfer.ts`: явные publish/pull, metadata/chunk requests поверх существующего pinned TLS, локально выбранные checkout binding и destination. Новые peer requests только читают опубликованные ресурсы; старые M1 hello/board messages не изменены. REST endpoints и ограничения описаны в `docs/api.md` и `docs/local-device-sync.md`.
@@ -224,7 +230,7 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
 - Первый общий gate остановился только на API branch coverage **69.70%**; все тесты были зелёными. Добавлены проверки ошибок публикации, повреждённого incremental без скрывающего fallback, отмены после ответа, отсутствующего peer address, scoped dispatch и структурированных readiness errors. Coverage threshold/exclusions не менялись; API branches стали **70.08%**.
 - Итоговый isolated `npm run ai:validate` — **exit 0**: format, lint 10/10, tests/coverage 10/10, build 7/7, Chromium 8/8, k6 3/3, protocol CLI 0.145.0, checklist. **3296 passed / 1 existing skipped**. Минимальная coverage metric: shared 74.83%, data 76.57%, API 70.08%, agent 76.31%, runtime 73.25%, web 74.49%, MCP 86.27%. Лог: `.codex/m2/logs/transfer-validated.log`; промежуточный coverage — `transfer-coverage.log`.
 - Применимые shared/data/api checklists выполнены: DB boundary, upgrade v35→v36 с сохранением immutable records, hostile/partial/restart tests, REST schemas/docs, browser-safe exports и build потребителей. Новых packages/dependencies, runtime adapter capabilities, UI components/WS events нет; Docker/adapter/Pencil/theme sync неприменимы.
-- M1 native API/peer/UI и их данные сохранены; тесты используют private DB/ports/temp Git fixtures. Реальные проекты, firewall, remote Git и user refs не менялись. Native Mac smoke нового P12 и настоящий Win↔Mac code transfer ещё ожидаются. Следующий блок — P13; P14 stop/fencing и P15 onboarding/UI также впереди. Серверный запрет personal AI execution сохраняется; M2→M1 merge и публикация не выполнялись агентом.
+- M1 native API/peer/UI и их данные сохранены; тесты используют private DB/ports/temp Git fixtures. Реальные проекты, firewall, remote Git и user refs не менялись. На момент коммита `3ff9d55` native Mac smoke P12 ожидал запуска; последующий результат записан выше. Настоящий Win↔Mac code transfer ещё ожидается. Следующий блок — P13; P14 stop/fencing и P15 onboarding/UI также впереди. Серверный запрет personal AI execution сохраняется; M2→M1 merge и публикация не выполнялись агентом.
 
 ## Нативные Mac tests локальных P10/P11 helpers — 02.10.2026
 

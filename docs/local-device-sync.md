@@ -342,6 +342,13 @@ revocation and a process crash after checkout identity creation but before the
 SQLite completion write. Native Windows↔Mac acceptance of this new transfer layer
 remains pending, separately from the accepted local P10/P11 tests and M1 board sync.
 
+On 2026-10-02 the user supplied passing native macOS results for the same P12
+fixture checks: `gitSnapshot.test.ts` 6 tests (5.69 s), `snapshotTransfers.test.ts`
+4 tests (797 ms), and API `gitSnapshotTransfer.test.ts` / `peerProcesses.test.ts`
+12 tests across two files (9.57 s). All **22 tests passed**, including the real
+loopback TLS/process-restart scenarios. This closes the targeted Mac smoke;
+cross-device Windows↔Mac transfer and the full handoff acceptance remain open.
+
 For a native fixture smoke of P12 after updating Handoff, run:
 
 ```sh
