@@ -2,7 +2,7 @@
 
 > [ТЗ](../specs/personal-lan-handoff.md) · [Запуск сессии](../specs/personal-lan-handoff-session.md) · [Проекты](../specs/personal-lan-handoff-projects.json)
 
-Статус: **M1 P01–P09 завершён и принят 02.10.2026** в объёме синхронизации досок. Полный локальный `ai:validate`, включая k6, и нативный Windows ↔ Mac pilot пройдены: pairing, автоматический обмен, offline/restart, сохранение/разрешение конфликтов, локальные checkout bindings, явное participant mapping и сохранение локальных прав. Финальный диагностический отчёт с Mac предоставлен пользователем; его проверки сопоставлены с живой Windows-стороной. Исполнение AI и передача кода остаются за M2; M2–M4 не реализовывались. Исследованная база: `Two-Faces/aif-handoff`, `main@3d982ef344aaa2fb72f99d5603a1fea0051206ea`, 02.10.2026. Ветка: `codex/personal-lan-handoff` от `51df656`. Рабочие пользовательские checkout не менялись и не регистрировались; приёмка использовала отдельные тестовые репозитории Windows и Mac.
+Статус: **M1 P01–P09 завершён и принят 02.10.2026** в объёме синхронизации досок. Полный локальный `ai:validate`, включая k6, и нативный Windows ↔ Mac pilot пройдены: pairing, автоматический обмен, offline/restart, сохранение/разрешение конфликтов, локальные checkout bindings, явное participant mapping и сохранение локальных прав. Финальный диагностический отчёт с Mac предоставлен пользователем; его проверки сопоставлены с живой Windows-стороной. **M2 в работе:** готовы локальные Git/context/continuation primitives P10 и контракт P11; 51 целевой тест прошёл на Mac по выводу пользователя. P10 остаётся открытой для onboarding/run gates; LAN-передача кода, grants и stop/fencing — P12–P15. M3/M4 ещё не реализованы. Исследованная база: `Two-Faces/aif-handoff`, `main@3d982ef344aaa2fb72f99d5603a1fea0051206ea`, 02.10.2026. M1: `codex/personal-lan-handoff` от `51df656`; текущая ветка M2: `codex/personal-lan-handoff-m2`. Рабочие пользовательские checkout не менялись и не регистрировались; приёмка использовала отдельные тестовые репозитории Windows и Mac.
 
 Новые пути модулей ниже — предложение; существующие точки расширения проверены по исходной ревизии. Не создавать отдельный пакет только ради transport: начать с модулей в текущих workspaces. Если пакет окажется необходимым, выполнить Docker Sync Rule.
 
@@ -105,7 +105,7 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
 ## M2. Снимки кода и продолжение задачи
 
 - [ ] **P10. Сделать commits scoped и task checkouts воспроизводимыми.**
-  - **В работе:** `codex/personal-lan-handoff-m2` от принятого M1 `b523143`, теперь в основном checkout/IDEA. Готовы exact-commit checkout, host-controlled checkpoints, registered root guards и local continuation; P10 остаётся открытой до onboarding/run gates и native Mac acceptance. Нативные M1-узлы сохраняются, quality gates изолированы.
+  - **В работе:** `codex/personal-lan-handoff-m2` от принятого M1 `b523143`, теперь в основном checkout/IDEA. Готовы exact-commit checkout, host-controlled checkpoints, registered root guards и local continuation; их целевые native Mac tests прошли 02.10.2026. P10 остаётся открытой до onboarding/run gates. Нативные M1-узлы сохраняются, quality gates изолированы.
   - Зависимости: P02, P03.
   - Файлы: `packages/shared/src/commitWorkflow.ts`, `gitIsolation.ts`, `packages/agent/src/autoQueueCommit.ts`, `subagents/planner.ts`, остальные mutating stage root resolution.
   - Детерминированный ownership/whitelist diff helper; убрать требование prompt `git add -A`; сохранить index/unrelated files. Exact-snapshot root для implementation/fix/QA/commit, а не только условного planner worktree.
@@ -113,10 +113,10 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
   - Проверка: чужие staged hunks/untracked/dirty files, чужая ветка, одинаковое имя ветки с другим HEAD, глобально грязный root, один commit или корректная последовательность task commits. Failure сохраняет исходное состояние.
   - **Второй блок:** append-only v34 хранит local workspace, исходный scope и prepared commit intent. Подключены stage/API/chat root guards, запись планов и детерминированные API/auto-queue checkpoints; legacy prompt больше не выполняет `git add -A`. Проверяется восстановление в новом процессе после Git publication до SQLite ACK.
   - **Третий блок:** local continuation journal v35 резервирует новую рабочую копию из immutable code/context snapshot и атомарно активирует root/scope. Retry после materialization до activation использует сохранённый пакет; старые файлы/index остаются неизменны, session ID очищается, plan path ограничен новым root.
-  - Остались onboarding/подключение нового run вместе с P13–P15 и native Mac acceptance. До P13/P14 API и worker personal-проектов остаются закрыты прежними guards; внутренний журнал сам по себе не останавливает текущий процесс и не выдаёт execution grant.
+  - Остались onboarding/подключение нового run вместе с P13–P15 и приёмка полного межмашинного handoff. Native Mac acceptance локальных Git/context/continuation helpers закрыта по 51 целевому тесту. До P13/P14 API и worker personal-проектов остаются закрыты прежними guards; внутренний журнал сам по себе не останавливает текущий процесс и не выдаёт execution grant.
 
 - [x] **P11. Добавить immutable code/context snapshot contract.**
-  - **Код и quality gate готовы.** Строгие descriptor/manifest/blobs, immutable SQLite storage, exact Git context + explicit portable paths, новый context digest при изменениях, idempotent installation без перезаписи. Context scripts/commands не выполняются; local machine/auth/session configs исключены. Registered coordinator не запускает повторный AIF init. Native Mac acceptance M2 остаётся открытой.
+  - **Код и quality gate готовы.** Строгие descriptor/manifest/blobs, immutable SQLite storage, exact Git context + explicit portable paths, новый context digest при изменениях, idempotent installation без перезаписи. Context scripts/commands не выполняются; local machine/auth/session configs исключены. Registered coordinator не запускает повторный AIF init. Целевые Mac context/continuation tests прошли; полная приёмка M2 впереди.
   - Зависимости: P10, P04.
   - Предлагаемые модули: `packages/shared/src/handoff/contracts.ts`, `packages/data/src/codeSnapshots.ts`, `packages/api/src/services/contextSnapshot.ts`.
   - Snapshot commit/object format, digest, portable allowlist manifest; goal/plan/next steps/test outcomes. Поддержать ignored portable context без копирования machine configs/session history/secrets.
@@ -214,6 +214,13 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
 
 В планировании проверки кода и native scenarios не выполнялись: функциональности пока нет. При реализации записывать точные команды, результаты и ограничения, а не только отметки checkbox. Ошибки baseline и недоступные среды отделять от регрессий; не ослаблять assertions ради зелёной проверки.
 
+## Нативные Mac tests локальных P10/P11 helpers — 02.10.2026
+
+- Пользователь прислал stdout Vitest 4.1.5 из `/Users/aries/Projects/aif-handoff`: shared `taskCheckout.test.ts` **30 passed**, `contextSnapshot.test.ts` **10 passed** (2 files, 40 tests, 11.44 s); data `taskWorkspaces.test.ts` **11 passed** (1 file, 14.18 s). Старт shared — 21:09:16, data — 21:09:37 по выводу терминала. Итого **51 passed**, ошибок в предоставленных итогах нет.
+- Команды: `npm test --workspace @aif/shared -- taskCheckout.test.ts contextSnapshot.test.ts` и `npm test --workspace @aif/data -- taskWorkspaces.test.ts`. Фильтры по именам файлов обходят ошибочный путь `src/tests/`; предыдущие запуски с `No test files found` не засчитываются, включая data exit 0 с `--passWithNoTests`.
+- Подтверждены на нативном Mac: exact SHA-1/SHA-256 checkouts, сохранность source/index/веток и чужих edits, запрет hooks/filters, immutable context и scoped цепочка commits, восстановление в новых Node-процессах после Git publication без SQLite ACK и после context materialization без activation.
+- Evidence получено от пользователя; Mac удалённо не запускался. Это целевая проверка локальных helpers, а не полный Mac `ai:validate`, сетевой Git/blob transfer, остановка runtime или передача execution grant. P11 готов; P10 остаётся открытой для onboarding/run gates. Следующий блок — P12, затем P13–P15 и native Win→Mac→Win handoff.
+
 ## Третий блок M2 — 02.10.2026
 
 - P11 реализован в shared `handoff/`, data `codeSnapshots.ts`, API `services/contextSnapshot.ts`. Metadata и все blobs проверяются перед записью и при чтении; tracked context берётся из точного Git commit, ignored/untracked — только из explicit portable allowlist. Новый контекст меняет digest, неполный/повреждённый пакет не ready. Portable Codex role TOML ограничен документированным подмножеством без локального MCP/auth и повышения разрешений.
@@ -222,7 +229,7 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
 - При review исправлено расхождение выбора plan path при явно заданном `isFix`: в shared helper передаётся уже проверенный путь. Регрессия прошла отдельно, затем все 309 data tests повторно прошли с coverage на итоговом коде; итоговый lint 10/10 также повторён после исправления.
 - `npm run ai:validate` через isolated driver завершился **exit 0**: format, lint 10/10, tests/coverage 10/10, build 7/7, Chromium 8/8, k6 3/3, protocol CLI 0.145.0, checklist. Unit/integration: **3273 passed / 1 existing skipped**. Минимальные coverage metrics: shared 76.33%, data 74.72%, API 70.92%, agent 76.31%, runtime 73.25%, web 74.49%, MCP 86.27%. Лог: `.codex/m2/logs/context-validate.log`; финальный lint: `context-final-lint.log`.
 - Checklists shared/data/api/agent пройдены по применимым пунктам: DB boundary, upgrade/rollback/restart cases, source/index preservation, shared consumers build, browser-safe exports, coordinator regression. Новых REST/WS endpoints, UI components, runtime adapter capabilities, packages/dependencies нет; соответствующие API/UI/Pencil/adapter/Docker checks неприменимы.
-- P12 transfer, P13 grants, P14 stop/fencing и P15 UI/onboarding ещё не реализованы; M2 не объявлен готовым. Mac tests новых Git/context/continuation helpers ожидают ручного запуска пользователя после публикации M2. M1 native API/peer/UI и их данные сохранены; реальные проекты не изменялись. Push, PR и merge M2→M1 не выполнялись.
+- P12 transfer, P13 grants, P14 stop/fencing и P15 UI/onboarding ещё не реализованы; M2 не объявлен готовым. На момент кодового коммита `28b3c14` Mac tests ожидали ручного запуска; их последующий результат записан выше. M1 native API/peer/UI и их данные сохранены; реальные проекты не изменялись. Push, PR и merge M2→M1 агентом не выполнялись.
 
 ## Второй блок M2 — 02.10.2026
 

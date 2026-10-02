@@ -35,7 +35,10 @@ Local migration v34/taskWorkspaces.ts сохраняет scope до записи
 Local v35 продолжает sealed workspace в новом checkout из immutable code/context
 snapshot: reservation до materialization, atomic root/scope activation после неё.
 P11 descriptor/manifest/blobs реализованы; смотри актуальные проверки в плане.
-P10 остаётся открытой для onboarding/run gates и native Mac acceptance.
+Пользователь подтвердил native Mac tests локальных helpers: shared 40 passed
+(taskCheckout + contextSnapshot), data 11 passed (taskWorkspaces), 02.10.2026.
+P10 остаётся открытой для onboarding/run gates; полный межмашинный handoff,
+network code/blob transfer и stop/fencing этими тестами ещё не проверены.
 Не восстанавливай принадлежность dirty files новым scope после restart и
 не подменяй grants/fencing журналом: он не останавливает уже запущенный процесс.
 Далее следуй зависимостям P12–P15. M3/M4 не отмечай готовыми после M2.

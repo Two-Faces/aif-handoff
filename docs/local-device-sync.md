@@ -232,8 +232,10 @@ merely has the same branch name.
 Native Windows Git fixtures cover source/index preservation, overlapping staged
 hunks, foreign untracked files, binary and UTF-8 paths, HEAD drift, ref contention,
 linear checkpoint chains, hook/filter non-execution, and independent Node process
-recovery after Git publication but before SQLite acknowledgement. Native macOS validation
-of these new primitives remains open, independently of the completed M1 acceptance.
+recovery after Git publication but before SQLite acknowledgement. On 2026-10-02,
+the user supplied native macOS results: `taskCheckout.test.ts` 30 passed,
+`contextSnapshot.test.ts` 10 passed, and `taskWorkspaces.test.ts` 11 passed.
+This accepts the local primitives on macOS; full network handoff acceptance remains open.
 
 ## Immutable code/context packages (P11)
 
@@ -275,9 +277,19 @@ existing AIF 2.19 project context. Resuming uses a new local session.
 These are internal host APIs, not new REST endpoints or a runnable handoff UI.
 Board replication does not carry these packages yet. Git/blob LAN transfer and
 target readiness are P12; execution grants and confirmed process stop are P13/P14.
-Windows process-restart tests cover interruption after filesystem materialization
-but before activation, with later source-context changes. Native M2 Mac acceptance
-remains pending.
+Process-restart tests cover interruption after filesystem materialization but
+before activation, with later source-context changes, and passed on Windows and
+native macOS. The Mac evidence is the user's targeted Vitest output, not a full
+Mac validation run or a network code/grant handoff. To repeat these fixture-only
+checks from the Handoff repository root, use filename filters:
+
+```sh
+npm test --workspace @aif/shared -- taskCheckout.test.ts contextSnapshot.test.ts
+npm test --workspace @aif/data -- taskWorkspaces.test.ts
+```
+
+Require actual `Test Files` / `Tests` passed summaries. `No test files found` is
+not acceptance, even if a workspace's `--passWithNoTests` setting returns exit 0.
 
 ## Implementation references
 
