@@ -275,12 +275,21 @@ k6 3/3, protocol CLI 0.145.0. Все 14 OpenCode API cases, включая actua
 После feature commit 34b91cb исправлена только канонизация temp roots в
 runtime fixture (macOS /var vs /private/var); рабочий код не менялся. Повторный
 полный gate прошёл с теми же результатами. Финальный лог:
-.codex/m2/logs/native-opencode-portable-final-validate.log. Mac subset 241 + 14 = 255
-ожидает пользователя: OPENCODE_NATIVE_TEST_PATH="$(command -v opencode)" для
-API deviceOpenCode.test.ts обязателен, чтобы последний actual CLI case не был skip.
-Команды в docs/local-device-sync.md. Никакой LLM/model download/paid API для них не нужен.
-Далее P14 — native Mac acceptance owned OpenCode,
-normal runner admission/external-service coverage, runtime-backed checkpoint/release и
+.codex/m2/logs/native-opencode-portable-final-validate.log.
+04.10.2026 пользователь подтвердил, что все присланные Mac tests прошли.
+Принимается запрошенный OpenCode subset 241 runtime + 14 API = 255,
+включая actual CLI через OPENCODE_NATIVE_TEST_PATH. Подробного stdout/счётчиков
+не приложено; 255 — scope команд, не независимо измеренный результат.
+Повторять этот subset без изменений не нужно; код при фиксации приёмки не менялся.
+
+Пользователь отдельно отметил чрезмерное время на повторные тесты. Дальше:
+сначала закончить правки, diff review и focused/platform checks, затем один
+обязательный финальный ai:validate. Документация/косметика fixtures после зелёного
+gate проверяются адресно. Не ослаблять assertions/coverage; общий gate повторять
+после незавершённого/упавшего gate или изменения поведения/границ исполнения.
+Не менять test pipeline автоматически: сейчас в нём test и coverage идут отдельно.
+
+Далее P14 — normal runner admission/external-service coverage, runtime-backed checkpoint/release и
 физическая передача Win→Mac→Win. Native stop receipt сам по себе не освобождает
 grant/run и не подтверждает остановку внешних/делегированных services.
 Personal AI и публичные launch/recovery/handoff actions пока не включать.

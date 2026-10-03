@@ -169,7 +169,8 @@ The official [server contract](https://opencode.ai/docs/server/) and pinned
 [configuration loader](https://github.com/anomalyco/opencode/blob/v1.18.34/packages/opencode/src/config/config.ts)
 were checked against the actual 1.18.34 Windows binary with a local model and a
 real file-write tool call. The previous HTTP subset was accepted on Mac (255
-tests); this OpenCode increment's Mac native acceptance is still pending.
+tests). On 2026-10-04 the user also confirmed the requested OpenCode Mac subset
+passed (241 runtime + 14 API); detailed output was not supplied.
 See `local-device-sync.md` for its exact test commands and scope.
 
 All four built-in adapters check the native scope. Cancellation callbacks,

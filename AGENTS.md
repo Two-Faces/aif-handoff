@@ -294,7 +294,8 @@ a detached writer and recovery, and uses `OPENCODE_NATIVE_TEST_PATH` for a real
 installed CLI plus a local model/tool fixture. That variable participates in
 Turbo test/coverage hashes. The final Windows ai:validate passed on 2026-10-04:
 3784 tests, 10 existing skips, coverage ≥70%, build 7/7, Chromium 8/8 and k6 3/3.
-The new Mac subset (241 runtime + 14 API) and complete P14/M2 remain open;
+The user confirmed the requested Mac subset (241 runtime + 14 API) passed on
+2026-10-04; detailed output was not supplied. Complete P14/M2 remains open;
 normal/personal runner admission is still disabled.
 
 | File                                    | Purpose                               |

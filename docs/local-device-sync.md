@@ -742,7 +742,7 @@ handoff acceptance. Mac launch/recovery supervision is implemented below but
 awaits its own native tests, followed by adapter transport integration.
 P14/M2 remain open and personal AI remains disabled.
 
-## Owned OpenCode server (P14; native Mac acceptance pending)
+## Owned OpenCode server (P14; targeted Mac acceptance confirmed)
 
 `runTaskDeviceOpenCode` admits a fresh OpenCode **1.18.34** server under the native
 worker and the existing task/run/root/personal gates. It never attaches to an
@@ -804,7 +804,7 @@ Root/runtime/API checklists and all four adapters were reviewed. No new package,
 dependency, migration, public route/event or UI requires Docker/Pencil/route
 validation; the Dockerfile documents the host-only prerequisite.
 
-After the branch is published and pulled, run on Mac in the Handoff directory:
+Reproduction commands for the accepted Mac subset (no unchanged rerun needed):
 
 ```bash
 git pull --ff-only
@@ -813,7 +813,14 @@ npm test --workspace @aif/runtime -- nativeOpenCode.test.ts nativeHttp.test.ts n
 OPENCODE_NATIVE_TEST_PATH="$(command -v opencode)" npm test --workspace @aif/api -- deviceOpenCode.test.ts --bail=1
 ```
 
-Expected **241 runtime + 14 API = 255 passed**. The last API case uses the installed
+On 2026-10-04 the user confirmed that all requested Mac tests passed in response
+to the commands for `34b91cb` / `2465b4b`. The requested scope was **241 runtime +
+14 API = 255 tests**, including the installed CLI case. No detailed console log
+or individual counters were supplied; 255 describes the requested scope, not an
+independent measurement. This accepts the targeted Mac subset. Recording the
+result changes documentation only and does not require rerunning unchanged tests.
+
+For reproduction, expect **241 runtime + 14 API = 255 passed**. The last API case uses the installed
 OpenCode 1.18.34; it must pass, not skip. Without `OPENCODE_NATIVE_TEST_PATH`, the
 portable API suite has 13 passed / 1 explicit skip, which does not accept the real
 CLI. No running LM Studio/Ollama, model download, provider key or paid request is
