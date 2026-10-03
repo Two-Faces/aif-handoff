@@ -781,7 +781,17 @@ JSON-RPC fixture. It verifies that a detached writer stops before a successful
 result, cancellation keeps the fenced run, invalid task/root/session inputs do
 not launch, and previous crash/recovery cases still work. It makes no paid model
 requests or provider authentication calls. Mac acceptance for this increment is
-pending and is separate from the accepted 56-test backend suite below.
+partial and is separate from the accepted 56-test backend suite below.
+
+The user's 2026-10-03 textClipping report (08-19-06 filename) confirms **16 scope/
+parity + 5 native API tests passed**, starting at 20:18:15 and 20:18:19 respectively.
+All real native/journal cases passed, including the detached writer and abort
+fencing. Transport errors logged within the deliberate abort case did not fail
+its verified-stop assertions. The other 21 app-server cases were not selected:
+the submitted command used `appServer/tests/run.test.ts`, missing the underscores.
+Only `npm test --workspace @aif/runtime -- run.test.ts --bail=1` remains (expected
+21 passed); this basename is unique in the runtime workspace. Do not count the
+whole 42-test smoke as accepted until that result arrives.
 
 The final Windows `ai:validate` passed on 2026-10-03 (exit 0): **3515 passed /
 10 skipped**, all package coverage metrics at least 70%, build 7/7, Chromium 8/8,
@@ -798,7 +808,7 @@ After manually publishing and pulling this increment, run in the Mac checkout:
 ```bash
 cd /Users/aries/Projects/aif-handoff
 npm run build
-npm test --workspace @aif/runtime -- nativeProcessScope.test.ts appServer/__tests__/run.test.ts --bail=1
+npm test --workspace @aif/runtime -- nativeProcessScope.test.ts run.test.ts --bail=1
 npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts --bail=1
 ```
 
