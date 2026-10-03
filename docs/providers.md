@@ -117,8 +117,10 @@ native stop and journal acknowledgement. CLI retains its default 300-second run
 timeout, and usage includes cache input tokens as in the ordinary CLI transport.
 Its tool callback reports invocation; SDK/API retain PostToolUse/SubagentStart
 hooks. The restricted admission rules above remain, including no resume/fork or
-custom argv/config. Mac acceptance for the CLI/API increment is pending; the
-requested subset is 114 runtime + 39 API tests in `local-device-sync.md`.
+custom argv/config. Targeted Mac acceptance for CLI/API was recorded on
+2026-10-03 from the user's confirmation for the requested 114 runtime + 39 API
+tests, with 60 seconds reported for the API suite. Detailed logs/counts were not
+supplied; the acceptance scope is recorded in `local-device-sync.md`.
 
 All four built-in adapters check this scope. Codex API,
 OpenRouter and OpenCode reject it before provider activity. Their cancellation

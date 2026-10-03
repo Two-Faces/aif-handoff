@@ -258,7 +258,10 @@ discarded metadata) is bounded; full-stdin abort, final JSON without newline,
 missing result, nonzero exit and coordinator-death recovery are tested. Native
 SDK/API/CLI share host callback fencing and durable stop; ordinary capabilities
 and the new-session/config/external-service restrictions remain unchanged.
-Claude CLI/API Mac smoke is pending; see `docs/local-device-sync.md`. Codex API,
+Claude CLI/API Mac smoke was accepted on 2026-10-03 from the user's confirmation
+for the requested 114 runtime + 39 API set; API duration was reported as 60 seconds.
+No detailed console log or individual counts were supplied. See
+`docs/local-device-sync.md` for the acceptance scope. Codex API,
 OpenRouter and OpenCode remain closed, as do normal/personal runner admission,
 runtime-backed release and full P14/M2 acceptance.
 

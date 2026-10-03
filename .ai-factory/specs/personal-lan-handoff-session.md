@@ -221,7 +221,12 @@ exit 0, 3655 passed / 10 skipped, в том числе все 39 native API/jour
 coverage всех пакетов ≥70% (runtime минимум 75.59%, API 70.40%), build 7/7,
 Chromium 8/8, k6 3/3, protocol CLI 0.145.0. Лог
 .codex/m2/logs/native-claude-cli-final-validate.log; 14 source/test hashes совпали.
-Mac subset 114 runtime + 39 API ожидает пользователя; команды в device-sync doc.
+Mac subset Claude CLI/API принят 03.10.2026 по сообщению пользователя «Тесты зеленые»
+для 9fa29e1: запрошенный набор 114 runtime + 39 API = 153 tests. Пользователь
+отдельно подтвердил API-набор за 60 секунд; подробного stdout и отдельных
+счётчиков нет. Повтор без изменений не нужен; команды сохранены в device-sync doc.
+Это целевой subset по подтверждению пользователя, не полный Mac ai:validate,
+live provider run или приёмка P14/M2. Исходники после Windows gate не менялись.
 
 Далее P14 — остальные transports (Codex API, OpenRouter/OpenCode),
 normal runner admission/external-service coverage, runtime-backed checkpoint/release и
