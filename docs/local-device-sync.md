@@ -742,7 +742,7 @@ handoff acceptance. Mac launch/recovery supervision is implemented below but
 awaits its own native tests, followed by adapter transport integration.
 P14/M2 remain open and personal AI remains disabled.
 
-## Text-only HTTP native integration (targeted Mac smoke pending)
+## Text-only HTTP native integration (targeted Mac smoke accepted)
 
 Internal `runTaskDeviceHttp` admits Codex API and OpenRouter Chat Completions
 clients through the same task/run/root/personal gates and native process journal.
@@ -807,7 +807,7 @@ Log: `.codex/m2/logs/native-http-final-validate.log`. Root/runtime/API checklist
 and all four adapters were reviewed. No package/dependency/migration, public
 REST/WS/MCP or UI changes require Docker/Pencil/route updates in this increment.
 
-After publishing the branch and pulling it on Mac, run separately:
+Reproduction commands used for the requested Mac subset (no unchanged rerun needed):
 
 ```bash
 cd /Users/aries/Projects/aif-handoff
@@ -817,7 +817,14 @@ npm test --workspace @aif/runtime -- nativeHttp.test.ts nativeProcessScope.test.
 npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts participantWebSocket.integration.test.ts --bail=1
 ```
 
-Expected **188 runtime + 67 API = 255 passed**. Only local fixtures are used;
+On 2026-10-03 the user supplied **173 runtime tests / 8 files passed**
+(2.28s) and **67 API tests / 2 files passed** (95.13s), then separately confirmed
+**15 passed** for `appServer/__tests__/process.test.ts`. The last result was a
+count confirmation without detailed stdout. The aggregate **188 runtime +
+67 API = 255 passed** accepts this targeted subset. These reports respond to
+the instructions for `bf0cfd5`; no remote execution or independent Mac HEAD
+inspection was performed. Recording acceptance changed documentation only; the
+Windows source validation remains applicable. Only local fixtures are used;
 no API key/login, provider payment or installed OpenCode server is needed.
 The existing clang/macOS SDK prerequisite remains. This subset does not accept
 full Mac `ai:validate`, live providers, owned OpenCode or full P14/M2 handoff.

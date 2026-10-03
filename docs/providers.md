@@ -147,8 +147,9 @@ has stopped, and grants no remote tool/server authority.
 executor, so supervising only the HTTP client would prove the wrong thing.
 Run/resume and direct session creation fail with `native_external_executor_unowned`
 before contacting that server. A separately designed owned server launch and
-recovery path is still required. The new HTTP increment's Mac smoke is pending;
-see `local-device-sync.md` for the requested 188 runtime + 67 API tests.
+recovery path is still required. The HTTP increment's targeted Mac smoke was accepted
+on 2026-10-03 from the user's 173 + 15 runtime and 67 API results (255 total).
+See `local-device-sync.md` for the evidence and remaining admission limits.
 
 All four built-in adapters check this scope. OpenCode rejects it before provider activity. Its cancellation
 callbacks, SDK results and remote service responses are not native stop receipts.

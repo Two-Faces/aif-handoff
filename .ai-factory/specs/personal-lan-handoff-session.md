@@ -242,7 +242,13 @@ protocol CLI 0.145.0. Лог .codex/m2/logs/native-http-final-validate.log;
 API cases прошли, включая новый HTTP и прежние CLI/SDK/app-server сценарии.
 App-server proxy env casing и discovery tests учитывают Windows; HTTP fixtures
 обходят browser bad ports и Windows reserved ranges без ослабления assertions.
-Mac subset 188 runtime + 67 API пока ожидает пользователя.
+Mac subset принят 03.10.2026: пользователь прислал 173 runtime / 8 files passed
+(2.28s) и 67 API / 2 files passed (95.13s), затем отдельно подтвердил 15 passed
+для appServer/__tests__/process.test.ts. Итого 188 runtime + 67 API = 255.
+Последние 15 подтверждены сообщением без подробного stdout; Mac запускал
+пользователь в ответ на инструкции для bf0cfd5, независимого Mac HEAD нет.
+Повтор без изменений не нужен. Это целевые локальные fixtures, не полный
+Mac ai:validate, live providers или приёмка P14/M2. При записи код не менялся.
 OpenCode выполняет работу на отдельном сервере: остановка клиента его не
 останавливает. nativeAdmission.ts закрывает run/resume/createSession до HTTP
 с кодом native_external_executor_unowned; нужен owned server launch/recovery.
