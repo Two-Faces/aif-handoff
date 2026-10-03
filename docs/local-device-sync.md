@@ -742,7 +742,7 @@ handoff acceptance. Mac launch/recovery supervision is implemented below but
 awaits its own native tests, followed by adapter transport integration.
 P14/M2 remain open and personal AI remains disabled.
 
-## Claude SDK native integration (targeted Mac smoke pending)
+## Claude SDK native integration (targeted Mac smoke accepted by user confirmation)
 
 `runTaskDeviceClaudeSdk` is the next internal P14 bridge. It requires the current
 task run, exact registered checkout, matching task/project attribution and the
@@ -793,7 +793,15 @@ reviewed. No dependencies, packages, migrations, public routes/WS/MCP or UI were
 added; conditional Docker/Pencil/route checks do not apply. The gate used private
 SQLite and ports 3309/5480, preserving the existing M1 installations and projects.
 
-After publishing the branch and pulling it on Mac, run these commands separately:
+On 2026-10-03 the user confirmed the requested Mac tests were green for `e1cc45b`
+and separately reported that `deviceProcessSupervisor.test.ts --bail=1` passed
+in **38 seconds**. The requested scope was **54 runtime + 23 API = 77 tests**;
+detailed console output and individual counts were not supplied. This records
+targeted acceptance from the user's report, not remote or independently observed
+execution. Application code did not change; full Mac `ai:validate`, live-provider
+execution and complete P14/M2 acceptance remain separate.
+
+Accepted regression commands, retained for future changes (no repeat needed now):
 
 ```bash
 cd /Users/aries/Projects/aif-handoff

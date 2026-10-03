@@ -200,9 +200,13 @@ actual SDK topology/hooks, old version/nonzero exit, abort и crash recovery.
 Полный Windows ai:validate прошёл: exit 0, 3607 passed / 10 skipped, coverage всех
 пакетов ≥70% (runtime минимум 75.59%, API 70.55%), build 7/7, Chromium 8/8,
 k6 3/3, protocol CLI 0.145.0. Лог .codex/m2/logs/native-claude-final-validate.log;
-все 15 package source/test hashes совпали. Native Mac smoke этого increment
-ожидает пользователя, команды в docs/local-device-sync.md. Обычные capabilities
-не менялись; personal AI и полный P14/M2 пока не включать.
+все 15 package source/test hashes совпали. Native Mac smoke Claude SDK принят
+03.10.2026 по сообщению пользователя «Тесты зеленые» для e1cc45b: запрошенный набор
+54 runtime + 23 API = 77 tests. Пользователь отдельно подтвердил API-набор за
+38 секунд; подробного stdout и отдельных счётчиков нет. Повтор без изменений
+не нужен, команды сохранены в docs/local-device-sync.md. Это пользовательское
+подтверждение целевого subset, не полный Mac ai:validate или live provider run.
+Обычные capabilities не менялись; personal AI и полный P14/M2 пока не включать.
 
 Далее P14 — остальные transports (Claude CLI/API, Codex API, OpenRouter/OpenCode),
 normal runner admission/external-service coverage, runtime-backed checkpoint/release и

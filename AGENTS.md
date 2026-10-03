@@ -243,7 +243,10 @@ permission bypass remain denied. No retries or host quota/session scans occur.
 Offline actual-SDK tests verify version/CLI parent PID, tool/subagent callbacks,
 stop on failure/cancellation and coordinator-death recovery without release.
 Claude CLI/API, Codex API, OpenRouter and OpenCode remain closed to native scope.
-The Claude increment's Mac smoke is pending; see `docs/local-device-sync.md`.
+The Claude increment's Mac smoke was accepted on 2026-10-03 from the user's
+confirmation for the requested 54 runtime + 23 API set; API duration was reported
+as 38 seconds. No detailed console log or individual counts were supplied.
+See `docs/local-device-sync.md`; this is not full Mac/P14/M2 acceptance.
 No normal/personal runner or handoff admission is enabled by this internal helper.
 
 | File                                    | Purpose                               |

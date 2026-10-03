@@ -91,7 +91,10 @@ Ordinary Claude transport capabilities, provider profiles and usage `FULL` remai
 unchanged. Native usage preserves input/output tokens and cost; the limited
 projection does not yet include provider quota refresh or every SDK event.
 Bounded worker I/O does not bound the SDK's private buffers. Targeted Mac
-acceptance for this increment is pending; commands are in `local-device-sync.md`.
+acceptance was recorded on 2026-10-03 from the user's confirmation for the
+requested 54 runtime + 23 API set; the user reported 38 seconds for the API suite.
+Detailed console logs/counts were not supplied. Commands and acceptance scope
+are recorded in `local-device-sync.md`.
 The public query/options contract is documented in the
 [Claude Agent SDK reference](https://platform.claude.com/docs/en/agent-sdk/typescript).
 
