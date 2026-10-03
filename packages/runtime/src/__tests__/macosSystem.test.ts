@@ -187,6 +187,62 @@ describe("macOS host preparation boundary (simulated OS)", () => {
     expect(mock.run).not.toHaveBeenCalled();
     expect(mock.files.size).toBe(0);
   });
+  it.each([0, 1])(
+    "rejects numeric stopped=%i at the capability barrier and reports the invalid field",
+    async (stopped) => {
+      mock.run.mockImplementation(async (file, args) => {
+        if (args[0] === "capabilities")
+          return {
+            stdout: JSON.stringify({
+              kind: "capabilities",
+              bootSessionId: boot,
+              uid: 501,
+              identity: { ...nativeIdentity(file), stopped },
+            }),
+            stderr: "",
+          };
+        return execute(file, args);
+      });
+      await expect(createMacNativeSystem()).rejects.toMatchObject({
+        adapterCode: "supervisor_protocol_invalid",
+        cause: {
+          phase: "capabilities",
+          kindMatches: true,
+          uidMatches: true,
+          bootIssues: [],
+          identityIssues: [{ code: "invalid_type", path: ["stopped"] }],
+        },
+      });
+      expect(mock.run.mock.calls.some((x) => x[0] === "/bin/launchctl")).toBe(false);
+      expect(mock.files.size).toBe(0);
+    },
+  );
+  it("reports malformed boot identity without reflecting arbitrary native payloads", async () => {
+    mock.run.mockImplementation(async (file, args) => {
+      if (args[0] === "capabilities")
+        return {
+          stdout: JSON.stringify({
+            kind: "capabilities",
+            bootSessionId: "invalid boot identity",
+            uid: 501,
+            identity: nativeIdentity(file),
+          }),
+          stderr: "",
+        };
+      return execute(file, args);
+    });
+    await expect(createMacNativeSystem()).rejects.toMatchObject({
+      adapterCode: "supervisor_protocol_invalid",
+      cause: {
+        phase: "capabilities",
+        identityUidMatches: true,
+        bootIssues: [{ code: "invalid_format", path: [] }],
+        identityIssues: [],
+      },
+    });
+    expect(mock.run.mock.calls.some((x) => x[0] === "/bin/launchctl")).toBe(false);
+    expect(mock.files.size).toBe(0);
+  });
   it.each(["toolchain", "compile", "capability"] as const)(
     "cleans preparation after %s failure before any service is registered",
     async (stage) => {

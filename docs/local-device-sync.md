@@ -804,7 +804,19 @@ typedef imported by Foundation from the macOS SDK. The supplied runtime log has
 38 simulated tests passed and 8 native tests failed; both API bridge tests failed
 at the same compilation boundary. These failures precede the native scenarios.
 The formatter and all its calls now use `aif_u64_string`; compiler warnings remain
-errors and test assertions are unchanged. Native acceptance requires a rerun.
+errors and test assertions are unchanged.
+
+The user's second log (2026-10-03, 07:30) gets past compilation and the native
+capability query, but rejects the capability frame before registering a service:
+38 simulated runtime tests passed, 8 native runtime and 2 API tests failed. The
+log does not include the rejected frame. Source review found that the C expression
+`@(i.bsd.pbi_status == 4)` boxes an integer, so its `stopped` field cannot satisfy
+the required JSON boolean. It now explicitly uses `NSNumber numberWithBool`.
+Validation still rejects numeric 0/1; errors at this barrier now include the
+phase, identity/boot issue paths and UID/kind checks, without copying raw payloads.
+Three additional simulated regressions cover numeric stopped values and an
+invalid boot UUID, including cleanup before launchd registration. Native
+acceptance still requires a rerun with the boolean fix.
 The passing capability probe above does not certify this helper or its lifecycle.
 After updating the M2 branch and building, run these commands in the Mac checkout:
 
@@ -817,8 +829,8 @@ npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts
 ```
 
 Expected scope: 13 shared contract tests, 7 data journal tests, 23 simulated
-protocol tests, 15 simulated OS-boundary tests, **8 real Mac process tests** and
-**2 real native SQLite bridge tests** (68 total). The native cases exercise
+protocol tests, 18 simulated OS-boundary tests, **8 real Mac process tests** and
+**2 real native SQLite bridge tests** (71 total). The native cases exercise
 suspended preparation, literal argv/output, forged output, full stdin, detached
 grandchildren, an unrelated live process, failed persistence, helper death and
 caller death before/after resume. The bridge records stop without clearing a
@@ -844,9 +856,18 @@ adapter contracts, capabilities, dependencies, migrations and UI are unchanged,
 so their conditional checks do not apply. The existing native tests retain the
 compilation regression check; rerun the runtime/API commands on Mac for acceptance.
 
+The boolean/diagnostic fix passed Windows `ai:validate` on 2026-10-03 (exit 0):
+3491 passed / 9 skipped, coverage at least 70% in every package (runtime minimum
+74.76%), build 7/7, Chromium 8/8, k6 3/3 and protocol CLI 0.145.0. Evidence:
+`.codex/m2/logs/macos-boolean-fix-validate.log`. Root/runtime checklists reviewed;
+adapter/public contracts, dependencies, migrations and UI are unchanged. This
+Windows run does not accept native Mac execution; the current runtime/API rerun
+must pass 49 + 2 tests on Mac.
+
 ## Implementation references
 
 - [ADR](decisions/personal-lan-sync.md)
+- [Clang: Objective-C boxed expressions and NSNumber boolean literals](https://clang.llvm.org/docs/ObjectiveCLiterals.html#boxed-expressions)
 - [Node 22 TLS API](https://nodejs.org/docs/latest-v22.x/api/tls.html)
 - [Ed25519 X.509 identifiers, RFC 8410](https://www.rfc-editor.org/rfc/rfc8410.html)
 - [Windows job objects and child-process membership](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)

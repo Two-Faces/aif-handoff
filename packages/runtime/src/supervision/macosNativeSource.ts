@@ -118,7 +118,8 @@ static NSDictionary *identity(pid_t pid) {
     return @{@"pid": @(pid), @"uid": @(i.bsd.pbi_uid), @"birth": aif_u64_string(born(&i)),
         @"uniqueId": aif_u64_string(i.unique.unique), @"pidVersion": @((uint32_t)i.unique.version),
         @"coalitionId": aif_u64_string(c.resource), @"image": [NSString stringWithUTF8String:image],
-        @"stopped": @(i.bsd.pbi_status == 4)};
+        /* A C comparison has type int; boxing it directly emits JSON 0/1. */
+        @"stopped": [NSNumber numberWithBool:(i.bsd.pbi_status == 4)]};
 }
 static int counts(uint64_t coalition, uint64_t *started, uint64_t *exited) {
     uint64_t values[2] = {0}; errno = 0;

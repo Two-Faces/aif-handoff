@@ -101,8 +101,8 @@ macosSystem.ts / macosNativeSource.ts, но его native приёмка ещё 
 durable host/child callbacks и независимая проверка пустой coalition после exit.
 Mac receipts хранят UID/boot UUID/unique IDs в существующем JSON journal v40;
 старые migrations не менялись. Recovery сохраняет stop, не снимая run/grant.
-Нужны реальные Mac tests: shared 13 + data 7 + runtime (23 protocol + 15 OS-boundary
-+ 8 native) + API 2 native = 68. Команды и ограничения в docs/local-device-sync.md.
+Нужны реальные Mac tests: shared 13 + data 7 + runtime (23 protocol + 18 OS-boundary
++ 8 native) + API 2 native = 71. Команды и ограничения в docs/local-device-sync.md.
 До передачи launch controller проверяет kernel audit token самого Unix socket
 через унаследованный descriptor: hello обязан принадлежать этому процессу.
 До их принятия не считать Mac supervisor подтверждённым; далее интеграция
@@ -121,6 +121,17 @@ native acceptance пока открыта. Этот отчёт не содерж
 После symbol fix Windows `ai:validate` exit 0: 3488 passed / 9 skipped,
 coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3, protocol CLI 0.145.0.
 Лог: .codex/m2/logs/macos-symbol-fix-validate.log; это ещё не повтор на Mac.
+Второй Mac лог (03.10.2026, 07:30): сборка helper и capability query проходят,
+но capability frame отвергается до launchd bootstrap (38 simulated passed,
+8 runtime native + 2 API failed). Сам payload в логе отсутствует. В source найден
+дефект: C comparison внутри @() даёт NSNumber integer для `stopped`, тогда как
+контракт требует boolean. Исправлено явным numberWithBool; проверки не ослаблены.
+Ошибки capability теперь содержат phase и paths/code нарушенных полей. Добавлены
+3 simulated regressions, текущий повтор runtime/API на Mac — 49 + 2 теста.
+Native acceptance ещё открыта; не переходить к признанию Mac supervisor готовым.
+Windows gate boolean/diagnostic fix: `ai:validate` exit 0, 3491 passed / 9 skipped,
+coverage всех пакетов ≥70% (runtime минимум 74.76%), build 7/7, Chromium 8/8,
+k6 3/3, protocol CLI 0.145.0. Лог .codex/m2/logs/macos-boolean-fix-validate.log.
 Windows gate исходного probe принят: `ai:validate` exit 0, 3432 passed / 1 existing
 skip, coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3.
 После исправления baseline Windows `ai:validate` также exit 0: 3438 passed /

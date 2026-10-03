@@ -260,7 +260,16 @@ export async function createMacNativeSystem(): Promise<MacNativeSystem> {
       !parent.success ||
       parent.data.uid !== uid
     )
-      throw macFailure("supervisor_protocol_invalid");
+      throw macFailure("supervisor_protocol_invalid", {
+        phase: "capabilities",
+        kindMatches: capability.kind === "capabilities",
+        uidMatches: capability.uid === uid,
+        identityUidMatches: parent.success && parent.data.uid === uid,
+        bootIssues: boot.success ? [] : boot.error.issues.map(({ code, path }) => ({ code, path })),
+        identityIssues: parent.success
+          ? []
+          : parent.error.issues.map(({ code, path }) => ({ code, path })),
+      });
     return {
       id,
       uid,
