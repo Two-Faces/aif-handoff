@@ -63,7 +63,10 @@ Pinned offers/receipts и explicit acceptance сохраняют root/scope/epoc
 grant head accepted не исполняется до отдельного явного продолжения P15.
 Windows ai:validate первого блока прошёл: 3386 passed / 1 existing skip,
 coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3.
-Native Mac smoke журнала ещё не принят: ожидаются 61 shared + 50 data + 9 API tests.
+03.10.2026 пользователь сообщил об успешном прохождении всех тестов на Mac:
+целевой smoke журнала для 7ec806c принят (61 shared + 50 data + 9 API = 120).
+Evidence получено от пользователя; полный Mac ai:validate и физический handoff
+этим не подтверждены.
 Полный P14 ещё открыт: нужен настоящий process-tree supervisor, stop proof,
 orphan recovery и native Win/Mac acceptance. Manual confirmation не заменяет их.
 Детали и текущие проверки — в плане и docs/local-device-sync.md.

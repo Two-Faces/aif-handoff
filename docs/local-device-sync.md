@@ -539,8 +539,13 @@ The isolated driver used a fixture database and ports 3309/5480; evidence is in
 `.codex/m2/logs/p14-validate.log`. Only documentation changed after the run.
 Root/shared/data/API checklists were reviewed; shared consumers build and the
 DB boundary remains enforced. No new packages/dependencies, adapter capabilities
-or UI components require Docker/adapter/Pencil changes. New Mac fixture smoke
-remains pending:
+or UI components require Docker/adapter/Pencil changes.
+
+Native Mac fixture smoke was accepted on 2026-10-03 from the user's report that
+all tests passed. The requested suite for `7ec806c` contains shared 61, data 50
+and API 9 tests (120 total); the Mac was operated by the user, not remotely.
+This does not establish full Mac `ai:validate`, native process-tree termination
+or physical Windows↔Mac handoff. Reproduction commands:
 
 ```sh
 npm test --workspace @aif/shared -- deviceHandoff.test.ts db.test.ts taskCheckout.test.ts
@@ -548,7 +553,7 @@ npm test --workspace @aif/data -- deviceHandoff.test.ts deviceExecution.test.ts 
 npm test --workspace @aif/api -- deviceHandoff.test.ts peerHandoff.test.ts
 ```
 
-Expected counts: shared 61, data 50, API 9 (120 total), after pulling and building.
+Run after pulling and building the same revision.
 Shared/data Git fixture files run serially on Windows to avoid process-startup
 contention; all explicit concurrency scenarios, timeouts, assertions, coverage
 thresholds and exclusions remain intact.
