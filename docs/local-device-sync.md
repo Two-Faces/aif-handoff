@@ -798,8 +798,14 @@ cleanup deletes only the checked UUID/UID-owned directory. This proves cessation
 of the native unit; delegated services, privilege-changing work and remote MCP
 activity still require transport-specific accounting before P14 can release a run.
 
-The new native backend has **not yet been run on the user's Mac**. The passing
-capability probe above does not certify this new helper or its lifecycle.
+The first native backend run on the user's Mac on 2026-10-03 **failed during
+helper compilation**: the private `decimal` function collided with the `decimal`
+typedef imported by Foundation from the macOS SDK. The supplied runtime log has
+38 simulated tests passed and 8 native tests failed; both API bridge tests failed
+at the same compilation boundary. These failures precede the native scenarios.
+The formatter and all its calls now use `aif_u64_string`; compiler warnings remain
+errors and test assertions are unchanged. Native acceptance requires a rerun.
+The passing capability probe above does not certify this helper or its lifecycle.
 After updating the M2 branch and building, run these commands in the Mac checkout:
 
 ```sh
@@ -829,6 +835,14 @@ were identical before and after the final run. Evidence:
 checklists were reviewed; no adapter capability, migration, dependency, package,
 UI or public route changed. These results do not compile or execute the new
 Objective-C backend on Mac.
+
+After the SDK symbol fix, Windows `ai:validate` again exited 0 on 2026-10-03:
+3488 passed / 9 skipped, all package coverage metrics at least 70%, build 7/7,
+Chromium 8/8, k6 3/3 and protocol CLI 0.145.0. Log:
+`.codex/m2/logs/macos-symbol-fix-validate.log`. Root/runtime checklists reviewed;
+adapter contracts, capabilities, dependencies, migrations and UI are unchanged,
+so their conditional checks do not apply. The existing native tests retain the
+compilation regression check; rerun the runtime/API commands on Mac for acceptance.
 
 ## Implementation references
 

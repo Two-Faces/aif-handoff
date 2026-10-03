@@ -111,6 +111,16 @@ adapter transports. Personal AI и публичные launch/recovery actions н
 (8 Mac-only + 1 прежний), coverage всех пакетов ≥70%, build 7/7, Chromium 8/8,
 k6 3/3; log .codex/m2/logs/macos-supervisor-final-validate.log. Package sources
 не менялись во время финального прогона. Это не native Mac acceptance.
+Первый запуск нового backend на Mac 03.10.2026 выявил compile blocker:
+private function `decimal` конфликтовала с typedef из macOS SDK/Foundation.
+По двум textClipping-логам пользователя прошли 38 simulated runtime tests;
+8 native runtime и 2 API bridge tests упали до запуска сценариев.
+Formatter и все вызовы переименованы в `aif_u64_string`; compiler flags и
+assertions не ослаблены. Следующий шаг — повтор этих двух Mac команд после push/pull;
+native acceptance пока открыта. Этот отчёт не содержит результатов shared/data.
+После symbol fix Windows `ai:validate` exit 0: 3488 passed / 9 skipped,
+coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3, protocol CLI 0.145.0.
+Лог: .codex/m2/logs/macos-symbol-fix-validate.log; это ещё не повтор на Mac.
 Windows gate исходного probe принят: `ai:validate` exit 0, 3432 passed / 1 existing
 skip, coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3.
 После исправления baseline Windows `ai:validate` также exit 0: 3438 passed /

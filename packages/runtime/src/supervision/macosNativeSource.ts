@@ -51,7 +51,8 @@ static uint64_t milliseconds(void) {
     struct timespec t; if (clock_gettime(CLOCK_MONOTONIC, &t) != 0) fail(@"clock", errno);
     return (uint64_t)t.tv_sec * 1000 + (uint64_t)t.tv_nsec / 1000000;
 }
-static NSString *decimal(uint64_t n) { return [NSString stringWithFormat:@"%" PRIu64, n]; }
+/* Prefix private helpers: Foundation also imports SDK typedefs such as decimal. */
+static NSString *aif_u64_string(uint64_t n) { return [NSString stringWithFormat:@"%" PRIu64, n]; }
 static bool text(id value) {
     if (![value isKindOfClass:NSString.class]) return false;
     NSString *s = value; const char *p = s.UTF8String;
@@ -114,9 +115,9 @@ static NSDictionary *identity(pid_t pid) {
     if (error) fail(@"inspect", error);
     char image[PROC_PIDPATHINFO_MAXSIZE] = {0};
     if (proc_pidpath(pid, image, sizeof(image)) <= 0) fail(@"image", errno ? errno : EPROTO);
-    return @{@"pid": @(pid), @"uid": @(i.bsd.pbi_uid), @"birth": decimal(born(&i)),
-        @"uniqueId": decimal(i.unique.unique), @"pidVersion": @((uint32_t)i.unique.version),
-        @"coalitionId": decimal(c.resource), @"image": [NSString stringWithUTF8String:image],
+    return @{@"pid": @(pid), @"uid": @(i.bsd.pbi_uid), @"birth": aif_u64_string(born(&i)),
+        @"uniqueId": aif_u64_string(i.unique.unique), @"pidVersion": @((uint32_t)i.unique.version),
+        @"coalitionId": aif_u64_string(c.resource), @"image": [NSString stringWithUTF8String:image],
         @"stopped": @(i.bsd.pbi_status == 4)};
 }
 static int counts(uint64_t coalition, uint64_t *started, uint64_t *exited) {
@@ -160,7 +161,7 @@ static uint32_t drain(uint64_t coalition, pid_t preserve) {
             struct identity_info i; struct coalitions_info c;
             if (inspect(pid, &i, &c) || c.resource != coalition || i.bsd.pbi_uid != geteuid()) continue;
             int result = signal_identity(pid, &i, coalition, SIGKILL);
-            if (result == 0) [signalled addObject:decimal(i.unique.unique)];
+            if (result == 0) [signalled addObject:aif_u64_string(i.unique.unique)];
         }
         free(pids);
         if (milliseconds() >= deadline) fail(@"drain_timeout", ETIMEDOUT);
@@ -287,7 +288,7 @@ static void host(NSString *root) {
     int e = counts(host_coalition, &initial, &dead);
     if (e || initial - dead != 1) fail(@"host_not_isolated", e ? e : EPROTO);
     emit(@{@"kind": @"hello", @"identity": self, @"bootSessionId": boot_session(),
-        @"started": decimal(initial), @"exited": decimal(dead), @"id": idPart});
+        @"started": aif_u64_string(initial), @"exited": aif_u64_string(dead), @"id": idPart});
     NSMutableData *buffer = [NSMutableData data], *pendingInput = [NSMutableData data];
     pid_t child = 0; int input = -1, output = -1, diagnostic = -1, status = 0;
     bool started = false, inputEnded = false, rootExited = false, stopping = false;
@@ -428,8 +429,8 @@ int main(int argc, char **argv) {
                 uint64_t coalition = number([NSString stringWithUTF8String:argv[2]]), started, exited;
                 int error = counts(coalition, &started, &exited);
                 if (error) fail(@"usage", error);
-                emit(@{@"kind": @"usage", @"started": decimal(started), @"exited": decimal(exited),
-                    @"active": decimal(started - exited)}); return 0;
+                emit(@{@"kind": @"usage", @"started": aif_u64_string(started), @"exited": aif_u64_string(exited),
+                    @"active": aif_u64_string(started - exited)}); return 0;
             }
             if (argc == 3 && strcmp(argv[1], "recover") == 0) {
                 NSDictionary *saved = json([[NSString stringWithUTF8String:argv[2]] dataUsingEncoding:NSUTF8StringEncoding]);
