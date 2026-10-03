@@ -69,7 +69,7 @@ function fixture() {
   data.initializeTaskDeviceGrant(task.id);
   return { task, workspace, input: { taskId: task.id, projectRoot } };
 }
-describe.skipIf(process.platform !== "win32")(
+describe.skipIf(!["win32", "darwin"].includes(process.platform))(
   "native process and durable task journal bridge",
   () => {
     it("persists the native empty-job proof before settling the managed run", async () => {

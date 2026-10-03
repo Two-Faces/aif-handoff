@@ -558,8 +558,9 @@ Shared/data Git fixture files run serially on Windows to avoid process-startup
 contention; all explicit concurrency scenarios, timeouts, assertions, coverage
 thresholds and exclusions remain intact.
 
-**P14 remains open:** actual process-tree supervision, durable native stop proof,
-orphan recovery and runtime-backed release are not implemented by this foundation.
+**P14 remains open:** this journal foundation did not itself implement native
+supervision or runtime-backed release. The later native primitives below still
+need complete transport integration and acceptance before authority can transfer.
 `quiescing` requests cancellation; it never certifies exit. The adapter inventory
 includes Claude, Codex, OpenRouter and OpenCode; their current cancellation paths
 must not be treated as portable tree-stop proofs. Native supervision must account
@@ -615,11 +616,11 @@ that work delegated to external services, remote MCP servers or broker-created
 processes stopped. Transport-specific coverage must be established before a
 runtime-backed handoff can consume this evidence.
 
-**Still open:** Claude/Codex/OpenRouter/OpenCode adapter integration, macOS
-supervision, autonomous checkpoint/release and physical Windows↔Mac acceptance.
-The adapters still use their existing cancellation paths. macOS/Linux calls to
-the new native primitive reject as unsupported; they never fall back to a PID
-or process-group signal. Personal AI and public launch/recovery actions stay
+**Still open:** Claude/Codex/OpenRouter/OpenCode adapter integration, native Mac
+backend acceptance, autonomous checkpoint/release and physical Windows↔Mac acceptance.
+The adapters still use their existing cancellation paths. Linux and unsupported
+mechanisms reject; they never fall back to a PID or process-group signal.
+Personal AI and public launch/recovery actions stay
 disabled. This sub-block does not complete P14.
 
 Windows `ai:validate` completed with exit 0 on the final sources: **3410 passed /
@@ -646,9 +647,10 @@ npm test --workspace @aif/data -- deviceProcesses.test.ts deviceExecution.test.t
 
 These checks exercise portable contracts, migration and fencing; they do not
 certify full Mac `ai:validate`, native Mac process stop or physical handoff.
-The Windows-specific supervisor/bridge fixtures run only on Windows.
+The Windows Job Object fixtures run only on Windows. The native journal bridge
+fixtures also run on Mac once the Mac backend below is available.
 
-## macOS supervision capability probe (native fixture accepted, backend pending)
+## macOS supervision capability probe (native fixture accepted)
 
 Before implementing the Mac backend, test the actual installed kernel interfaces
 and launchd behavior with the fixed diagnostic fixture:
@@ -694,7 +696,8 @@ The probe has portable protocol/negative tests and a passing user-supplied nativ
 fixture report recorded below. A passed report only establishes
 a candidate mechanism for the next implementation: Mac launch/recovery integration,
 durable stop receipts, all adapter transports and P14/M2 acceptance remain open.
-`launchSupervisedProcess` still rejects macOS; personal AI stays disabled.
+The subsequent Mac backend below still needs its own native acceptance;
+personal AI stays disabled.
 
 Windows verification on 2026-10-03: final `ai:validate` exited 0 with 3432 tests
 passed and one existing skip, including 22 probe protocol/negative tests. All
@@ -736,9 +739,96 @@ and `grantsExecution: false`. It reported:
 This accepts the native diagnostic fixture on that reported environment. The
 report was supplied by the user; Codex did not run it remotely. It is not a full
 Mac `ai:validate`, a production durable stop receipt or physical Win/Mac task
-handoff acceptance. The next implementation is Mac launch/recovery supervision
-with persisted identities and stop receipts, followed by adapter transport
-integration. P14/M2 remain open and personal AI remains disabled.
+handoff acceptance. Mac launch/recovery supervision is implemented below but
+awaits its own native tests, followed by adapter transport integration.
+P14/M2 remain open and personal AI remains disabled.
+
+## macOS native supervisor (implementation awaiting native acceptance)
+
+The internal `launchSupervisedProcess` / `recoverSupervisedProcess` dispatch to
+`macosSupervisor.ts` and `macosSystem.ts` on Darwin. The bundled Objective-C
+helper in `macosNativeSource.ts` is compiled with the installed clang/macOS SDK
+and Foundation. A logged-in user's GUI launchd domain is required; no sudo,
+system daemon installation or OS version allowlist is used. The compiler and
+SDK are required for both launch and recovery.
+
+Each launch creates a UID-owned mode-0700 directory and a UUID-named, one-shot
+launchd service. Its executable receives a clean environment via `env -i`.
+Task arguments/environment remain data on a private Unix socket; they are not
+embedded in native source, a shell command or the service plist. The target gets
+only its own stdin/stdout/stderr, and cannot forge control frames through output.
+Input and output queues are bounded; a full stdin pipe cannot block control.
+Closing stdin is idempotent and subsequent writes are rejected on both platforms.
+
+Before sending a launch request, a trusted query helper inspects the accepted
+Unix socket's kernel `LOCAL_PEERTOKEN` through an inherited descriptor. Its UID,
+PID generation and current process identity must match the host's hello; no
+control data is read or written through that descriptor. The controller then
+verifies the executable, user, boot-session UUID and stable root-only coalition counters,
+then awaits the durable host-identity callback. The helper uses
+`POSIX_SPAWN_START_SUSPENDED` with `POSIX_SPAWN_CLOEXEC_DEFAULT`; the child must be
+observed suspended in the same coalition. Only the durable prepared callback
+authorizes audit-token resume. Initial setuid/setgid executables are rejected.
+These are internal host primitives, not browser/MCP launch actions.
+
+On cancellation, parent-channel loss or root exit, the helper signals members of
+its coalition using checked native unique IDs/PID generations and audit tokens.
+Enumeration finds candidates; native accounting, not an empty PID list, proves
+cessation. Its stopped frame alone is insufficient: the controller separately
+waits for the host to exit and the entire coalition to become empty, removes the
+service, checks again, then returns evidence. Callback/channel failures remain
+uncertain; finalization is bounded even if a durable callback is still pending.
+Timeouts never establish successful stop.
+
+Mac receipts extend the existing v40 JSON journal with `macos_coalition_v1`,
+UID, boot-session UUID, resource coalition, host unique ID/PID generation and
+the prepared child identity. No schema migration is rewritten or needed for
+these JSON variants. Host projection preserves every platform binding. Receipt
+schemas, mismatched provenance and unresolved-run settlement are tested on the
+portable data boundary; receipts stay local and never release a task grant.
+
+Recovery compiles a fresh trusted query/stop helper and uses only identity from
+the local journal. A different boot/user, changed host incarnation, inaccessible
+member or unverifiable native mechanism blocks recovery; it never signals a
+reused PID or infers takeover from a lease. A lost bootout acknowledgement is
+accepted only when the exact same-boot coalition is already reaped and the host
+is gone. Target launch requests are never persisted, the service has no automatic
+restart, and the controller accepts only one connection. After verified removal,
+cleanup deletes only the checked UUID/UID-owned directory. This proves cessation
+of the native unit; delegated services, privilege-changing work and remote MCP
+activity still require transport-specific accounting before P14 can release a run.
+
+The new native backend has **not yet been run on the user's Mac**. The passing
+capability probe above does not certify this new helper or its lifecycle.
+After updating the M2 branch and building, run these commands in the Mac checkout:
+
+```sh
+npm run build
+npm test --workspace @aif/shared -- processSupervision.test.ts
+npm test --workspace @aif/data -- deviceProcesses.test.ts
+npm test --workspace @aif/runtime -- macosSupervisor.test.ts macosSupervisorProtocol.test.ts macosSystem.test.ts
+npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts
+```
+
+Expected scope: 13 shared contract tests, 7 data journal tests, 23 simulated
+protocol tests, 15 simulated OS-boundary tests, **8 real Mac process tests** and
+**2 real native SQLite bridge tests** (68 total). The native cases exercise
+suspended preparation, literal argv/output, forged output, full stdin, detached
+grandchildren, an unrelated live process, failed persistence, helper death and
+caller death before/after resume. The bridge records stop without clearing a
+crashed run's authority. Windows skips the eight Mac-only cases; this is not
+native Mac acceptance. P14/M2 remain open and personal AI stays disabled.
+
+Final Windows verification on 2026-10-03: `ai:validate` exited 0 with **3488
+passed / 9 skipped** (the eight Mac-only process cases and one existing skip),
+lint/tests/coverage 10/10, build 7/7, Chromium 8/8, k6 3/3 and protocol CLI 0.145.0.
+Coverage minima: shared 75.75%, data 78.57%, runtime 74.72%, API 70.57%, agent
+76.17%, web 74.49%, MCP 86.27%. SHA-256 hashes of all 15 changed/new package files
+were identical before and after the final run. Evidence:
+`.codex/m2/logs/macos-supervisor-final-validate.log`. Root/shared/data/runtime/API
+checklists were reviewed; no adapter capability, migration, dependency, package,
+UI or public route changed. These results do not compile or execute the new
+Objective-C backend on Mac.
 
 ## Implementation references
 
@@ -754,3 +844,7 @@ integration. P14/M2 remain open and personal AI remains disabled.
 - [Apple XNU: libproc wrappers](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/libproc/libproc.c)
 - [Apple XNU: resource coalition accounting layout](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/mach/coalition.h)
 - [Apple XNU: cumulative coalition task counters and active membership](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/kern/coalition.c)
+- [Apple XNU: suspended process creation before user code](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_exec.c)
+- [Apple XNU: spawn attributes, descriptor inheritance and working directory](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/spawn/posix_spawn.c)
+- [Apple XNU: Unix socket peer audit tokens](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/uipc_usrreq.c)
+- [Node 22: inheriting stream descriptors in child processes](https://github.com/nodejs/node/blob/v22.22.2/doc/api/child_process.md#optionsstdio)

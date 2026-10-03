@@ -21,12 +21,20 @@ receipt. It requires durable callbacks before child creation and before resuming
 the suspended child. It does not select support by Windows version: unavailable
 native APIs or policy restrictions fail before the target runs.
 
+The internal Mac backend uses a dedicated launchd resource coalition and a
+private control socket. It checks a suspended `posix_spawn` child before the
+durable preparation callback may authorize resume, then independently verifies
+that the coalition including its host is empty. UID, boot-session UUID and native
+process incarnation bind local recovery. The installed clang/macOS SDK is needed
+for launch and recovery. This backend still awaits its native Mac test run; the
+previous successful capability probe is not acceptance of the new implementation.
+
 This primitive is not yet wired into the Claude, Codex, OpenRouter or OpenCode
 adapter transports. Their cancellation callbacks, SDK results and remote service
 responses are not native stop receipts. No adapter capability has changed and
-personal AI remains disabled. macOS/Linux supervision is currently unsupported;
-the API rejects those platforms instead of claiming process-group termination
-is sufficient. See [device sync](local-device-sync.md) for scope and recovery.
+personal AI remains disabled. Linux and other unsupported mechanisms reject;
+process-group termination is never substituted for native proof.
+See [device sync](local-device-sync.md) for scope, recovery and native acceptance.
 
 ## Runtime Profile Model
 

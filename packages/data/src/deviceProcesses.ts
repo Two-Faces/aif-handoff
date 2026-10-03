@@ -7,6 +7,7 @@ import {
   processHostIdentitySchema,
   preparedProcessIdentitySchema,
   processStopEvidenceSchema,
+  processHostIdentity,
   taskDeviceProcesses,
   taskDeviceRuns,
   type ProcessHostIdentity,
@@ -43,10 +44,6 @@ function originalHost(id: string) {
 function hostOnly(): void {
   if (currentTaskDeviceRunId()) throw new DeviceExecutionError("run_scope_required");
 }
-function hostIdentity(value: ProcessHostIdentity | PreparedProcessIdentity): ProcessHostIdentity {
-  const { version, mechanism, id, jobName, hostPid, hostSessionId, hostBirth } = value;
-  return { version, mechanism, id, jobName, hostPid, hostSessionId, hostBirth };
-}
 function savedIdentity(json: string | null): ProcessHostIdentity {
   let value: unknown;
   try {
@@ -64,7 +61,10 @@ function saveStop(id: string, value: unknown, recovery: boolean) {
   const evidence = parsed.data;
   return getDb().transaction(() => {
     const row = originalHost(id);
-    if (!row.identityJson || canonicalJson(hostIdentity(evidence.identity)) !== row.identityJson)
+    if (
+      !row.identityJson ||
+      canonicalJson(processHostIdentity(evidence.identity)) !== row.identityJson
+    )
       fail("process_conflict");
     if (!recovery && (!row.preparedJson || canonicalJson(evidence.identity) !== row.preparedJson))
       fail("process_conflict");
@@ -138,7 +138,7 @@ export function createTaskDeviceProcessJournal(taskId: string) {
         if (row.state === "prepared" && row.preparedJson === json) return;
         if (
           row.state !== "identified" ||
-          row.identityJson !== canonicalJson(hostIdentity(parsed.data))
+          row.identityJson !== canonicalJson(processHostIdentity(parsed.data))
         )
           fail("process_conflict");
         getDb()

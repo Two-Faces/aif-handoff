@@ -12,5 +12,6 @@ Run through this list whenever you touch anything under `packages/shared/`.
 - [ ] Adopting an incoming task checkpoint uses its private ref, expected predecessor and verified ancestry. Symbolic refs, divergence and locked refs fail closed; a repeated publication preserves user branches/index/files. Migration upgrades retain existing grant ownership, active runs and native bindings.
 - [ ] Native Git fixture files run serially on Windows; retain explicit concurrent-process tests and strict timeouts/assertions.
 - [ ] Native process contracts bind the supervisor job, PID and birth time. Upgrade migrations preserve unresolved runs/accepted grants and never manufacture stop evidence for older executions.
+- [ ] Mac process receipts retain UID, boot-session UUID, resource coalition and full-width unique process IDs. Host projection must preserve every platform binding while removing only validated child fields; malformed decimal counters must return validation errors without throwing from refinements.
 - [ ] `npm run lint`
 - [ ] `npm test`

@@ -50,7 +50,7 @@ afterEach(async () => {
 });
 
 describe("native supervisor support boundary", () => {
-  it.each(["darwin", "linux"])(
+  it.each(["linux", "freebsd"])(
     "refuses %s without substituting process-group or PID signals for proof",
     async (platform) => {
       vi.stubGlobal("process", { platform });
@@ -136,6 +136,8 @@ describe.skipIf(process.platform !== "win32")(
       const forged = JSON.stringify({ kind: "stopped", activeProcesses: 0 });
       child.write(Buffer.from(forged));
       child.endInput();
+      child.endInput();
+      expect(() => child.write(Buffer.from("after EOF"))).toThrow();
       expect(await child.completed).toMatchObject({ exitCode: 7, activeProcesses: 0 });
       expect(chunks.join("")).toBe(forged);
       expect(() => child.write(Buffer.from("late"))).toThrow();
@@ -209,6 +211,8 @@ describe.skipIf(process.platform !== "win32")(
     });
     it("recovers a live orphan through its exact process handle and rejects changed birth metadata", async () => {
       const child = await launch(fixture(), "setInterval(()=>{},100);");
+      if (child.identity.mechanism !== "windows_job_v1")
+        throw new Error("Expected Windows fixture");
       await expect(
         recoverSupervisedProcess({
           ...child.identity,

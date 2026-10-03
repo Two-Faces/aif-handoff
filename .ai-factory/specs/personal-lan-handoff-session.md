@@ -78,8 +78,8 @@ skip, coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3; 
 03.10.2026 по сообщению пользователя о прохождении тестов: целевой набор
 для d63cd8b — 25 shared + 36 data = 61; команды в docs/local-device-sync.md.
 Это не подтверждение полного Mac ai:validate, native Mac stop или физического handoff.
-Полный P14 ещё открыт: transport integration всех четырёх adapters, macOS
-supervision, autonomous checkpoint/release и native Win/Mac acceptance.
+Полный P14 ещё открыт: transport integration всех четырёх adapters, native Mac
+supervisor acceptance, autonomous checkpoint/release и native Win/Mac handoff.
 Personal AI не включать; manual confirmation не заменяет native proof.
 Подготовлен Mac capability probe: `npm run probe:macos-supervision --workspace @aif/runtime`.
 Он компилирует фиксированный C fixture в private temp, использует отдельный nonce
@@ -95,8 +95,22 @@ blockers=[], cleanupVerified=true, grantsExecution=false. Baseline 2/1/1 сов�
 остался в той же coalition с ppid=1; stale audit token отвергнут ядром (ESRCH=3),
 после остановки и снятия service coalition отсутствует (ESRCH=3).
 Это native diagnostic fixture, не готовый production supervisor или stop receipt.
-Следующий блок — Mac launch/recovery supervisor с durable receipts, затем
-интеграция adapter transports. Mac execution пока остаётся unsupported.
+Mac launch/recovery backend теперь реализован в runtime macosSupervisor.ts /
+macosSystem.ts / macosNativeSource.ts, но его native приёмка ещё ожидается.
+Одноразовый launchd host, закрытый Unix socket, posix_spawn START_SUSPENDED,
+durable host/child callbacks и независимая проверка пустой coalition после exit.
+Mac receipts хранят UID/boot UUID/unique IDs в существующем JSON journal v40;
+старые migrations не менялись. Recovery сохраняет stop, не снимая run/grant.
+Нужны реальные Mac tests: shared 13 + data 7 + runtime (23 protocol + 15 OS-boundary
++ 8 native) + API 2 native = 68. Команды и ограничения в docs/local-device-sync.md.
+До передачи launch controller проверяет kernel audit token самого Unix socket
+через унаследованный descriptor: hello обязан принадлежать этому процессу.
+До их принятия не считать Mac supervisor подтверждённым; далее интеграция
+adapter transports. Personal AI и публичные launch/recovery actions не включать.
+Финальный Windows ai:validate Mac-backend прошёл: 3488 passed / 9 skipped
+(8 Mac-only + 1 прежний), coverage всех пакетов ≥70%, build 7/7, Chromium 8/8,
+k6 3/3; log .codex/m2/logs/macos-supervisor-final-validate.log. Package sources
+не менялись во время финального прогона. Это не native Mac acceptance.
 Windows gate исходного probe принят: `ai:validate` exit 0, 3432 passed / 1 existing
 skip, coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3.
 После исправления baseline Windows `ai:validate` также exit 0: 3438 passed /

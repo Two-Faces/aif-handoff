@@ -93,6 +93,65 @@ function identities() {
   return { host, prepared, evidence };
 }
 describe("durable local process supervision journal", () => {
+  it("persists Mac boot, user and coalition bindings and refuses substituted recovery evidence", async () => {
+    const { task, input } = fixture(),
+      supervisorId = randomUUID();
+    const host: ProcessHostIdentity = {
+      version: 1,
+      mechanism: "macos_coalition_v1",
+      id: supervisorId,
+      serviceName: `com.aif.handoff.supervisor-${supervisorId}`,
+      hostPid: 123,
+      hostBirth: "1790994215911465",
+      hostUid: 501,
+      hostUniqueId: "9007199254740993",
+      hostPidVersion: 7,
+      bootSessionId: randomUUID(),
+      coalitionId: "4577",
+    };
+    let id = "";
+    await expect(
+      data.withTaskDeviceExecution(input, async () => {
+        const journal = data.createTaskDeviceProcessJournal(task.id);
+        id = journal.id;
+        await journal.onIdentity(host);
+        const prepared = {
+          ...host,
+          pid: 124,
+          birth: "1790994216911465",
+          uniqueId: "9007199254740994",
+          pidVersion: 8,
+        };
+        await expect(
+          journal.onPrepared({ ...prepared, coalitionId: "4578" }),
+        ).rejects.toMatchObject({ code: "process_conflict" });
+        await journal.onPrepared(prepared);
+      }),
+    ).rejects.toMatchObject({ code: "process_stop_unproven" });
+    expect(data.getTaskDeviceProcessRecovery(id)).toEqual(host);
+    const grant = data.getTaskDeviceGrant(task.id);
+    const recovery = {
+      identity: host,
+      activeProcesses: 0,
+      reason: "recovered",
+      exitCode: null,
+      terminatedProcesses: null,
+    };
+    for (const patch of [
+      { bootSessionId: randomUUID() },
+      { hostUid: 502 },
+      { coalitionId: "4578" },
+      { hostPidVersion: 8 },
+    ])
+      expect(() =>
+        data.recordTaskDeviceProcessRecovery(id, { ...recovery, identity: { ...host, ...patch } }),
+      ).toThrow(expect.objectContaining({ code: "process_conflict" }));
+    data.recordTaskDeviceProcessRecovery(id, recovery);
+    const stopped = data.getTaskDeviceProcess(id);
+    data.recordTaskDeviceProcessRecovery(id, recovery);
+    expect(data.getTaskDeviceProcess(id)).toEqual(stopped);
+    expect(data.getTaskDeviceGrant(task.id)).toEqual(grant);
+  });
   it("persists ordered identity/child/stop receipts before a managed run can settle", async () => {
     const { task, input } = fixture(),
       { host, prepared, evidence } = identities();

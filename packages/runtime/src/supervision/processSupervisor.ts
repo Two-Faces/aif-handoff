@@ -3,10 +3,13 @@ import { randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 import { RuntimeExecutionError } from "../errors.js";
 import { windowsJobSource } from "./windowsJobSource.js";
+import { launchMacSupervisedProcess, recoverMacSupervisedProcess } from "./macosSupervisor.js";
 import type {
   ProcessHostIdentity,
   PreparedProcessIdentity,
   ProcessStopEvidence,
+  WindowsProcessHostIdentity,
+  WindowsPreparedProcessIdentity,
 } from "@aif/shared";
 export type {
   ProcessHostIdentity,
@@ -54,7 +57,9 @@ function windowsOnly(): void {
 function validText(value: unknown): value is string {
   return typeof value === "string" && !value.includes("\0") && value.length < 32768;
 }
-function validateIdentity(identity: ProcessHostIdentity): void {
+function validateIdentity(
+  identity: ProcessHostIdentity,
+): asserts identity is WindowsProcessHostIdentity {
   if (
     identity.version !== 1 ||
     identity.mechanism !== "windows_job_v1" ||
@@ -241,6 +246,7 @@ function channel() {
 export async function launchSupervisedProcess(
   input: SupervisedProcessInput,
 ): Promise<SupervisedProcess> {
+  if (process.platform === "darwin") return launchMacSupervisedProcess(input);
   windowsOnly();
   const id = randomUUID(),
     jobName = `Local\\AifHandoff-${id}`;
@@ -249,11 +255,13 @@ export async function launchSupervisedProcess(
   const ipc = channel(),
     ready = deferred<SupervisedProcess>(),
     completed = deferred<ProcessStopEvidence>();
-  let identity: ProcessHostIdentity | undefined, prepared: PreparedProcessIdentity | undefined;
+  let identity: WindowsProcessHostIdentity | undefined,
+    prepared: WindowsPreparedProcessIdentity | undefined;
   let evidence: ProcessStopEvidence | undefined,
     launched = false,
     started = false,
-    stopping = false;
+    stopping = false,
+    inputClosed = false;
   const stop = () => {
     if (stopping || evidence) return completed.promise;
     stopping = true;
@@ -317,12 +325,15 @@ export async function launchSupervisedProcess(
         completed: completed.promise,
         stop,
         write: (bytes) => {
-          if (stopping || evidence || bytes.byteLength > 65536)
+          if (stopping || evidence || inputClosed || bytes.byteLength > 65536)
             throw failure("supervisor_input_invalid");
           ipc.send({ kind: "input", bytes: Buffer.from(bytes).toString("base64") });
         },
         endInput: () => {
-          if (!stopping && !evidence) ipc.send({ kind: "endInput" });
+          if (!stopping && !evidence && !inputClosed) {
+            inputClosed = true;
+            ipc.send({ kind: "endInput" });
+          }
         },
       });
     } else if (frame.kind === "output" && prepared) {
@@ -373,6 +384,10 @@ export async function launchSupervisedProcess(
 export async function recoverSupervisedProcess(
   identity: ProcessHostIdentity,
 ): Promise<ProcessStopEvidence> {
+  if (process.platform === "darwin") {
+    if (identity.mechanism !== "macos_coalition_v1") throw failure("supervisor_identity_invalid");
+    return recoverMacSupervisedProcess(identity);
+  }
   windowsOnly();
   identity = Object.freeze({ ...identity });
   validateIdentity(identity);

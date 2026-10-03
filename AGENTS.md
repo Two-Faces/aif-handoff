@@ -157,7 +157,7 @@ The new grant-head `accepted` state is deliberately non-executable (including to
 older runners); only a future explicit P15 continuation may promote it to `owned`.
 Manual confirmation requires a local admin, human ownership and no managed run
 history for the current grant. It cannot substitute for runtime process-tree stop.
-Native supervisor/recovery remains open in P14; there are no browser/MCP handoff
+Runtime-backed checkpoint/release remains open in P14; there are no browser/MCP handoff
 actions or automatic delivery/acceptance/runtime launches in this increment.
 
 P14 native supervision adds runtime `supervision/` with a Windows Job Object
@@ -165,7 +165,7 @@ host and data `deviceProcesses.ts` / migration v40 for local launch/stop receipt
 Persist host identity before creating the child, and its suspended identity before
 resuming. API `deviceProcessSupervisor.ts` is an internal bridge, with no routes.
 Empty-job evidence does not release a run/grant or establish adapter-wide coverage.
-Claude/Codex/OpenRouter/OpenCode transport integration and macOS supervision remain
+Claude/Codex/OpenRouter/OpenCode transport integration and native macOS acceptance remain
 open. Unsupported platforms must reject; never substitute PID/group signals or
 elapsed time for native stop proof. Existing personal AI guards remain enabled.
 
@@ -176,9 +176,14 @@ audit-token signaling. It never reads the task DB or enables Mac execution.
 The user's native arm64/Darwin 27.0.0 report passed on 2026-10-03: stable root-only
 baseline 2/1/1, running 4/2/2, orphan 4/3/1, stale-token ESRCH, coalition reaped
 after service removal and verified cleanup. Keep baseline-relative exact deltas.
-This accepts the diagnostic fixture only. The next macOS work is production
-launch/recovery supervision and durable stop receipts; adapter integration and
-P14/M2 acceptance remain open. Personal AI stays disabled.
+This accepts the diagnostic fixture only. The internal Mac backend now lives in
+`macosSupervisor.ts` / `macosSystem.ts` / `macosNativeSource.ts`: a one-shot launchd
+host with a private socket, suspended posix_spawn, durable host/child callbacks,
+audit-token stop and independently verified empty coalition. Mac receipts add
+UID/boot/unique-ID bindings to the existing v40 JSON journal; no migration is
+rewritten. Recovery compiles a fresh trusted helper and rejects a different boot
+or user. It records stop only, never releases task authority. The new backend's
+native Mac tests and adapter integration remain pending; personal AI stays disabled.
 
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |
