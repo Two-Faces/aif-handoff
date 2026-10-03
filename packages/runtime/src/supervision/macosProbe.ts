@@ -104,7 +104,7 @@ export function assertMacProbeProcess(a: MacProbeIdentity, b: MacProbeIdentity):
       { adapterCode: "macos_probe_identity_changed" },
     );
 }
-export function freshMacProbeCoalition(
+export function isolatedMacProbeCoalition(
   root: MacProbeIdentity,
   control: MacProbeIdentity,
   usage: MacProbeUsage,
@@ -118,9 +118,33 @@ export function freshMacProbeCoalition(
     root.coalitionId !== "0" &&
     root.coalitionId !== control.coalitionId &&
     usage.coalitionId === root.coalitionId &&
-    usage.started === "1" &&
-    usage.exited === "0" &&
+    BigInt(usage.started) - BigInt(usage.exited) === 1n &&
     usage.active === "1"
+  );
+}
+
+const probeUsageDeltas = {
+  initial: [0n, 0n, "1"],
+  running: [2n, 1n, "2"],
+  orphan: [2n, 2n, "1"],
+  stopped: [2n, 3n, "0"],
+} as const;
+
+/** Native counters include completed startup tasks. Freeze the root-only
+ * baseline before allowing forks; never rebase after fixture execution begins. */
+export function macProbeUsageMatches(
+  initial: MacProbeUsage,
+  current: MacProbeUsage,
+  phase: keyof typeof probeUsageDeltas,
+): boolean {
+  const [started, exited, active] = probeUsageDeltas[phase];
+  return (
+    initial.active === "1" &&
+    BigInt(initial.started) - BigInt(initial.exited) === 1n &&
+    current.coalitionId === initial.coalitionId &&
+    BigInt(current.started) === BigInt(initial.started) + started &&
+    BigInt(current.exited) === BigInt(initial.exited) + exited &&
+    current.active === active
   );
 }
 export interface MacSupervisionProbeEvidence {
@@ -144,7 +168,7 @@ export interface MacSupervisionProbeEvidence {
  * No result from this module can release a grant or enable a runtime. */
 export function assessMacSupervisionProbe(value: MacSupervisionProbeEvidence) {
   const blockers: string[] = [];
-  if (!freshMacProbeCoalition(value.root, value.control, value.initial))
+  if (!isolatedMacProbeCoalition(value.root, value.control, value.initial))
     blockers.push("coalition_not_isolated");
   if (
     !value.child.fixtureImage ||
@@ -156,20 +180,12 @@ export function assessMacSupervisionProbe(value: MacSupervisionProbeEvidence) {
     value.child.ppid !== 1
   )
     blockers.push("detached_child_not_bound");
-  if (
-    value.running.coalitionId !== value.root.coalitionId ||
-    value.running.started !== "3" ||
-    value.running.exited !== "1" ||
-    value.running.active !== "2"
-  )
+  if (!macProbeUsageMatches(value.initial, value.running, "running"))
     blockers.push("running_accounting_mismatch");
   if (
     !value.rootGone ||
     !value.orphanWrote ||
-    value.orphan.coalitionId !== value.root.coalitionId ||
-    value.orphan.started !== "3" ||
-    value.orphan.exited !== "2" ||
-    value.orphan.active !== "1"
+    !macProbeUsageMatches(value.initial, value.orphan, "orphan")
   )
     blockers.push("orphan_accounting_unproven");
   if (
@@ -184,7 +200,7 @@ export function assessMacSupervisionProbe(value: MacSupervisionProbeEvidence) {
   const ended =
     "absent" in value.final
       ? value.final.absent === true && value.final.errno === 3
-      : value.final.active === "0" && value.final.started === "3" && value.final.exited === "3";
+      : macProbeUsageMatches(value.initial, value.final, "stopped");
   if (
     value.final.coalitionId !== value.root.coalitionId ||
     !ended ||

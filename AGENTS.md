@@ -173,7 +173,10 @@ The next macOS step is the standalone runtime `probe:macos-supervision` command
 (`scripts/macos-supervision-probe.mjs` plus its fixed native C fixture). It checks
 an isolated launchd resource coalition, double-fork/setsid orphan accounting and
 audit-token signaling. It never reads the task DB or enables Mac execution.
-Native Mac results are pending; Windows protocol tests cannot accept this gate.
+The first native Mac report compiled the fixture and found both APIs, but stopped
+at cumulative startup counters (2 started / 1 exited / 1 active). The probe now
+confirms a stable root-only baseline and requires exact subsequent deltas.
+Native stop results are pending; Windows protocol tests cannot accept this gate.
 
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |

@@ -648,7 +648,7 @@ These checks exercise portable contracts, migration and fencing; they do not
 certify full Mac `ai:validate`, native Mac process stop or physical handoff.
 The Windows-specific supervisor/bridge fixtures run only on Windows.
 
-## macOS supervision capability probe (native result pending)
+## macOS supervision capability probe (native stop result pending)
 
 Before implementing the Mac backend, test the actual installed kernel interfaces
 and launchd behavior with the fixed diagnostic fixture:
@@ -663,8 +663,15 @@ registers one nonce-named job under that user's GUI launchd domain. It creates
 only its own bounded fixture processes; it does not start an AI provider, read
 the task database or change project checkouts or runtime profiles.
 
-The probe requires a fresh, dedicated resource coalition before allowing the
-fixture to fork. A double-fork/setsid child must remain accounted for after its
+The probe requires a dedicated resource coalition with only the identified root
+active before allowing the fixture to fork. Kernel task counters are cumulative,
+so already completed startup tasks are retained in a frozen baseline. Two equal
+accounting samples and unchanged live root identity must confirm this baseline
+before the go gate. Thereafter the required started/exited deltas are exactly
+`+2/+1` with two active tasks after forking, `+2/+2` with one orphan, and `+2/+3`
+with none remaining. Extra completed tasks cannot be hidden by active counts
+alone, and the probe never rebases during execution.
+A double-fork/setsid child must remain accounted for after its
 parent exits and must demonstrate continued writes. Signals use an audit token
 and the kernel must reject a deliberately stale PID generation. The signaling
 helper also verifies that the target runs this exact temporary fixture executable.
@@ -683,8 +690,8 @@ nonce service identity and the compiled binary hash before using that helper.
 An explicit cleanup refuses to race a still-running probe driver. A changed
 process incarnation, image or coalition is treated as unverified, not as exit.
 
-The probe has portable protocol/negative tests, but its C compilation and actual
-Mac behavior still require the user's native run. A passed report only establishes
+The probe has portable protocol/negative tests, but actual Mac stop behavior still
+requires the user's native run. A passed report only establishes
 a candidate mechanism for the next implementation: Mac launch/recovery integration,
 durable stop receipts, all adapter transports and P14/M2 acceptance remain open.
 `launchSupervisedProcess` still rejects macOS; personal AI stays disabled.
@@ -697,6 +704,20 @@ and after validation. The CLI also passed ESLint and `node --check`. Evidence:
 `.codex/m2/logs/macos-probe-final-validate.log`. Root/runtime checklists were
 reviewed; adapter contracts, dependencies, migrations, UI and Docker are unchanged.
 This evidence does not include compilation or execution of the C helper on Mac.
+
+The user's first native report on 2026-10-03 (arm64, Darwin 27.0.0) subsequently
+confirmed C compilation, both required symbols, a root coalition distinct from
+the control, and verified cleanup. It stopped before forks with
+`coalition_not_isolated` because the initial probe assumed counters `1/0/1`, while
+the reported started/exited/active values were `2/1/1`. The exact source of the
+completed startup task was not observed. The baseline fix above handles cumulative
+accounting; it does not accept this partial report as orphan, stale-token or stop
+proof. A repeat native report is pending.
+
+The baseline correction passed Windows `ai:validate`: 3438 tests passed with one
+existing skip (28 probe tests), all package coverage minima above 70%, build 7/7,
+Chromium 8/8 and k6 3/3. The four changed runtime files were unchanged throughout
+validation. Log: `.codex/m2/logs/macos-probe-baseline-validate.log`.
 
 ## Implementation references
 
@@ -711,3 +732,4 @@ This evidence does not include compilation or execution of the C helper on Mac.
 - [Apple XNU: native process identity and audit-token signal implementation](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/proc_info.c)
 - [Apple XNU: libproc wrappers](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/libproc/libproc.c)
 - [Apple XNU: resource coalition accounting layout](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/mach/coalition.h)
+- [Apple XNU: cumulative coalition task counters and active membership](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/kern/coalition.c)

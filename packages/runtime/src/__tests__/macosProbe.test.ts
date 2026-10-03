@@ -4,9 +4,10 @@ import { fileURLToPath } from "node:url";
 import {
   assessMacSupervisionProbe,
   assertMacProbeProcess,
-  freshMacProbeCoalition,
+  isolatedMacProbeCoalition,
   macProbePlist,
   macProbeService,
+  macProbeUsageMatches,
   parseMacProbeIdentity,
   parseMacProbeManifest,
   parseMacProbeUsage,
@@ -121,15 +122,58 @@ describe("macOS native supervision diagnostic evidence", () => {
       );
     expect(() => parseMacProbeUsage({ ok: false, errno: 3 })).toThrow();
   });
-  it("requires a previously empty, dedicated resource coalition before the fixture may fork", () => {
+  it("requires a dedicated coalition with only the live root before the fixture may fork", () => {
     const good = evidence();
-    expect(freshMacProbeCoalition(root, control, good.initial)).toBe(true);
+    expect(isolatedMacProbeCoalition(root, control, good.initial)).toBe(true);
     expect(
-      freshMacProbeCoalition(root, { ...control, coalitionId: root.coalitionId }, good.initial),
+      isolatedMacProbeCoalition(root, { ...control, coalitionId: root.coalitionId }, good.initial),
     ).toBe(false);
     expect(
-      freshMacProbeCoalition(root, control, { ...good.initial, started: "20", exited: "19" }),
+      isolatedMacProbeCoalition(root, control, { ...good.initial, started: "20", exited: "19" }),
+    ).toBe(true);
+    expect(
+      isolatedMacProbeCoalition(root, control, { ...good.initial, started: "20", exited: "18" }),
     ).toBe(false);
+    expect(
+      isolatedMacProbeCoalition(root, control, { ...good.initial, started: "20", exited: "20" }),
+    ).toBe(false);
+  });
+  it.each(["1", "2", "20", "9007199254740993"])(
+    "keeps exact fixture deltas from the frozen startup counter %s",
+    (started) => {
+      const x = evidence();
+      const count = BigInt(started);
+      x.initial = { coalitionId: "50", started, exited: String(count - 1n), active: "1" };
+      x.running = { coalitionId: "50", started: String(count + 2n), exited: started, active: "2" };
+      x.orphan = { ...x.running, exited: String(count + 1n), active: "1" };
+      x.final = { ...x.running, exited: String(count + 2n), active: "0" };
+      expect(macProbeUsageMatches(x.initial, x.initial, "initial")).toBe(true);
+      expect(assessMacSupervisionProbe(x)).toEqual({
+        status: "probe_passed",
+        grantsExecution: false,
+        blockers: [],
+      });
+    },
+  );
+  it("refuses a drifting baseline even when only one task remains active", () => {
+    const initial = { coalitionId: "50", started: "2", exited: "1", active: "1" };
+    expect(
+      macProbeUsageMatches(initial, { ...initial, started: "3", exited: "2" }, "initial"),
+    ).toBe(false);
+    expect(macProbeUsageMatches(initial, { ...initial, coalitionId: "60" }, "initial")).toBe(false);
+  });
+  it("rejects reset counters and additional completed tasks despite matching active counts", () => {
+    const reset = evidence();
+    reset.initial = { ...reset.initial, started: "2", exited: "1" };
+    expect(assessMacSupervisionProbe(reset).blockers).toContain("running_accounting_mismatch");
+    for (const phase of ["running", "orphan", "final"] as const) {
+      const x = evidence();
+      const counts = x[phase];
+      if ("absent" in counts) throw new Error("Expected accounting fixture");
+      counts.started = String(BigInt(counts.started) + 1n);
+      counts.exited = String(BigInt(counts.exited) + 1n);
+      expect(assessMacSupervisionProbe(x).status).toBe("blocked");
+    }
   });
   it("accepts complete native observations only as a diagnostic, never an execution grant", () => {
     expect(assessMacSupervisionProbe(evidence())).toEqual({

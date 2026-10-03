@@ -21,9 +21,10 @@ import { fileURLToPath } from "node:url";
 import {
   assessMacSupervisionProbe,
   assertMacProbeProcess,
-  freshMacProbeCoalition,
+  isolatedMacProbeCoalition,
   macProbePlist,
   macProbeService,
+  macProbeUsageMatches,
   parseMacProbeIdentity,
   parseMacProbeManifest,
   parseMacProbeUsage,
@@ -310,9 +311,17 @@ async function probe() {
     report.stages.initial = initial;
     if (
       rootIdentity.coalitionId === parent.coalitionId ||
-      !freshMacProbeCoalition(rootIdentity, controlIdentity, initial)
+      !isolatedMacProbeCoalition(rootIdentity, controlIdentity, initial)
     )
       throw stageError("coalition_not_isolated");
+    // The known fixture must still be the sole member. Historical tasks may
+    // have exited during launch, but counters cannot drift before the go gate.
+    if (!stillAlive(binary, rootIdentity)) throw stageError("initial_root_gone");
+    const confirmedInitial = usage(binary, rootIdentity.coalitionId);
+    report.stages.initialConfirmed = confirmedInitial;
+    if (!macProbeUsageMatches(initial, confirmedInitial, "initial"))
+      throw stageError("initial_accounting_changed");
+    if (!stillAlive(binary, rootIdentity)) throw stageError("initial_root_gone");
     manifest.coalitionId = rootIdentity.coalitionId;
     save(root, "manifest.json", manifest);
     if (interrupted) throw stageError("probe_interrupted");
@@ -320,9 +329,8 @@ async function probe() {
     const childFile = await until(() => identityFile(root, "grandchild.json"));
     const running = await until(() => {
       const current = usage(binary, rootIdentity.coalitionId);
-      return current.active === "2" && current.started === "3" && current.exited === "1"
-        ? current
-        : false;
+      report.stages.running = current;
+      return macProbeUsageMatches(initial, current, "running") ? current : false;
     });
     const child = parseMacProbeIdentity(
       requireNative(binary, ["inspect", String(childFile.pid)], "child_identity"),
@@ -354,6 +362,7 @@ async function probe() {
     save(root, "manifest.json", manifest);
     const final = await until(() => {
       const current = usage(binary, rootIdentity.coalitionId, true);
+      report.stages.final = current;
       return "absent" in current || current.active === "0" ? current : false;
     });
     const controlAfter = parseMacProbeIdentity(

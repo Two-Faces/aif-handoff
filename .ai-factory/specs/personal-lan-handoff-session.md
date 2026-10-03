@@ -85,10 +85,16 @@ Personal AI не включать; manual confirmation не заменяет nat
 Он компилирует фиксированный C fixture в private temp, использует отдельный nonce
 launchd service, проверяет resource-coalition counters, orphan после double-fork/setsid,
 kernel stale-token rejection и cleanup. Это не production backend и не execution grant.
-Нужен полный JSON report с реального Mac; пока Mac execution остаётся unsupported.
-Windows gate для probe принят: `ai:validate` exit 0, 3432 passed / 1 existing skip,
-coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3. Native C на Mac ещё
-не компилировался в рамках подтверждённой приёмки; не подменяй её portable tests.
+Первый JSON report Mac (arm64, kernel 27.0.0) подтвердил C compilation, оба symbols,
+отдельную coalition и cleanup. Probe остановился до forks: начальные накопительные
+счётчики 2/1/1 вместо ошибочно ожидавшихся 1/0/1. Диагностика исправлена на стабильный
+root-only baseline и точные последующие deltas; нужен повторный полный JSON report.
+Mac execution остаётся unsupported; stop/orphan/stale-token gate ещё не принят.
+Windows gate исходного probe принят: `ai:validate` exit 0, 3432 passed / 1 existing
+skip, coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3.
+После исправления baseline Windows `ai:validate` также exit 0: 3438 passed /
+1 existing skip, включая 28 probe tests, coverage ≥70%, build 7/7, Chromium 8/8,
+k6 3/3. Повтор native probe на Mac ещё нужен.
 Детали и текущие проверки — в плане и docs/local-device-sync.md.
 P15: onboarding, local session existence и continuation UI.
 M3/M4 не отмечай готовыми после M2.
