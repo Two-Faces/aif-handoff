@@ -82,7 +82,7 @@
  * option. Every run/resume/fork/stream entry must call assertNativeProcessMode
  * before provider activity. Pass false until that transport uses the native
  * launcher and awaits durable stop proof; ignoring the scope is forbidden.
- * Codex app-server/default JSONL CLI and the fixed Codex/Claude SDK workers integrate this path. It does
+ * Codex app-server/default JSONL CLI and fixed Codex SDK/Claude SDK/API/CLI workers integrate this path. It does
  * not advertise whole-adapter containment or enable personal execution. Do not
  * fall back to a shell, retry another launch, or run discovery outside the scope.
  * Batch CLI completion must await both native stop and drained stdout/stderr,
@@ -93,6 +93,8 @@
  * fenced, SDK imports host-resolved, secrets off argv and worker failures opaque.
  * Adapter construction must not spawn discovery helpers: defer legacy PATH
  * discovery, and contain executable version probes in the native worker.
+ * A worker's direct CLI mode must not fall back to SDK. Generate literal argv,
+ * bound raw stdout/stderr before filtering metadata, and stop on blocked stdin.
  *
  * ```ts
  * async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {

@@ -23,7 +23,7 @@ type Frame =
   | { kind: "complete" };
 
 export function nativeClaudeFailure(code: string, cause?: unknown) {
-  return new RuntimeExecutionError("Native Claude SDK attempt failed", cause, "transport", {
+  return new RuntimeExecutionError("Native Claude attempt failed", cause, "transport", {
     adapterCode: "native_claude_" + code,
   });
 }

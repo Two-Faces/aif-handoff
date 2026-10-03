@@ -208,7 +208,22 @@ k6 3/3, protocol CLI 0.145.0. Лог .codex/m2/logs/native-claude-final-validate
 подтверждение целевого subset, не полный Mac ai:validate или live provider run.
 Обычные capabilities не менялись; personal AI и полный P14/M2 пока не включать.
 
-Далее P14 — остальные transports (Claude CLI/API, Codex API, OpenRouter/OpenCode),
+Новый increment — Claude CLI/API: внутренние runTaskDeviceClaudeCli/Api сохраняют
+task/run/root/personal gate. API в этом форке уже работает через Agent SDK и
+использует прежний worker; CLI делает прямой literal spawn внутри native worker
+без SDK handshake/fallback. Version probe внутри unit, argv генерируется, prompt
+через stdin. Raw CLI stdout/stderr ≤16 MiB даже для отфильтрованных metadata;
+поддержаны UTF-8/final JSON без newline, сохранён default CLI timeout 300 секунд.
+Fenced callbacks и результат требуют durable native stop. Custom argv/settings,
+external MCP, persistence, resume/fork по-прежнему запрещены. Windows targeted:
+114 runtime + 16 новых API-сценариев прошли. Финальный Windows ai:validate принят:
+exit 0, 3655 passed / 10 skipped, в том числе все 39 native API/journal cases;
+coverage всех пакетов ≥70% (runtime минимум 75.59%, API 70.40%), build 7/7,
+Chromium 8/8, k6 3/3, protocol CLI 0.145.0. Лог
+.codex/m2/logs/native-claude-cli-final-validate.log; 14 source/test hashes совпали.
+Mac subset 114 runtime + 39 API ожидает пользователя; команды в device-sync doc.
+
+Далее P14 — остальные transports (Codex API, OpenRouter/OpenCode),
 normal runner admission/external-service coverage, runtime-backed checkpoint/release и
 физическая передача Win→Mac→Win. Native stop receipt сам по себе не освобождает
 grant/run и не подтверждает остановку внешних/делегированных services.

@@ -7,21 +7,30 @@ import {
   startTaskDeviceProcess,
   runTaskDeviceSdk,
   runTaskDeviceClaudeSdk,
+  runTaskDeviceClaudeCli,
+  runTaskDeviceClaudeApi,
 } from "../../services/deviceProcessSupervisor.js";
 const [database, taskId, projectRoot, cwd, marker, mode] = process.argv.slice(2);
 getDb(database);
 await withTaskDeviceExecution({ taskId, projectRoot }, async () => {
-  if (mode === "sdk" || mode === "claude") {
-    const run = mode === "claude" ? runTaskDeviceClaudeSdk : runTaskDeviceSdk;
+  const claude = mode === "claude" || mode === "claude-cli" || mode === "claude-api";
+  if (mode === "sdk" || claude) {
+    const run =
+      mode === "claude-cli"
+        ? runTaskDeviceClaudeCli
+        : mode === "claude-api"
+          ? runTaskDeviceClaudeApi
+          : mode === "claude"
+            ? runTaskDeviceClaudeSdk
+            : runTaskDeviceSdk;
     await run(taskId, {
-      runtimeId: mode === "claude" ? "claude" : "codex",
-      transport: "sdk",
+      runtimeId: claude ? "claude" : "codex",
+      transport: mode === "claude-cli" ? "cli" : mode === "claude-api" ? "api" : "sdk",
       prompt: "fixture",
       cwd,
-      options:
-        mode === "claude"
-          ? { claudeCliPath: join(cwd, "claude-fixture.mjs") }
-          : { codexCliPath: process.execPath },
+      options: claude
+        ? { claudeCliPath: join(cwd, "claude-fixture.mjs") }
+        : { codexCliPath: process.execPath },
       usageContext: {
         source: UsageSource.TEST,
         taskId,

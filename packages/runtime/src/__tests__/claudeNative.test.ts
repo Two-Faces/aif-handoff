@@ -100,6 +100,7 @@ function run(f: ReturnType<typeof fixture>, patch: Partial<RuntimeRunInput> = {}
   return withNativeProcessScope(root, f.launch, (scope) =>
     createClaudeRuntimeAdapter({ logger }).run({
       ...input,
+      ...(patch.transport === "cli" ? { options: { claudeCliPath: process.execPath } } : {}),
       ...patch,
       execution: { ...input.execution, ...patch.execution, nativeProcessScope: scope },
     }),
@@ -110,7 +111,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.clearAllMocks();
 });
-describe("native Claude SDK worker", () => {
+describe.each(["sdk", "api", "cli"] as const)("native Claude %s worker", (transport) => {
   it("keeps discovery, version probes and SDK query out of the host and fences callback/results until proof", async () => {
     const f = fixture(),
       onToolUse = vi.fn(),
@@ -118,7 +119,12 @@ describe("native Claude SDK worker", () => {
       onEvent = vi.fn();
     vi.stubEnv("NODE_OPTIONS", "must-not-reach-worker");
     const running = run(f, {
-      options: { apiKey: "private-fixture-secret" },
+      transport,
+      options: {
+        apiKey: "private-fixture-secret",
+        apiKeyEnvVar: "ANTHROPIC_API_KEY",
+        ...(transport === "cli" ? { claudeCliPath: process.execPath } : {}),
+      },
       execution: { onToolUse, onSubagentStart, onEvent, systemPromptAppend: "Russian" },
     });
     await f.ready.promise;
@@ -131,6 +137,7 @@ describe("native Claude SDK worker", () => {
     );
     expect(payload).toMatchObject({
       version: 1,
+      transport,
       prompt: input.prompt,
       options: {
         cwd: root,
@@ -146,8 +153,10 @@ describe("native Claude SDK worker", () => {
     f.send(init);
     f.send({ kind: "text", text: "Готово 🧪" });
     f.send({ kind: "tool_use", id: "tool", name: "Bash", input: { command: "test" } });
-    f.send({ kind: "tool_done", name: "Bash", input: { command: "test" } });
-    f.send({ kind: "subagent", name: "reviewer", id: "agent" });
+    if (transport !== "cli") {
+      f.send({ kind: "tool_done", name: "Bash", input: { command: "test" } });
+      f.send({ kind: "subagent", name: "reviewer", id: "agent" });
+    }
     f.send(result);
     f.send({ kind: "complete" });
     let settled = false;
@@ -163,7 +172,8 @@ describe("native Claude SDK worker", () => {
       usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5, costUsd: 0.01 },
     });
     expect(onToolUse).toHaveBeenCalledWith("Bash", " `test`");
-    expect(onSubagentStart).toHaveBeenCalledWith("reviewer", "agent");
+    if (transport !== "cli") expect(onSubagentStart).toHaveBeenCalledWith("reviewer", "agent");
+    else expect(onSubagentStart).not.toHaveBeenCalled();
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: "stream:text" }));
     expect(mocks.query).not.toHaveBeenCalled();
     expect(mocks.probe).not.toHaveBeenCalled();
@@ -181,7 +191,7 @@ describe("native Claude SDK worker", () => {
     "is_error",
   ])("refuses false completion: %s", async (mode) => {
     const f = fixture(),
-      running = run(f);
+      running = run(f, { transport });
     const rejected = expect(running).rejects.toBeInstanceOf(Error);
     await f.ready.promise;
     f.send(init);
@@ -204,6 +214,7 @@ describe("native Claude SDK worker", () => {
     const f = fixture(),
       abortController = new AbortController();
     const running = run(f, {
+      transport,
       execution: {
         abortController,
         startTimeoutMs: mode === "start" ? 10 : undefined,
@@ -235,11 +246,13 @@ describe("native Claude SDK worker", () => {
       { execution: { agentDefinitionName: "agent" } },
       { execution: { bypassPermissions: true } },
       { options: { claudeCliPath: 42 } },
+      { options: { claudeCliPath: null } },
+      { options: { claudeCliArgs: ["--resume", "unbound"] } },
     ])
-      await expect(run(f, patch)).rejects.toMatchObject({
+      await expect(run(f, { transport, ...patch })).rejects.toMatchObject({
         adapterCode: "native_claude_input_invalid",
       });
-    await expect(run(f, { prompt: "x".repeat(1024 * 1024) })).rejects.toMatchObject({
+    await expect(run(f, { transport, prompt: "x".repeat(1024 * 1024) })).rejects.toMatchObject({
       adapterCode: "native_claude_input_limit",
     });
     const adapter = createClaudeRuntimeAdapter({ logger });
@@ -248,7 +261,7 @@ describe("native Claude SDK worker", () => {
       (i: RuntimeRunInput) => adapter.forkSession!({ ...i, sourceSessionId: "old" }),
       (i: RuntimeRunInput) => runClaudeCli(i),
       (i: RuntimeRunInput) => runClaudeQueryAttempt(i, {}),
-      (i: RuntimeRunInput) => runClaudeRuntime({ ...i, transport: "api" }, logger),
+      (i: RuntimeRunInput) => runClaudeRuntime({ ...i, transport: "cli" }, logger),
     ])
       await expect(
         withNativeProcessScope(root, f.launch, (scope) =>
@@ -259,6 +272,8 @@ describe("native Claude SDK worker", () => {
     expect(mocks.query).not.toHaveBeenCalled();
     expect(mocks.find).not.toHaveBeenCalled();
   });
+});
+describe("native Claude executable and callback boundaries", () => {
   it("fails closed on an old bundled artifact without consulting the host probe cache", async () => {
     mocks.bundled.mockReturnValueOnce({ major: 2, minor: 1, patch: 190, raw: "2.1.190" });
     const f = fixture();
@@ -266,6 +281,42 @@ describe("native Claude SDK worker", () => {
       adapterCode: "native_claude_version_unsupported",
     });
     expect(f.launch).not.toHaveBeenCalled();
+  });
+  it("counts CLI cache tokens and does not duplicate streamed text from the final result", async () => {
+    const f = fixture(),
+      running = run(f, { transport: "cli" });
+    await f.ready.promise;
+    f.send(init);
+    f.send({ kind: "text", text: "Готово 🧪" });
+    f.send({
+      ...result,
+      usage: {
+        input_tokens: 2,
+        output_tokens: 3,
+        cache_read_input_tokens: 4,
+        cache_creation_input_tokens: 5,
+      },
+    });
+    f.send({ kind: "complete" });
+    f.proof.resolve(f.evidence);
+    expect(await running).toMatchObject({
+      outputText: "Готово 🧪",
+      usage: { inputTokens: 11, totalTokens: 14 },
+    });
+  });
+  it.each([
+    { kind: "tool_done", name: "Bash", input: {} },
+    { kind: "subagent", name: "agent", id: "id" },
+  ])("rejects SDK-only hook frames in CLI: %j", async (frame) => {
+    const f = fixture(),
+      running = run(f, { transport: "cli" });
+    const rejected = expect(running).rejects.toMatchObject({
+      adapterCode: "native_claude_protocol_invalid",
+    });
+    await f.ready.promise;
+    f.send(init);
+    f.send(frame);
+    await rejected;
   });
 });
 describe("native Claude frame projection", () => {
@@ -289,7 +340,7 @@ describe("native Claude frame projection", () => {
     ).toThrow(
       expect.objectContaining({
         adapterCode: "native_claude_" + code,
-        message: "Native Claude SDK attempt failed",
+        message: "Native Claude attempt failed",
       }),
     );
   });

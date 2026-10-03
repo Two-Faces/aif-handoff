@@ -5,7 +5,17 @@ import { join } from "node:path";
  * CLI. No SDK, supervisor, journal or process topology is mocked. */
 export function claudeSdkFixture(
   root: string,
-  mode: "success" | "abort" | "timeout" | "malformed" | "old_version" | "nonzero",
+  mode:
+    | "success"
+    | "abort"
+    | "timeout"
+    | "malformed"
+    | "old_version"
+    | "nonzero"
+    | "no_result"
+    | "overflow"
+    | "full_stdin",
+  transport: "sdk" | "api" | "cli" = "sdk",
 ) {
   const path = join(root, "claude-fixture.mjs");
   const marker = join(root, "claude-writer.txt");
@@ -16,12 +26,16 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const fs = require('node:fs');
 const mode = ${JSON.stringify(mode)};
+const transport = ${JSON.stringify(transport)};
 const topology = {pid:process.pid,ppid:process.ppid,cwd:process.cwd(),argv:process.argv};
 if(process.argv.includes('--version')) {
   fs.writeFileSync('claude-version.json', JSON.stringify(topology));
   process.stdout.write(mode === 'old_version' ? '2.1.190' : '2.1.220');
 } else {
   fs.writeFileSync('claude-launch.json', JSON.stringify(topology));
+  if(transport === 'api') fs.writeFileSync('claude-auth.json',JSON.stringify({
+    apiKeyMatches:process.env.ANTHROPIC_API_KEY === 'fixture-secret',
+    baseUrlMatches:process.env.ANTHROPIC_BASE_URL === 'http://127.0.0.1:1'}));
   const writer = require('node:child_process').spawn(process.execPath, ['-e',
     ${JSON.stringify("setInterval(()=>require('node:fs').appendFileSync(" + JSON.stringify(marker) + ",'x'),10)")}
   ], {stdio:'ignore',detached:true,windowsHide:true});
@@ -31,9 +45,12 @@ if(process.argv.includes('--version')) {
   let initialized, user, sent = false, pending = 0;
   function result() {
     if(pending || mode === 'abort' || mode === 'timeout') return;
+    if(mode === 'no_result') {process.exit(0);return;}
+    if(mode === 'overflow') {process.stdout.write(' '.repeat(17*1024*1024));return;}
     const message = {type:'result',subtype:'success',session_id:session,is_error:false,result:'Claude result 🧪',
       usage:{input_tokens:2,output_tokens:3},total_cost_usd:0.01,duration_ms:1,duration_api_ms:1,num_turns:1};
-    process.stdout.write(JSON.stringify(message)+'\\n',()=>process.exit(mode === 'nonzero' ? 7 : 0));
+    // CLI deliberately ends without newline to exercise collector drain/tail.
+    process.stdout.write(JSON.stringify(message)+(transport === 'cli' ? '' : '\\n'),()=>process.exit(mode === 'nonzero' ? 7 : 0));
   }
   function emit() {
     if(!initialized || !user || sent) return;
@@ -45,6 +62,7 @@ if(process.argv.includes('--version')) {
     send({type:'system',subtype:'init',session_id:session});
     send({type:'stream_event',session_id:session,event:{type:'content_block_delta',delta:{type:'text_delta',text:mode === 'abort' ? 'abort now' : 'Claude result 🧪'}}});
     send({type:'assistant',session_id:session,message:{role:'assistant',content:[{type:'tool_use',id:'tool',name:'Bash',input:{command:'fixture'}}]}});
+    if(transport === 'cli') {result();return;}
     for(const [event,input] of [
       ['PostToolUse',{tool_name:'Bash',tool_input:{command:'fixture'},tool_response:'ok',tool_use_id:'tool'}],
       ['SubagentStart',{agent_type:'reviewer',agent_id:'agent'}]
@@ -55,7 +73,23 @@ if(process.argv.includes('--version')) {
         input:{hook_event_name:event,session_id:session,cwd:process.cwd(),...input}}});
     }
   }
-  require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
+  if(transport === 'cli') {
+    if(mode === 'full_stdin') {
+      const trigger=()=>{
+        if(!fs.existsSync(${JSON.stringify(marker)})) {setTimeout(trigger,5);return;}
+        send({type:'system',subtype:'init',session_id:session});
+        send({type:'stream_event',event:{type:'content_block_delta',delta:{type:'text_delta',text:'abort now'}}});
+      };
+      trigger();
+      setInterval(()=>{},1000);
+    } else {
+      const chunks=[];
+      process.stdin.on('data',chunk=>chunks.push(chunk));
+      process.stdin.on('end',()=>{
+        initialized={};user={message:{content:[{type:'text',text:Buffer.concat(chunks).toString('utf8')}]}};emit();
+      });
+    }
+  } else require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
     const message = JSON.parse(line);
     if(message.type === 'control_request' && message.request.subtype === 'initialize') {
       initialized = message.request;

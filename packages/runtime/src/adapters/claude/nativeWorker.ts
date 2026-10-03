@@ -1,9 +1,12 @@
-/** Fixed worker: both the real Agent SDK and its CLI live inside the native
+import { NATIVE_CLAUDE_CLI_RUNNER } from "./nativeCliWorker.js";
+
+/** Fixed worker: SDK/API use the real Agent SDK; CLI uses a direct spawn. Both live inside the native
  * unit. Credentials/prompt arrive only over bounded stdin, after both barriers.
  * SDK messages are data, never process-stop evidence or device authority. */
 export const NATIVE_CLAUDE_WORKER = String.raw`
 import { once } from 'node:events';
 import { execFile } from 'node:child_process';
+${NATIVE_CLAUDE_CLI_RUNNER}
 const write = async value => {
   const text = JSON.stringify(value) + '\n';
   if (Buffer.byteLength(text) > 16 * 1024 * 1024) throw new Error('frame_limit');
@@ -21,7 +24,7 @@ try {
   }
   const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
   if (input.version !== 1 || typeof input.prompt !== 'string' ||
-      input.options?.cwd !== process.cwd()) throw new Error('input_invalid');
+      !['sdk','api','cli'].includes(input.transport) || input.options?.cwd !== process.cwd()) throw new Error('input_invalid');
   const options = input.options;
   // Explicit executables are probed here, inside the same native unit. Never
   // invoke the legacy host version probe or rely on its test bypass/cache.
@@ -45,23 +48,8 @@ try {
     }
   }
   Object.assign(process.env, options.env);
-  const { query } = await import(process.argv[1]);
-  session = query({ prompt: input.prompt, options: {
-    ...options,
-    executable: process.execPath,
-    stderr: text => process.stderr.write(text),
-    hooks: {
-      PostToolUse: [{ hooks: [async event => {
-        await write({kind:'tool_done', name:event.tool_name, input:event.tool_input});
-        return {};
-      }]}],
-      SubagentStart: [{ hooks: [async event => {
-        await write({kind:'subagent', name:event.agent_type, id:event.agent_id});
-        return {};
-      }]}]
-    }
-  }});
-  for await (const event of session) {
+  const project = async event => {
+    if (!event || typeof event.type !== 'string') throw new Error('cli_event_invalid');
     if (event.type === 'system' && event.subtype === 'init')
       await write({kind:'init', sessionId:event.session_id});
     else if (event.type === 'stream_event' && event.event?.type === 'content_block_delta' &&
@@ -74,6 +62,26 @@ try {
       await write({kind:'result', sessionId:event.session_id, subtype:event.subtype,
         isError:event.is_error, text:event.result ?? '', usage:event.usage,
         cost:event.total_cost_usd});
+  };
+  if (input.transport === 'cli') await runCli(input, project);
+  else {
+    const { query } = await import(process.argv[1]);
+    session = query({ prompt: input.prompt, options: {
+      ...options,
+      executable: process.execPath,
+      stderr: text => process.stderr.write(text),
+      hooks: {
+        PostToolUse: [{ hooks: [async event => {
+          await write({kind:'tool_done', name:event.tool_name, input:event.tool_input});
+          return {};
+        }]}],
+        SubagentStart: [{ hooks: [async event => {
+          await write({kind:'subagent', name:event.agent_type, id:event.agent_id});
+          return {};
+        }]}]
+      }
+    }});
+    for await (const event of session) await project(event);
   }
   await write({kind:'complete'});
 } catch {

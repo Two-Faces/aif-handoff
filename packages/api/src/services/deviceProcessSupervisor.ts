@@ -44,13 +44,24 @@ export async function runTaskDeviceClaudeSdk(taskId: string, input: RuntimeRunIn
   return runTaskDeviceRuntime(taskId, input, RuntimeTransport.SDK, "claude");
 }
 
+/** Claude's API transport uses the same Agent SDK process, with provider auth. */
+export async function runTaskDeviceClaudeApi(taskId: string, input: RuntimeRunInput) {
+  return runTaskDeviceRuntime(taskId, input, RuntimeTransport.API, "claude");
+}
+
+/** Direct Claude print-mode CLI inside the fixed native worker; no SDK fallback. */
+export async function runTaskDeviceClaudeCli(taskId: string, input: RuntimeRunInput) {
+  return runTaskDeviceRuntime(taskId, input, RuntimeTransport.CLI, "claude");
+}
+
 async function runTaskDeviceRuntime(
   taskId: string,
   input: RuntimeRunInput,
   transport:
     | typeof RuntimeTransport.APP_SERVER
     | typeof RuntimeTransport.CLI
-    | typeof RuntimeTransport.SDK,
+    | typeof RuntimeTransport.SDK
+    | typeof RuntimeTransport.API,
   runtimeId: "codex" | "claude" = "codex",
 ) {
   const root = input.cwd ?? input.projectRoot;
@@ -66,11 +77,20 @@ async function runTaskDeviceRuntime(
     input.usageContext.taskId !== taskId ||
     input.usageContext.projectId !== task.projectId ||
     (input.projectRoot !== undefined && input.projectRoot !== root);
+  const unsupportedClaudeOptions =
+    runtimeId === "claude" &&
+    (input.options?.claudeCliArgs !== undefined ||
+      input.execution?.hooks !== undefined ||
+      input.execution?.environment !== undefined ||
+      input.execution?.outputSchema !== undefined ||
+      input.execution?.bypassPermissions ||
+      input.execution?.agentDefinitionName !== undefined);
   if (
     scopeMismatch ||
     input.runtimeId !== runtimeId ||
     input.transport !== transport ||
     reusesSession ||
+    unsupportedClaudeOptions ||
     (transport === RuntimeTransport.CLI && input.options?.codexCliArgs !== undefined) ||
     (transport === RuntimeTransport.SDK &&
       (input.options?.codexCliArgs !== undefined ||

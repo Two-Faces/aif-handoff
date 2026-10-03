@@ -1,5 +1,6 @@
 import { spawn, execFileSync } from "node:child_process";
 import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
+import { runNativeClaude } from "./native.js";
 import type {
   RuntimeEvent,
   RuntimeLimitSnapshot,
@@ -783,7 +784,12 @@ export async function runClaudeCli(
   logger?: ClaudeCliLogger,
   adapterDefaults?: { pathToClaudeCodeExecutable?: string },
 ): Promise<RuntimeRunResult> {
-  assertNativeProcessMode(input, false);
+  assertNativeProcessMode(input, input.transport === undefined || input.transport === "cli");
+  if (input.execution?.nativeProcessScope)
+    return runNativeClaude(
+      { ...input, transport: "cli" },
+      adapterDefaults?.pathToClaudeCodeExecutable,
+    );
   const cliPath = resolveCliPath(input, adapterDefaults?.pathToClaudeCodeExecutable);
   const args = buildCliArgs(input);
   const execution = input.execution;

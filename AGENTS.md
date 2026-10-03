@@ -249,6 +249,19 @@ as 38 seconds. No detailed console log or individual counts were supplied.
 See `docs/local-device-sync.md`; this is not full Mac/P14/M2 acceptance.
 No normal/personal runner or handoff admission is enabled by this internal helper.
 
+P14's Claude CLI/API increment adds internal `runTaskDeviceClaudeCli` and
+`runTaskDeviceClaudeApi`. API retains the fork's Agent SDK implementation; direct
+CLI runs via `nativeCliWorker.ts` inside the same native worker, without an SDK
+handshake or fallback. CLI argv is generated, with literal executable selection,
+stdin prompt and an in-unit version probe. Raw CLI stdout/stderr (including
+discarded metadata) is bounded; full-stdin abort, final JSON without newline,
+missing result, nonzero exit and coordinator-death recovery are tested. Native
+SDK/API/CLI share host callback fencing and durable stop; ordinary capabilities
+and the new-session/config/external-service restrictions remain unchanged.
+Claude CLI/API Mac smoke is pending; see `docs/local-device-sync.md`. Codex API,
+OpenRouter and OpenCode remain closed, as do normal/personal runner admission,
+runtime-backed release and full P14/M2 acceptance.
+
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |
 | `packages/api/src/index.ts`             | API server entry (Hono, port 3009)    |

@@ -21,13 +21,19 @@ import { parseClaudeAskUserQuestion } from "./questions.js";
 import { NATIVE_CLAUDE_WORKER } from "./nativeWorker.js";
 import { nativeClaudeFailure, parseNativeClaudeFrame } from "./nativeProtocol.js";
 
-/** Deliberately bounded admission for the internal fresh SDK path. Ordinary
+export function isNativeClaudeTransport(transport: RuntimeRunInput["transport"]) {
+  return (
+    transport === undefined || transport === "sdk" || transport === "api" || transport === "cli"
+  );
+}
+
+/** Deliberately bounded admission for the internal fresh Claude paths. Ordinary
  * project hooks/settings, session reuse and external MCP services remain open. */
 export function assertNativeClaudeInput(input: RuntimeRunInput) {
   const execution = input.execution;
   const allowedOptions = new Set(["apiKey", "apiKeyEnvVar", "baseUrl", "claudeCliPath", "effort"]);
-  if (
-    (input.transport ?? "sdk") !== "sdk" ||
+  const unsupported =
+    !isNativeClaudeTransport(input.transport) ||
     input.sessionId ||
     input.resume ||
     (input as Partial<RuntimeSessionForkInput>).sourceSessionId ||
@@ -37,9 +43,8 @@ export function assertNativeClaudeInput(input: RuntimeRunInput) {
     execution?.outputSchema !== undefined ||
     execution?.agentDefinitionName !== undefined ||
     execution?.bypassPermissions ||
-    Object.keys(input.options ?? {}).some((key) => !allowedOptions.has(key))
-  )
-    throw nativeClaudeFailure("input_invalid");
+    Object.keys(input.options ?? {}).some((key) => !allowedOptions.has(key));
+  if (unsupported) throw nativeClaudeFailure("input_invalid");
 }
 
 export async function runNativeClaude(
@@ -47,6 +52,8 @@ export async function runNativeClaude(
   executableOverride?: string,
 ): Promise<RuntimeRunResult> {
   assertNativeClaudeInput(input);
+  const transport = input.transport ?? "sdk";
+  const isCli = transport === "cli";
   const execution = parseExecutionOptions(input);
   // Host callbacks stay in their fenced async context, never serialized to SDK.
   const options = buildClaudeQueryOptions(input, {
@@ -67,7 +74,12 @@ export async function runNativeClaude(
     if (["NODE_OPTIONS", "NODE_PATH", "DEBUG_CLAUDE_AGENT_SDK"].includes(key.toUpperCase()))
       delete environment[key];
   options.env = environment;
-  const override = input.options?.claudeCliPath ?? executableOverride;
+  const override =
+    input.options?.claudeCliPath !== undefined
+      ? input.options.claudeCliPath
+      : isCli
+        ? (process.env.CLAUDE_CLI_PATH ?? executableOverride ?? "claude")
+        : executableOverride;
   if (override !== undefined) {
     if (typeof override !== "string" || !override) throw nativeClaudeFailure("input_invalid");
     if (/\.(?:mjs|js)$/.test(override)) {
@@ -81,6 +93,7 @@ export async function runNativeClaude(
   }
   const stdin = JSON.stringify({
     version: 1,
+    transport,
     minimumVersion: CLAUDE_MIN_VERSION,
     prompt: input.prompt,
     options,
@@ -99,14 +112,14 @@ export async function runNativeClaude(
   return runNativeBatch({
     input,
     stdin,
-    runTimeoutMs: execution.runTimeoutMs,
+    runTimeoutMs: execution.runTimeoutMs ?? (isCli ? 300_000 : undefined),
     command: {
       executable: process.execPath,
       args: [
         "--input-type=module",
         "-e",
         NATIVE_CLAUDE_WORKER,
-        import.meta.resolve("@anthropic-ai/claude-agent-sdk"),
+        ...(isCli ? [] : [import.meta.resolve("@anthropic-ai/claude-agent-sdk")]),
       ],
       environment: nativeProcessEnvironment({}),
     },
@@ -114,6 +127,8 @@ export async function runNativeClaude(
     line: (line) => {
       if (complete) throw nativeClaudeFailure("protocol_invalid");
       const frame = parseNativeClaudeFrame(line);
+      if (isCli && (frame.kind === "tool_done" || frame.kind === "subagent"))
+        throw nativeClaudeFailure("protocol_invalid");
       if (frame.kind === "complete") {
         if (!resultSeen) throw nativeClaudeFailure("incomplete");
         complete = true;
@@ -148,6 +163,9 @@ export async function runNativeClaude(
             questionPayload: parseClaudeAskUserQuestion(frame.name, frame.id, frame.input),
           }))
             emit(event);
+          // CLI reports invocation in its assistant event; SDK/API use the
+          // real PostToolUse callback. Neither event is native stop evidence.
+          if (isCli) execution.onToolUse?.(frame.name, summarizeToolInput(frame.name, frame.input));
           break;
         case "tool_done":
           execution.onToolUse?.(frame.name, summarizeToolInput(frame.name, frame.input));
@@ -161,10 +179,15 @@ export async function runNativeClaude(
           if (frame.isError) throw nativeClaudeFailure("result_failed");
           resultSeen = true;
           if (!outputText) outputText = frame.text;
+          const inputTokens =
+            frame.usage.input_tokens +
+            (isCli
+              ? frame.usage.cache_read_input_tokens + frame.usage.cache_creation_input_tokens
+              : 0);
           usage = {
-            inputTokens: frame.usage.input_tokens,
+            inputTokens,
             outputTokens: frame.usage.output_tokens,
-            totalTokens: frame.usage.input_tokens + frame.usage.output_tokens,
+            totalTokens: inputTokens + frame.usage.output_tokens,
             costUsd: frame.cost,
           };
           emit({ type: "result:success", timestamp, level: "info" });

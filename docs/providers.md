@@ -98,7 +98,29 @@ are recorded in `local-device-sync.md`.
 The public query/options contract is documented in the
 [Claude Agent SDK reference](https://platform.claude.com/docs/en/agent-sdk/typescript).
 
-All four built-in adapters check this scope. Claude CLI/API, Codex API,
+The next internal increment covers **Claude CLI and API** via
+`runTaskDeviceClaudeCli` and `runTaskDeviceClaudeApi`. In this fork the API
+transport already uses the Agent SDK, so it follows the same native SDK worker
+path with the existing provider environment. CLI mode directly spawns the
+selected literal executable inside the worker and never imports the SDK there.
+It resolves `claudeCliPath`, then `CLAUDE_CLI_PATH`, the explicit adapter path,
+or `claude` on PATH; it never invokes legacy shell/discovery helpers. Version
+probes stay in that same native unit. Generated print-mode argv disables settings
+sources, external MCP configuration and session persistence. The main prompt is
+sent through stdin; system-prompt append uses the CLI's literal argument contract.
+See the [Claude CLI reference](https://code.claude.com/docs/en/cli-reference).
+
+Direct CLI parsing bounds raw stdout/stderr at 16 MiB, including ignored metadata,
+preserves split UTF-8/final JSON without newline, and rejects a missing result or
+nonzero exit. Blocked stdin, callback errors, timeout and abort still require
+native stop and journal acknowledgement. CLI retains its default 300-second run
+timeout, and usage includes cache input tokens as in the ordinary CLI transport.
+Its tool callback reports invocation; SDK/API retain PostToolUse/SubagentStart
+hooks. The restricted admission rules above remain, including no resume/fork or
+custom argv/config. Mac acceptance for the CLI/API increment is pending; the
+requested subset is 114 runtime + 39 API tests in `local-device-sync.md`.
+
+All four built-in adapters check this scope. Codex API,
 OpenRouter and OpenCode reject it before provider activity. Their cancellation
 callbacks, SDK results and remote service responses are not native stop receipts.
 Configured external MCP/services, normal runner admission, bound resume/fork and
@@ -171,7 +193,8 @@ The API exposes effective selection endpoints:
 Capabilities are **transport-aware**: the same adapter may expose different capabilities depending on the selected transport. For example, Codex supports resume on SDK/CLI/App Server, session fork only on App Server, and session discovery on SDK/App Server. Use `resolveAdapterCapabilities(adapter, transport)` to get the effective set.
 
 The table describes regular runtime features. P14's internal native process path
-supports Codex App Server/default JSONL CLI and fixed Codex/Claude SDK workers, with new sessions; it does not advertise
+supports Codex App Server/default JSONL CLI, the Codex SDK worker and restricted
+Claude SDK/API/CLI worker paths, with new sessions; it does not advertise
 whole-adapter containment or change the regular transports' capabilities.
 
 ### Model-specific effort discovery

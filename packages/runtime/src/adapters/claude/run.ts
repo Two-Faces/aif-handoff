@@ -78,7 +78,10 @@ export async function runClaudeRuntime(
     pathToClaudeCodeExecutable?: string;
   },
 ): Promise<RuntimeRunResult> {
-  assertNativeProcessMode(input, (input.transport ?? "sdk") === "sdk");
+  assertNativeProcessMode(
+    input,
+    input.transport === undefined || input.transport === "sdk" || input.transport === "api",
+  );
   if (input.execution?.nativeProcessScope)
     return runNativeClaude(input, adapterDefaults?.pathToClaudeCodeExecutable);
   const execution = parseExecutionOptions(input, adapterDefaults);

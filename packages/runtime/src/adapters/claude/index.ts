@@ -35,6 +35,7 @@ import { buildClaudeQueryOptions, parseExecutionOptions } from "./options.js";
 import { runClaudeRuntime, type ClaudeRuntimeRunLogger } from "./run.js";
 import { assertClaudeExecutableCompatible } from "./version.js";
 import { runClaudeCli, probeClaudeCli, type ClaudeCliLogger } from "./cli.js";
+import { isNativeClaudeTransport } from "./native.js";
 
 export type ClaudeRuntimeAdapterLogger = ClaudeRuntimeRunLogger & ClaudeCliLogger;
 
@@ -531,11 +532,11 @@ export function createClaudeRuntimeAdapter(
     normalizeSdkExecutablePath(getExecutablePath(), logger, runtimeId);
 
   function runByTransport(input: RuntimeRunInput): Promise<RuntimeRunResult> {
+    const transport = input.transport ?? RuntimeTransport.SDK;
     if (input.execution?.nativeProcessScope)
-      return runClaudeRuntime(input, logger, {
+      return (transport === RuntimeTransport.CLI ? runClaudeCli : runClaudeRuntime)(input, logger, {
         pathToClaudeCodeExecutable: options.executablePath,
       });
-    const transport = input.transport ?? RuntimeTransport.SDK;
     if (transport === RuntimeTransport.CLI) {
       return runClaudeCli(input, logger, { pathToClaudeCodeExecutable: getExecutablePath() });
     }
@@ -633,10 +634,7 @@ export function createClaudeRuntimeAdapter(
       }
     },
     async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {
-      assertNativeProcessMode(
-        input,
-        (input.transport ?? RuntimeTransport.SDK) === RuntimeTransport.SDK,
-      );
+      assertNativeProcessMode(input, isNativeClaudeTransport(input.transport));
       return runByTransport(input);
     },
     async resume(input: RuntimeRunInput & { sessionId: string }): Promise<RuntimeRunResult> {
