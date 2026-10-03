@@ -78,8 +78,8 @@ skip, coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3; 
 03.10.2026 по сообщению пользователя о прохождении тестов: целевой набор
 для d63cd8b — 25 shared + 36 data = 61; команды в docs/local-device-sync.md.
 Это не подтверждение полного Mac ai:validate, native Mac stop или физического handoff.
-Полный P14 ещё открыт: transport integration всех четырёх adapters, native Mac
-supervisor acceptance, autonomous checkpoint/release и native Win/Mac handoff.
+Полный P14 ещё открыт: transport integration всех четырёх adapters,
+autonomous checkpoint/release и native Win/Mac handoff.
 Personal AI не включать; manual confirmation не заменяет native proof.
 Подготовлен Mac capability probe: `npm run probe:macos-supervision --workspace @aif/runtime`.
 Он компилирует фиксированный C fixture в private temp, использует отдельный nonce
@@ -95,81 +95,41 @@ blockers=[], cleanupVerified=true, grantsExecution=false. Baseline 2/1/1 сов�
 остался в той же coalition с ppid=1; stale audit token отвергнут ядром (ESRCH=3),
 после остановки и снятия service coalition отсутствует (ESRCH=3).
 Это native diagnostic fixture, не готовый production supervisor или stop receipt.
-Mac launch/recovery backend теперь реализован в runtime macosSupervisor.ts /
-macosSystem.ts / macosNativeSource.ts, но его native приёмка ещё ожидается.
+Mac launch/recovery backend реализован в runtime macosSupervisor.ts /
+macosSystem.ts / macosNativeSource.ts. Целевой native runtime/API набор принят
+03.10.2026 по выводу пользователя после обновления для `2f62264`:
+**54 runtime + 2 API = 56 passed**, без failures и неисполненных cases.
+Runtime: 20 OS-boundary + 25 protocol + все 9 native process tests, 19:22:21,
+16.30s. API: оба native journal/recovery tests, 19:22:39, 3.94s (Europe/Moscow).
+Среда, зафиксированная при приёмке: macOS 27.0.1, arm64, Node 22.22.2.
+Evidence получено от пользователя; Mac удалённо не запускался. В этом отчёте
+нет отдельных shared/data результатов или полного Mac ai:validate.
+
 Одноразовый launchd host, закрытый Unix socket, posix_spawn START_SUSPENDED,
 durable host/child callbacks и независимая проверка пустой coalition после exit.
 Mac receipts хранят UID/boot UUID/unique IDs в существующем JSON journal v40;
 старые migrations не менялись. Recovery сохраняет stop, не снимая run/grant.
-Нужны реальные Mac tests: shared 13 + data 7 + runtime (25 protocol + 20 OS-boundary
-+ 9 native) + API 2 native = 76. Команды и ограничения в docs/local-device-sync.md.
-До передачи launch controller проверяет kernel audit token самого Unix socket
-через унаследованный descriptor: hello обязан принадлежать этому процессу.
-До их принятия не считать Mac supervisor подтверждённым; далее интеграция
-adapter transports. Personal AI и публичные launch/recovery actions не включать.
-Финальный Windows ai:validate Mac-backend прошёл: 3488 passed / 9 skipped
-(8 Mac-only + 1 прежний), coverage всех пакетов ≥70%, build 7/7, Chromium 8/8,
-k6 3/3; log .codex/m2/logs/macos-supervisor-final-validate.log. Package sources
-не менялись во время финального прогона. Это не native Mac acceptance.
-Первый запуск нового backend на Mac 03.10.2026 выявил compile blocker:
-private function `decimal` конфликтовала с typedef из macOS SDK/Foundation.
-По двум textClipping-логам пользователя прошли 38 simulated runtime tests;
-8 native runtime и 2 API bridge tests упали до запуска сценариев.
-Formatter и все вызовы переименованы в `aif_u64_string`; compiler flags и
-assertions не ослаблены. Следующий шаг — повтор этих двух Mac команд после push/pull;
-native acceptance пока открыта. Этот отчёт не содержит результатов shared/data.
-После symbol fix Windows `ai:validate` exit 0: 3488 passed / 9 skipped,
-coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3, protocol CLI 0.145.0.
-Лог: .codex/m2/logs/macos-symbol-fix-validate.log; это ещё не повтор на Mac.
-Второй Mac лог (03.10.2026, 07:30): сборка helper и capability query проходят,
-но capability frame отвергается до launchd bootstrap (38 simulated passed,
-8 runtime native + 2 API failed). Сам payload в логе отсутствует. В source найден
-дефект: C comparison внутри @() даёт NSNumber integer для `stopped`, тогда как
-контракт требует boolean. Исправлено явным numberWithBool; проверки не ослаблены.
-Ошибки capability теперь содержат phase и paths/code нарушенных полей. Добавлены
-3 simulated regressions, текущий повтор runtime/API на Mac — 49 + 2 теста.
-Native acceptance ещё открыта; не переходить к признанию Mac supervisor готовым.
-Windows gate boolean/diagnostic fix: `ai:validate` exit 0, 3491 passed / 9 skipped,
-coverage всех пакетов ≥70% (runtime минимум 74.76%), build 7/7, Chromium 8/8,
-k6 3/3, protocol CLI 0.145.0. Лог .codex/m2/logs/macos-boolean-fix-validate.log.
-Третий Mac лог (03.10.2026, 07:45): runtime 41 passed / 8 native failed по timeout,
-API 2 failed с run_scope_required в onIdentity. Потеря AsyncLocalStorage при
-accepted-socket callback воспроизведена на Windows и исправлена AsyncResource.bind
-для frame handler; новый тест проверяет два concurrent scope и foreign-context input.
-Отдельная диагностика пользователя доходит до host saved, затем start timeout;
-explicit recovery подтверждает activeProcesses=0. Полученный stack sample показывает
-helper в poll. Найдена причина: Node при передаче Socket как child stdio ставит его
-чтение на pause. После успешной проверки credentials теперь возвращается исходное
-flowing-состояние; deliberately paused сокет и неуспешный query не возобновляются.
-OS-boundary mock моделирует этот pause; regression сначала упал, затем прошёл.
-Текущий Mac повтор runtime/API — 52 + 2; native acceptance остаётся открытой.
-Финальный Windows gate обоих socket/context fixes: `ai:validate` exit 0,
-3494 passed / 9 skipped, coverage всех пакетов ≥70% (runtime минимум 74.77%),
-build 7/7, Chromium 8/8, k6 3/3, protocol CLI 0.145.0. Лог:
-.codex/m2/logs/macos-socket-lifecycle-final-validate.log. Более ранний
-macos-async-context-validate.log не подтверждает итоговый код, так как socket fix
-был завершён позднее. Следующий шаг — Mac runtime/API 52 + 2 с --bail=1.
-Mac повтор в 19:10: 44 simulated tests + первый native case прошли; второй native
-case падает, оставшиеся шесть не выполнялись из-за bail (45 passed / 1 failed из 52).
-Найден дефект stdin: 64 KiB превращаются в 87384 Base64 symbols, но helper применял
-32 KiB argv/env text guard. Теперь binary path отдельно ограничивает encoded length,
-сохраняя decoded 64 KiB и queue 4 MiB. Добавлен native binary round-trip/EOF test
-на 24573/24574/65536 bytes и portable error stage test. Ошибки теперь показывают
-adapterCode и валидные nativeStage/nativeCode прямо в message, сохраняя cause.
-Текущий Mac повтор — runtime 54 + API 2; native acceptance остаётся открытой.
-Пользователь отдельно подтвердил оба native API bridge tests: 2 passed на повторе
-socket/context revision. Journal/stop и separate-process crash recovery этого
-целевого набора приняты; runtime suite и последующий stdin fix ещё не приняты.
-Финальный Windows gate stdin/error-diagnostic fix: `ai:validate` exit 0,
+Проверены stdin/EOF и 64 KiB binary round trip, detached grandchildren,
+отказ persistence до записи, helper death, caller death до/после resume.
+Kernel peer audit token проверяется до передачи target args. Принятые исправления:
+SDK-safe names, boolean JSON для stopped, AsyncResource context для callbacks,
+восстановление чтения Socket после inherited-stdio query и отдельный Base64 stdin
+limit. История неуспешных прогонов сохранена в плане и docs/local-device-sync.md;
+не повторять прежние указания о неподтверждённом native backend как текущий статус.
+
+Последний Windows gate исходников `2f62264`: ai:validate exit 0,
 3495 passed / 10 skipped (9 native Mac-only + 1 прежний), coverage всех пакетов
 ≥70% (runtime минимум 74.82%), build 7/7, Chromium 8/8, k6 3/3,
-protocol CLI 0.145.0. Лог .codex/m2/logs/macos-stdin-limit-final-validate.log.
-Следующий шаг — native Mac runtime/API **54 + 2** с --bail=1.
-Windows gate исходного probe принят: `ai:validate` exit 0, 3432 passed / 1 existing
-skip, coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3.
-После исправления baseline Windows `ai:validate` также exit 0: 3438 passed /
-1 existing skip, включая 28 probe tests, coverage ≥70%, build 7/7, Chromium 8/8,
-k6 3/3. Успешный native probe получен от пользователя, удалённого запуска не было.
+protocol CLI 0.145.0; .codex/m2/logs/macos-stdin-limit-final-validate.log.
+После этого изменялись только документы приёмки. Полный дополнительный targeted
+набор включает 13 shared + 7 data + 54 runtime + 2 API = 76; не приписывать
+пользовательскому отчёту 56 tests прохождение всех 76.
+
+Следующий блок P14 — интеграция supervisor со всеми adapter transports
+(Claude/Codex/OpenRouter/OpenCode), затем runtime-backed checkpoint/release и
+физическая передача Win→Mac→Win. Native stop receipt сам по себе не освобождает
+grant/run и не подтверждает остановку внешних/делегированных services.
+Personal AI и публичные launch/recovery/handoff actions пока не включать.
 Детали и текущие проверки — в плане и docs/local-device-sync.md.
 P15: onboarding, local session existence и continuation UI.
 M3/M4 не отмечай готовыми после M2.

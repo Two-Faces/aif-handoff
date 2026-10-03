@@ -693,11 +693,10 @@ An explicit cleanup refuses to race a still-running probe driver. A changed
 process incarnation, image or coalition is treated as unverified, not as exit.
 
 The probe has portable protocol/negative tests and a passing user-supplied native
-fixture report recorded below. A passed report only establishes
-a candidate mechanism for the next implementation: Mac launch/recovery integration,
-durable stop receipts, all adapter transports and P14/M2 acceptance remain open.
-The subsequent Mac backend below still needs its own native acceptance;
-personal AI stays disabled.
+fixture report recorded below. A passed probe only establishes a candidate
+mechanism. The subsequent Mac backend has its own accepted native runtime/API
+report below; adapter transport integration and P14/M2 acceptance remain open.
+Personal AI stays disabled.
 
 Windows verification on 2026-10-03: final `ai:validate` exited 0 with 3432 tests
 passed and one existing skip, including 22 probe protocol/negative tests. All
@@ -743,7 +742,27 @@ handoff acceptance. Mac launch/recovery supervision is implemented below but
 awaits its own native tests, followed by adapter transport integration.
 P14/M2 remain open and personal AI remains disabled.
 
-## macOS native supervisor (implementation awaiting native acceptance)
+## macOS native supervisor (targeted native runtime/API suite accepted)
+
+On 2026-10-03 the user supplied passing Mac results after updating the M2 branch
+for the `2f62264` stdin fix: **54 runtime + 2 API tests passed**, with no failures
+or unexecuted cases in those suites. Runtime started at 19:22:21 and completed in
+16.30 seconds; API started at 19:22:39 and completed in 3.94 seconds (Europe/Moscow).
+The runtime count comprises 20 simulated OS-boundary tests, 25 protocol tests and
+all **9 real native process tests**. Both API cases use the native supervisor and
+durable SQLite journal, including recovery from a separate process after a crash.
+The environment recorded during validation is macOS 27.0.1, arm64, Node 22.22.2.
+
+This accepts the targeted Mac launch/stop/recovery suite, including binary stdin
+through EOF, detached descendants, failed persistence, helper death, and caller
+death before/after resume. Evidence is the user's Vitest output, not remote
+execution by the agent. The report does not contain the separate shared/data
+commands or a full Mac `ai:validate`. The next P14 work is integration with all
+four adapter transports and runtime-backed checkpoint/release; physical Windows
+↔ Mac handoff and the overall M2 gate remain open. Personal AI stays disabled.
+
+The failed attempts and their fixes below are historical evidence; the passing
+runtime/API report above supersedes their pending-acceptance status.
 
 The internal `launchSupervisedProcess` / `recoverSupervisedProcess` dispatch to
 `macosSupervisor.ts` and `macosSystem.ts` on Darwin. The bundled Objective-C
@@ -816,7 +835,7 @@ Validation still rejects numeric 0/1; errors at this barrier now include the
 phase, identity/boot issue paths and UID/kind checks, without copying raw payloads.
 Three additional simulated regressions cover numeric stopped values and an
 invalid boot UUID, including cleanup before launchd registration. Native
-acceptance still requires a rerun.
+acceptance was still pending at that revision.
 
 The third native log (2026-10-03, 07:45) passes 41 simulated cases but times out
 in all 8 native cases before preparation; the two API bridge cases report
@@ -833,8 +852,8 @@ The controller now restores its previously flowing state only after query exit a
 credential validation. Deliberately paused sockets stay paused; failed credentials
 never resume reading. The OS-boundary mock now reproduces Node's pause side effect,
 and its new regression failed before this fix and reads the next frame afterward.
-The corrected native backend still needs the Mac rerun; the earlier timeout is not
-a passing native launch/stop scenario.
+The corrected backend still needed a Mac rerun at that revision; the earlier
+timeout was not a passing native launch/stop scenario.
 
 On the next Mac run (2026-10-03, 19:10), the first native case passed: suspended
 barriers, literal arguments, separate output and verified completion. The second
@@ -848,13 +867,13 @@ case hashes binary chunks of 24573, 24574 and 65536 bytes through EOF and reject
 65537 bytes at the caller boundary. Native error messages now include adapter code
 and, when valid, stage/nativeCode, while preserving structured error fields. The
 reported failure did not include its native stage; the bound violation is verified
-from source and its correction still needs native confirmation.
+from source and its correction was subsequently confirmed by the 19:22 native run.
 The user separately confirmed both native API bridge tests passed on this Mac run.
 This accepts the targeted journal/stop and separate-process crash-recovery cases
 for the socket/context revision; it does not accept the incomplete runtime suite
 or the subsequent stdin fix.
 The passing capability probe above does not certify this helper or its lifecycle.
-After updating the M2 branch and building, run these commands in the Mac checkout:
+The complete regression command set remains available for future changes:
 
 ```sh
 npm run build
@@ -866,7 +885,8 @@ npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts
 
 Expected scope: 13 shared contract tests, 7 data journal tests, 25 simulated
 protocol tests, 20 simulated OS-boundary tests, **9 real Mac process tests** and
-**2 real native SQLite bridge tests** (76 total). The native cases exercise
+**2 real native SQLite bridge tests** (76 total; the latest supplied report covers
+the 56 runtime/API tests). The native cases exercise
 suspended preparation, literal argv/output, forged output, full stdin, detached
 grandchildren, an unrelated live process, failed persistence, helper death and
 caller death before/after resume. The bridge records stop without clearing a
@@ -919,7 +939,7 @@ one existing skip), all package coverage metrics at least 70% (runtime minimum
 CLI 0.145.0. Log: `.codex/m2/logs/macos-stdin-limit-final-validate.log`. The four
 changed runtime source/test files were unchanged during the gate. Root/runtime
 checklists reviewed; no adapter capability, dependency, migration, UI or route
-changed. The current native Mac rerun is **54 runtime + 2 API**, with `--bail=1`.
+changed. The subsequent **54 runtime + 2 API** Mac rerun passed as recorded above.
 
 ## Implementation references
 

@@ -165,8 +165,9 @@ host and data `deviceProcesses.ts` / migration v40 for local launch/stop receipt
 Persist host identity before creating the child, and its suspended identity before
 resuming. API `deviceProcessSupervisor.ts` is an internal bridge, with no routes.
 Empty-job evidence does not release a run/grant or establish adapter-wide coverage.
-Claude/Codex/OpenRouter/OpenCode transport integration and native macOS acceptance remain
-open. Unsupported platforms must reject; never substitute PID/group signals or
+Claude/Codex/OpenRouter/OpenCode transport integration remains open. The targeted
+native Mac runtime/API suite passed on 2026-10-03 (54 + 2 tests, user-supplied logs).
+Unsupported platforms must reject; never substitute PID/group signals or
 elapsed time for native stop proof. Existing personal AI guards remain enabled.
 
 The standalone runtime `probe:macos-supervision` command
@@ -182,8 +183,10 @@ host with a private socket, suspended posix_spawn, durable host/child callbacks,
 audit-token stop and independently verified empty coalition. Mac receipts add
 UID/boot/unique-ID bindings to the existing v40 JSON journal; no migration is
 rewritten. Recovery compiles a fresh trusted helper and rejects a different boot
-or user. It records stop only, never releases task authority. The new backend's
-native Mac tests and adapter integration remain pending; personal AI stays disabled.
+or user. It records stop only, never releases task authority. All nine native Mac
+process cases and both API journal/recovery cases passed after the fixes in
+`2f62264`. Adapter integration, runtime-backed release and full M2 acceptance remain
+open; personal AI stays disabled.
 
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |

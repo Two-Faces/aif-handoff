@@ -26,8 +26,10 @@ private control socket. It checks a suspended `posix_spawn` child before the
 durable preparation callback may authorize resume, then independently verifies
 that the coalition including its host is empty. UID, boot-session UUID and native
 process incarnation bind local recovery. The installed clang/macOS SDK is needed
-for launch and recovery. This backend still awaits its native Mac test run; the
-previous successful capability probe is not acceptance of the new implementation.
+for launch and recovery. On 2026-10-03 the user supplied passing Mac logs for
+54 runtime tests (including all nine native process cases) and both native API
+journal/recovery tests after the fixes in `2f62264`. This accepts the targeted
+backend suite; it is separate from the earlier fixed-fixture capability probe.
 
 This primitive is not yet wired into the Claude, Codex, OpenRouter or OpenCode
 adapter transports. Their cancellation callbacks, SDK results and remote service
