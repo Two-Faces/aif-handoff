@@ -138,11 +138,12 @@ API runTaskDeviceAppServer — внутренний bridge для уже enrolle
 Целевые Windows tests: 37 runtime (16 scope/parity + 21 app-server), 5 API с
 реальным supervisor/SQLite и offline JSON-RPC fixture. Mac отчёт пользователя
 03.10.2026 в textClipping 08-19-06 подтверждает 16 scope/parity + все 5 native API
-tests (21 passed). Ещё 21 app-server test не выбран из-за пути appServer/tests
-вместо appServer/__tests__. Нужна только команда:
-npm test --workspace @aif/runtime -- run.test.ts --bail=1
-Файл с этим именем единственный в runtime.
-Полный 42-test smoke до этого результата не объявлять принятым.
+tests (21 passed). Первоначально ещё 21 app-server test не выбран из-за пути
+appServer/tests вместо appServer/__tests__. После исправления selector пользователь
+прислал 21/21 run.test.ts (20:21:26, 1.02s). Целевой Mac smoke для 0195064 принят:
+16 scope/parity + 21 app-server + 5 native API = 42 passed. Это не полный Mac
+ai:validate, платный provider smoke или приёмка полного P14/M2. Повторять эти
+команды без новых изменений не нужно. Personal AI и public admission ещё закрыты.
 Финальный Windows ai:validate нового блока прошёл 03.10.2026: exit 0,
 3515 passed / 10 skipped, coverage всех пакетов ≥70% (runtime min 74.91%,
 API min 70.67%), build 7/7, Chromium 8/8, k6 3/3, protocol CLI 0.145.0.

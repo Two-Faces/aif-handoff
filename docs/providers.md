@@ -38,6 +38,9 @@ chat or the worker yet. A host-only `nativeProcessScope` permits one launch and
 awaits native stop plus journal acknowledgement before returning a result. Abort
 retains the fenced run even after its native process unit stops. Start timeouts
 do not retry; dynamic model discovery cannot spawn an uncontained helper.
+The user supplied passing Mac logs on 2026-10-03 for all 42 targeted tests:
+16 scope/parity, 21 app-server protocol and 5 real native/journal cases using an
+offline provider fixture. This accepts the internal increment, not full P14/M2.
 
 All four built-in adapters check this scope. Claude, other Codex transports,
 OpenRouter and OpenCode reject it before provider activity. Their cancellation

@@ -780,8 +780,8 @@ uses the actual adapter, native host and isolated SQLite journal with a local
 JSON-RPC fixture. It verifies that a detached writer stops before a successful
 result, cancellation keeps the fenced run, invalid task/root/session inputs do
 not launch, and previous crash/recovery cases still work. It makes no paid model
-requests or provider authentication calls. Mac acceptance for this increment is
-partial and is separate from the accepted 56-test backend suite below.
+requests or provider authentication calls. Targeted Mac acceptance for this
+increment is complete and separate from the accepted 56-test backend suite below.
 
 The user's 2026-10-03 textClipping report (08-19-06 filename) confirms **16 scope/
 parity + 5 native API tests passed**, starting at 20:18:15 and 20:18:19 respectively.
@@ -789,9 +789,11 @@ All real native/journal cases passed, including the detached writer and abort
 fencing. Transport errors logged within the deliberate abort case did not fail
 its verified-stop assertions. The other 21 app-server cases were not selected:
 the submitted command used `appServer/tests/run.test.ts`, missing the underscores.
-Only `npm test --workspace @aif/runtime -- run.test.ts --bail=1` remains (expected
-21 passed); this basename is unique in the runtime workspace. Do not count the
-whole 42-test smoke as accepted until that result arrives.
+The user then ran `npm test --workspace @aif/runtime -- run.test.ts --bail=1`
+(the basename is unique in this workspace) and supplied **21 passed**, starting
+at 20:21:26, duration 1.02s. This completes **42/42 requested tests** for `0195064`.
+It does not establish a full Mac quality gate, a live paid-provider run or complete
+P14/M2 acceptance. Application sources did not change during this acceptance.
 
 The final Windows `ai:validate` passed on 2026-10-03 (exit 0): **3515 passed /
 10 skipped**, all package coverage metrics at least 70%, build 7/7, Chromium 8/8,
@@ -803,7 +805,7 @@ No package, dependency, migration, UI or public REST/WS/MCP change was introduce
 conditional Docker/Pencil/route checks do not apply. The gate used its private
 SQLite fixture and ports 3309/5480, preserving the native M1 apps and user data.
 
-After manually publishing and pulling this increment, run in the Mac checkout:
+Accepted regression commands, retained for future changes (no repeat needed now):
 
 ```bash
 cd /Users/aries/Projects/aif-handoff
@@ -961,7 +963,8 @@ Scope at `2f62264`: 13 shared contract tests, 7 data journal tests, 25 simulated
 protocol tests, 20 simulated OS-boundary tests, **9 real Mac process tests** and
 **2 real native SQLite bridge tests** (76 total; the latest supplied report covers
 the 56 runtime/API tests). The later adapter increment above expands this API
-file to 5 cases (79 total for these commands); its new acceptance is pending.
+file to 5 cases (79 total for these commands); all five Mac API cases are accepted
+in the separate 42-test increment above.
 The native cases exercise
 suspended preparation, literal argv/output, forged output, full stdin, detached
 grandchildren, an unrelated live process, failed persistence, helper death and

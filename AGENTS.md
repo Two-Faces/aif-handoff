@@ -199,8 +199,10 @@ substitution. No routes/coordinator/chat call it yet. Windows needs a literal
 `.exe`, not `.cmd`; native environment restores only libuv's OS essentials.
 External service/config coverage, remaining transports, normal admission and
 runtime-backed checkpoint/release remain open. Stop of this unit grants no
-handoff authority. New adapter Mac acceptance is separate from the 56-test
-backend acceptance above; see the current plan and device-sync instructions.
+handoff authority. The separate adapter Mac smoke passed on 2026-10-03 from user
+logs: 16 scope/parity + 21 app-server + 5 native API = 42 tests. The native API uses
+an offline protocol fixture; this is not a live provider run or complete P14/M2.
+See the current plan and device-sync instructions.
 
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |
