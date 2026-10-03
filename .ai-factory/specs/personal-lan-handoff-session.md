@@ -162,9 +162,12 @@ CLI блока прошёл 03.10.2026: exit 0, 3534 passed / 10 skipped, covera
 ≥70% (runtime минимум 75.09%, API 70.72%), build 7/7, Chromium 8/8, k6 3/3,
 protocol CLI 0.145.0. Лог .codex/m2/logs/native-cli-final-validate.log; восемь
 package source/test hashes не изменились. Root/runtime/API checklists проверены.
-Новая Mac acceptance пока ожидается: 85 runtime + 9 API = 94; команды в
-docs/local-device-sync.md. Это offline protocol fixture с реальным supervisor,
-не платный provider smoke и не включение обычного исполнения/personal AI.
+Целевой Mac smoke CLI принят 03.10.2026 по textClipping пользователя 08-54-15:
+85 runtime + 9 API = 94 passed для блока ba3347e. Runtime 20:52:22 / 1.04s,
+API 20:52:26 / 15.06s; все три native CLI случая success/abort/timeout прошли.
+Это offline protocol fixture с реальным supervisor, не полный Mac ai:validate,
+платный provider smoke или включение обычного исполнения/personal AI.
+Повтор этих команд без новых изменений не нужен; детали в docs/local-device-sync.md.
 
 Далее P14 — остальные transports (Claude, Codex SDK/API, OpenRouter/OpenCode),
 normal runner admission/external-service coverage, runtime-backed checkpoint/release и

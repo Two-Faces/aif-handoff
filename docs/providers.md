@@ -49,7 +49,10 @@ The batch collector waits for native proof and drained stdout/stderr, including
 early process completion. It preserves split UTF-8, caps combined output at
 16 MiB and requires both zero exit and a completed turn. Abort, protocol failures
 and callback errors reject the run without retry. Global session-limit file scans
-are skipped; JSONL usage remains `PARTIAL`. Native Mac CLI acceptance is pending.
+are skipped; JSONL usage remains `PARTIAL`. Targeted Mac CLI acceptance passed
+on 2026-10-03 from the user's logs: 85 runtime + 9 native API/journal tests using
+an offline provider fixture, including CLI success, cancellation and timeout.
+This does not establish complete P14/M2 acceptance or a live provider run.
 The output contract follows [Codex non-interactive JSONL](https://learn.chatgpt.com/docs/non-interactive-mode).
 
 All four built-in adapters check this scope. Claude, Codex SDK/API,

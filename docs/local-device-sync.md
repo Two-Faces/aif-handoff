@@ -742,7 +742,7 @@ handoff acceptance. Mac launch/recovery supervision is implemented below but
 awaits its own native tests, followed by adapter transport integration.
 P14/M2 remain open and personal AI remains disabled.
 
-## Codex CLI native integration (internal P14 increment; Mac acceptance pending)
+## Codex CLI native integration (targeted Mac smoke accepted)
 
 `runTaskDeviceCli` shares the internal task/run/root/personal admission gate with
 app-server. It is not called by ordinary routes, chat or the worker. Only a new
@@ -783,7 +783,17 @@ contracts and native deny parity were reviewed. No dependencies/packages,
 migrations, public REST/WS/MCP or UI changed, so their conditional Docker/Pencil/
 route checks do not apply. The gate used private SQLite and ports 3309/5480.
 
-After publication/pull, the required Mac subset is:
+The user's 2026-10-03 textClipping report (`08-54-15` filename) accepts the full
+requested CLI subset for `ba3347e`: **85 runtime + 9 API = 94 passed**, with no
+failed or skipped cases. Runtime started at 20:52:22 and took 1.04s; API started
+at 20:52:26 and took 15.06s (Europe/Moscow). All three real native CLI cases passed:
+success, cancellation and timeout, including the detached writer and durable
+journal assertions. App-server regression, scope guards and crash recovery also
+passed. Diagnostic warnings/errors belong to negative test scenarios; they are
+not failing cases. Evidence came from user-run Mac commands, not remote execution.
+The decoded local log is `.codex/m2/logs/mac-native-cli-20261003.txt`.
+
+Accepted regression commands, retained for future changes (no repeat needed now):
 
 ```bash
 cd /Users/aries/Projects/aif-handoff
@@ -793,9 +803,10 @@ npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts --bail=1
 ```
 
 Expected **85 runtime + 9 API = 94 passed** (15 native CLI protocol, 16 scope/parity,
-33 legacy CLI and 21 adapter tests; 9 native API/journal cases). This increment
-needs its own Mac acceptance; the previous 42-test app-server acceptance does not
-cover it. Installed clang/macOS SDK is required. Full P14/M2 acceptance is separate.
+33 legacy CLI and 21 adapter tests; 9 native API/journal cases). Installed
+clang/macOS SDK is required. This targeted acceptance is separate from the earlier
+42-test app-server report, a full Mac quality gate, a live provider run and full
+P14/M2 acceptance. Application sources did not change during this acceptance.
 
 ## Codex app-server native integration (first internal P14 increment, accepted)
 

@@ -212,8 +212,10 @@ children. It decodes split UTF-8, bounds total output, requires `turn.completed`
 and zero exit, and rejects abort/protocol/callback errors without retry. Global
 session-limit scans are skipped in this scope; stream usage remains PARTIAL.
 The Windows native fixture covers success, cancellation and timeout with a
-detached writer and large stdin. Native Mac acceptance of this new CLI block is
-pending. Claude, Codex SDK/API, OpenRouter and OpenCode still reject native scope.
+detached writer and large stdin. The targeted Mac CLI smoke passed on 2026-10-03
+from user logs: 85 runtime + 9 API = 94 tests, including native success/abort/timeout.
+This uses an offline provider fixture, not a live model or full P14/M2 acceptance.
+Claude, Codex SDK/API, OpenRouter and OpenCode still reject native scope.
 Personal AI, normal runner admission and runtime-backed release remain closed.
 
 | File                                    | Purpose                               |
