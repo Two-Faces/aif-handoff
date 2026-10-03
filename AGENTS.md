@@ -227,7 +227,9 @@ not argv, and worker failures are opaque. New text-only sessions are admitted;
 custom config/argv, hooks/env, output schema and resume/fork remain denied.
 No global session scans or native retries occur. Windows tests cover actual SDK
 topology, success/abort/timeout, malformed output and coordinator-death recovery.
-Mac SDK acceptance remains pending. Claude, Codex API, OpenRouter and OpenCode
+Targeted Mac SDK acceptance was recorded on 2026-10-03 from the user's passing
+confirmation for the requested 109 runtime + 15 API set; detailed logs were not
+supplied in that report. Claude, Codex API, OpenRouter and OpenCode
 still reject native scope; normal/personal execution and full P14/M2 remain open.
 
 | File                                    | Purpose                               |

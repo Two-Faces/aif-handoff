@@ -67,7 +67,9 @@ hooks/environment, output schemas and resume/fork fail before launch. This avoid
 uncovered SDK temporary-schema cleanup and alternate launch paths. Global session
 scans and native retries are disabled; ordinary SDK capabilities and `FULL` usage
 declaration are unchanged. The host bounds worker I/O, not the SDK's private
-stderr buffer. Native Mac acceptance of this increment is pending. See the
+stderr buffer. Targeted Mac acceptance was recorded on 2026-10-03 from the user's
+confirmation that the requested SDK smoke commands passed (109 runtime + 15 API
+expected); no detailed output or timings were supplied in that report. See the
 [Codex SDK documentation](https://learn.chatgpt.com/docs/codex-sdk) for the public API.
 
 All four built-in adapters check this scope. Claude, Codex API,

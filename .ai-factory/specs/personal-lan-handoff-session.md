@@ -181,8 +181,12 @@ session; custom config/argv, execution hooks/env, outputSchema, resume/fork и
 ai:validate прошёл: exit 0, 3572 passed / 10 skipped, coverage всех пакетов ≥70%
 (runtime минимум 75.30%, API 70.65%), build 7/7, Chromium 8/8, k6 3/3, protocol
 CLI 0.145.0. Лог .codex/m2/logs/native-sdk-final-validate.log; все 12 package
-source/test hashes совпали до/после gate. Новая Mac acceptance ожидается: 124 tests, команды в
-docs/local-device-sync.md. Public/normal/personal execution ещё не включать.
+source/test hashes совпали до/после gate. 03.10.2026 пользователь подтвердил
+«Тесты зеленые» в ответ на SDK smoke-команды для 068b777: запрошенный набор
+109 runtime + 15 API = 124 tests. Целевая Mac приёмка принята по подтверждению;
+подробные logs/длительности/счётчики в этом сообщении не приложены. Повтор без
+изменений не нужен. Это не полный Mac gate или live provider run.
+Public/normal/personal execution ещё не включать.
 
 Далее P14 — остальные transports (Claude, Codex API, OpenRouter/OpenCode),
 normal runner admission/external-service coverage, runtime-backed checkpoint/release и

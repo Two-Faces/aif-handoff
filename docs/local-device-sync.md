@@ -742,7 +742,7 @@ handoff acceptance. Mac launch/recovery supervision is implemented below but
 awaits its own native tests, followed by adapter transport integration.
 P14/M2 remain open and personal AI remains disabled.
 
-## Codex SDK native integration (internal increment; Mac acceptance pending)
+## Codex SDK native integration (targeted Mac smoke accepted by user confirmation)
 
 `runTaskDeviceSdk` uses the same task/run/root/personal gate as the other internal
 Codex bridges. It starts a fixed Node worker through both native launch barriers;
@@ -793,7 +793,15 @@ all four adapters and registration/usage contracts were reviewed. No dependencie
 packages, migrations, public REST/WS/MCP or UI changed; conditional Docker/Pencil/
 route checks do not apply. Tests used private SQLite and ports 3309/5480.
 
-After manual publication/pull, run on Mac:
+On 2026-10-03 the user confirmed that the requested Mac tests were green for the
+`068b777` SDK increment. The requested scope is 109 runtime + 15 API tests. This
+records targeted acceptance from the user's confirmation, not an independently
+read console report: detailed output, individual counts and timings were not
+supplied. No remote Mac execution took place, and application sources did not
+change. The full Mac quality gate, live provider execution and P14/M2 acceptance
+remain separate.
+
+Accepted regression commands, retained for future changes (no repeat needed now):
 
 ```bash
 cd /Users/aries/Projects/aif-handoff
@@ -804,8 +812,8 @@ npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts --bail=1
 
 Expected **109 runtime + 15 API = 124 passed** (33 native SDK, 29 existing SDK,
 17 adapter SDK, 15 native CLI and 15 scope/parity tests; 15 API/journal cases).
-The installed clang/macOS SDK is still required. Earlier native acceptances do
-not accept this new worker; this is not a full Mac gate or complete P14/M2.
+The installed clang/macOS SDK is still required. This worker has its own targeted
+acceptance above; it is not a full Mac gate or complete P14/M2.
 
 ## Codex CLI native integration (targeted Mac smoke accepted)
 
