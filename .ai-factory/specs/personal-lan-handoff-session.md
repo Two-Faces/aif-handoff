@@ -74,8 +74,10 @@ task_device_processes: host identity до CreateProcess, suspended child receipt
 Успешный JS return при незавершённом process journal оставляет run uncertain.
 Windows ai:validate второго блока прошёл на финальном коде: 3410 passed / 1 existing
 skip, coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3; лог
-.codex/m2/logs/supervision-final-validate.log. Общий Mac smoke v40 ещё открыт:
-25 shared + 36 data = 61; команды в docs/local-device-sync.md.
+.codex/m2/logs/supervision-final-validate.log. Общий Mac smoke v40 принят
+03.10.2026 по сообщению пользователя о прохождении тестов: целевой набор
+для d63cd8b — 25 shared + 36 data = 61; команды в docs/local-device-sync.md.
+Это не подтверждение полного Mac ai:validate, native Mac stop или физического handoff.
 Полный P14 ещё открыт: transport integration всех четырёх adapters, macOS
 supervision, autonomous checkpoint/release и native Win/Mac acceptance.
 Personal AI не включать; manual confirmation не заменяет native proof.

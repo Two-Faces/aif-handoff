@@ -633,7 +633,10 @@ checklists were reviewed. No packages/dependencies, adapter capabilities,
 REST/WS contracts or UI components changed, so Docker/adapter registration and
 Pencil synchronization do not apply.
 
-Common Mac regression for migration v40 and run journals remains pending:
+Common Mac regression for migration v40 and run journals was accepted on
+2026-10-03 from the user's report that the requested tests passed. The target
+suite for `d63cd8b` contains shared 25 and data 36 tests (**61 total**). The Mac
+was operated by the user, not remotely. Reproduction commands:
 
 ```sh
 npm run build
@@ -641,8 +644,8 @@ npm test --workspace @aif/shared -- processSupervision.test.ts db.test.ts
 npm test --workspace @aif/data -- deviceProcesses.test.ts deviceExecution.test.ts
 ```
 
-Expected counts: shared 25, data 36 (**61 total**). These checks exercise portable
-contracts, migration and fencing; they do not certify native Mac process stop.
+These checks exercise portable contracts, migration and fencing; they do not
+certify full Mac `ai:validate`, native Mac process stop or physical handoff.
 The Windows-specific supervisor/bridge fixtures run only on Windows.
 
 ## Implementation references
