@@ -21,3 +21,5 @@ Run through this list whenever you touch anything under `packages/api/`.
 - [ ] SDK worker fixtures use the actual SDK with a local CLI fixture and assert parent/child topology. Isolate inherited SDK originator overrides in tests; prove stop and retained authority after coordinator death rather than treating SDK return as stop evidence.
 
 - [ ] Loopback HTTP fixtures avoid fetch-restricted ports and Windows reserved ranges. Select and bind an available port before requests; do not add retries to runtime attempts or relax authorization/stop assertions to hide fixture setup failures.
+
+- [ ] Owned-server native tests cover detached writers and coordinator recovery without releasing the grant. Keep installed-CLI tests explicit, include their executable selection in test cache hashes, and do not treat a skipped real-binary case as native acceptance.

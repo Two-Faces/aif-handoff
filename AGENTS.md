@@ -280,6 +280,23 @@ accepted from user evidence on 2026-10-03: 173 runtime + a separately confirmed
 10 skips, coverage ≥70%, build 7/7, Chromium 8/8 and k6 3/3; normal/personal
 admission and full P14/M2 remain open. See `docs/local-device-sync.md` for current evidence and commands.
 
+P14's owned OpenCode increment adds `opencode/native.ts`, `nativeWorker.ts` and
+`nativeProtocol.ts`, plus internal `runTaskDeviceOpenCode`. A fixed worker launches
+and versions a fresh 1.18.34 server inside the same native unit; it uses private
+HOME/XDG/temp/auth and a locally announced endpoint. Existing server URLs, resume,
+direct session creation, project/managed config and external MCP remain denied.
+The model endpoint is `modelBaseUrl`, separate from the server address. Its own
+inference process is not stopped by an OpenCode receipt. Strict new-session
+completion and native stop/journal acknowledgement precede success. The optional
+`nativeBatch.afterStopped` removes owned artifacts only after verified stop;
+crashes/uncertain stop retain them. `deviceOpenCode.test.ts` covers lifecycle,
+a detached writer and recovery, and uses `OPENCODE_NATIVE_TEST_PATH` for a real
+installed CLI plus a local model/tool fixture. That variable participates in
+Turbo test/coverage hashes. The final Windows ai:validate passed on 2026-10-04:
+3784 tests, 10 existing skips, coverage ≥70%, build 7/7, Chromium 8/8 and k6 3/3.
+The new Mac subset (241 runtime + 14 API) and complete P14/M2 remain open;
+normal/personal runner admission is still disabled.
+
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |
 | `packages/api/src/index.ts`             | API server entry (Hono, port 3009)    |

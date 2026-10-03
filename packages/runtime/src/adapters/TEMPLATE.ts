@@ -100,6 +100,11 @@
  * complete JSON/SSE plus usage before success. Local client stop never proves
  * that remote inference or a separately owned executor stopped. Keep such
  * executors (including direct session creation) denied until they are owned.
+ * Owned server adapters must start a fresh server inside the native unit, use
+ * private auth/storage and a locally selected endpoint, and exclude ambient
+ * plugins/config/MCP. Verify the actual binary with a local model/tool fixture.
+ * Remove private attempt artifacts only after native stop acknowledgement;
+ * uncertain stop and coordinator death must retain them for explicit recovery.
  *
  * ```ts
  * async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {

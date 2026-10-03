@@ -143,16 +143,37 @@ accounting forms and still rejects duplicated usage, late content and missing
 `[DONE]`. Local client stop does not guarantee that remote inference or billing
 has stopped, and grants no remote tool/server authority.
 
-**OpenCode remains denied** in native scopes: its separate API server owns the
-executor, so supervising only the HTTP client would prove the wrong thing.
-Run/resume and direct session creation fail with `native_external_executor_unowned`
-before contacting that server. A separately designed owned server launch and
-recovery path is still required. The HTTP increment's targeted Mac smoke was accepted
-on 2026-10-03 from the user's 173 + 15 runtime and 67 API results (255 total).
-See `local-device-sync.md` for the evidence and remaining admission limits.
+**OpenCode now has a fresh owned-server path** for internal native scopes via
+`runTaskDeviceOpenCode`. The fixed worker checks OpenCode **1.18.34**, launches
+`serve --hostname 127.0.0.1 --port 0` in the same native unit, and uses a random
+per-attempt password and separate HOME/XDG/temp directories. Existing-server
+`baseUrl`/credentials, direct session creation and resume remain denied. This
+path supports explicit `opencodeCliPath` (or `OPENCODE_CLI_PATH`), `modelBaseUrl`
+(the model's OpenAI-compatible `/v1` endpoint), `apiKey`, `contextWindow` and
+`maxOutputTokens`. `model` is the exact model identifier at that endpoint.
+No model is downloaded or selected implicitly. macOS npm/fnm shims are resolved
+to their installed platform binary using filesystem lookup only.
 
-All four built-in adapters check this scope. OpenCode rejects it before provider activity. Its cancellation
-callbacks, SDK results and remote service responses are not native stop receipts.
+Project OpenCode config and managed machine config are rejected before launch;
+ambient auth, plugins, external MCP, LSP, formatters, updates and model discovery
+are excluded. The built-in build agent allows read/glob/grep/list/edit/bash;
+other tool permissions are denied. This is process supervision, not a filesystem
+or network sandbox. The model server remains independent: stop evidence covers
+the owned OpenCode server and descendants, not model inference or billing.
+Only a successful complete message for the new session plus native stop and
+durable journal acknowledgement returns success. Storage is removed after proven
+stop; coordinator death/uncertain stop retains it. Runtime usage remains `NONE`
+and `usage:null` consistently with the existing external-server adapter.
+
+The official [server contract](https://opencode.ai/docs/server/) and pinned
+[configuration loader](https://github.com/anomalyco/opencode/blob/v1.18.34/packages/opencode/src/config/config.ts)
+were checked against the actual 1.18.34 Windows binary with a local model and a
+real file-write tool call. The previous HTTP subset was accepted on Mac (255
+tests); this OpenCode increment's Mac native acceptance is still pending.
+See `local-device-sync.md` for its exact test commands and scope.
+
+All four built-in adapters check the native scope. Cancellation callbacks,
+SDK results and remote responses are not native stop receipts.
 Configured external MCP/services, normal runner admission, bound resume/fork and
 runtime-backed handoff remain open. No public capability or profile flag grants
 native execution, and personal AI remains disabled. Linux and other unsupported mechanisms reject;
@@ -300,7 +321,7 @@ Every adapter must declare a `usageReporting` value in its `RuntimeCapabilities`
 
 - **`FULL`** — adapter always populates `RuntimeRunResult.usage` on a successful run. If the wrapper observes a null `usage` while the capability says `FULL`, it logs an error (dev) or fires a metric (prod). The contract test in `bootstrap.test.ts` also fails the build if the field is missing.
 - **`PARTIAL`** — adapter returns usage when the provider gives it, but may return `null` on some transport/streaming paths (e.g. CLI early-termination). The wrapper accepts both and records only the non-null events.
-- **`NONE`** — transport fundamentally cannot report token counts (e.g. OpenCode message payload). The wrapper warns if usage unexpectedly appears, but this is an opt-out from the usage pipeline — dashboards will show zero traffic for runtimes in this tier.
+- **`NONE`** — the adapter does not provide normalized token accounting (e.g. the current OpenCode adapter). The wrapper warns if usage unexpectedly appears, but this is an opt-out from the usage pipeline — dashboards will show zero traffic for runtimes in this tier.
 
 All successful runs that produce non-null usage flow through the registry's `usageSink`, which persists them to the `usage_events` table and rolls them up into per-task / per-project / per-chat-session aggregates. Sink wiring lives in `packages/api/src/services/runtime.ts` (API) and `packages/agent/src/index.ts` / `subagentQuery.ts` (agent) — both use `createDbUsageSink()` from `@aif/data`.
 

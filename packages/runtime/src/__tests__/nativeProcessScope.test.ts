@@ -279,7 +279,7 @@ describe("host-owned native runtime scope", () => {
   it.each([
     ["claude", "app-server", createClaudeRuntimeAdapter],
     ["openrouter", "cli", createOpenRouterRuntimeAdapter],
-    ["opencode", "api", createOpenCodeRuntimeAdapter],
+    ["opencode", "cli", createOpenCodeRuntimeAdapter],
   ] as const)(
     "rejects unsupported %s/%s without native launch or HTTP",
     async (runtimeId, transport, factory) => {

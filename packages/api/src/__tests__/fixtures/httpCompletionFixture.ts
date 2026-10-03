@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { createConnection, type Socket } from "node:net";
-import { randomInt } from "node:crypto";
+import { listenOnHighLoopbackPort } from "./loopbackPort.js";
 
 export type HttpFixtureMode =
   | "json"
@@ -109,34 +109,7 @@ export async function httpCompletionFixture(
       socket.on("error", () => undefined);
       socket.once("close", () => sockets.delete(socket));
     });
-    // Some hosts assign port 0 from 1024 upwards, including fetch's forbidden
-    // ports. Bind directly in the high ephemeral range; no release/rebind race.
-    // Windows also reserves port ranges that reject bind with EACCES.
-    let listening = false;
-    for (let attempt = 0; attempt < 32 && !listening; attempt++) {
-      listening = await new Promise<boolean>((resolve, reject) => {
-        const onError = (error: NodeJS.ErrnoException) => {
-          target.off("listening", onListening);
-          if (
-            error.code === "EADDRINUSE" ||
-            (process.platform === "win32" && error.code === "EACCES")
-          )
-            resolve(false);
-          else reject(error);
-        };
-        const onListening = () => {
-          target.off("error", onError);
-          resolve(true);
-        };
-        target.once("error", onError);
-        target.once("listening", onListening);
-        target.listen(randomInt(49152, 65536), "127.0.0.1");
-      });
-    }
-    if (!listening) throw new Error("No high loopback fixture port available");
-    const address = target.address();
-    if (!address || typeof address === "string") throw new Error("fixture address");
-    return address.port;
+    return listenOnHighLoopbackPort(target);
   };
   const port = await listen(server);
   const proxy = createServer();

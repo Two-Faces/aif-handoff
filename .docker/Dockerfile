@@ -22,6 +22,9 @@ COPY .docker/apt-install.sh /usr/local/bin/apt-install
 RUN chmod +x /usr/local/bin/apt-install
 
 FROM base AS codex
+# OpenCode's native supervisor uses an explicitly installed Windows/macOS host
+# executable. Linux containers retain the existing external-server API path;
+# installing an OpenCode daemon here would not provide native stop proof.
 ARG CODEX_VERSION=0.145.0
 RUN npm install --prefix /opt/codex --ignore-scripts --no-save --package-lock=false "@openai/codex-sdk@${CODEX_VERSION}"
 

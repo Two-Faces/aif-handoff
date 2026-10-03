@@ -261,7 +261,22 @@ command -v: /Users/aries/.local/state/fnm_multishells/1241_1791042421446/bin/ope
 LM Studio сейчас установлен, но не нравится пользователю; другой inference backend
 пока не выбран. Не исключать OpenCode из M2 и не подменять stop сервера
 закрытием HTTP-клиента.
-Далее P14 — owned OpenCode server,
+Следующий increment уже реализован локально (04.10.2026): owned OpenCode 1.18.34
+через runTaskDeviceOpenCode и fixed worker. Version/server/descendants в одной
+native unit; fresh home/XDG/temp/password/session, legacy/external-server URL и
+resume закрыты. modelBaseUrl — endpoint отдельной OpenAI-compatible LLM.
+Project/managed config и MCP не допускаются. Private storage удаляется только
+после доказанной остановки; crash сохраняет его, recovery не освобождает grant.
+241 targeted runtime tests прошли; actual Windows CLI с synthetic model записал
+файл через свой tool. Полный Windows ai:validate прошёл (04.10.2026): 3784 passed / 10 skipped,
+coverage ≥70% (runtime min 76.16%, API min 70.31%), build 7/7, Chromium 8/8,
+k6 3/3, protocol CLI 0.145.0. Все 14 OpenCode API cases, включая actual CLI,
+прошли обычный и coverage прогоны; hashes 17 source/test/config файлов совпали.
+Лог .codex/m2/logs/native-opencode-final-validate.log. Mac subset 241 + 14 = 255
+ожидает пользователя: OPENCODE_NATIVE_TEST_PATH="$(command -v opencode)" для
+API deviceOpenCode.test.ts обязателен, чтобы последний actual CLI case не был skip.
+Команды в docs/local-device-sync.md. Никакой LLM/model download/paid API для них не нужен.
+Далее P14 — native Mac acceptance owned OpenCode,
 normal runner admission/external-service coverage, runtime-backed checkpoint/release и
 физическая передача Win→Mac→Win. Native stop receipt сам по себе не освобождает
 grant/run и не подтверждает остановку внешних/делегированных services.

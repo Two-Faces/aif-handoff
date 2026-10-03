@@ -18,6 +18,8 @@ export async function runNativeBatch<T>(options: {
   line: (line: string) => void;
   complete: () => T;
   failure: (code: string, cause?: unknown) => RuntimeExecutionError;
+  /** Remove attempt-owned artifacts only after durable native stop succeeds. */
+  afterStopped?: () => void | Promise<void>;
 }): Promise<T> {
   const { input, failure } = options;
   const execution = input.execution;
@@ -104,5 +106,6 @@ export async function runNativeBatch<T>(options: {
     child.stderr.off("data", stderr);
     child.off("error", fail);
     await child.stop();
+    await options.afterStopped?.();
   }
 }

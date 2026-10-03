@@ -742,6 +742,83 @@ handoff acceptance. Mac launch/recovery supervision is implemented below but
 awaits its own native tests, followed by adapter transport integration.
 P14/M2 remain open and personal AI remains disabled.
 
+## Owned OpenCode server (P14; native Mac acceptance pending)
+
+`runTaskDeviceOpenCode` admits a fresh OpenCode **1.18.34** server under the native
+worker and the existing task/run/root/personal gates. It never attaches to an
+external executor: the worker selects the endpoint from its own server's ready
+line, authenticates with a fresh password and verifies health/version/config.
+Raw server stdout/stderr is bounded and cannot forge worker/control frames.
+One new session receives the task; completion requires a matching session/message,
+no provider error, `finish:stop`, completed tools and native stop acknowledgement.
+The native supervisor stops detached descendants even after worker/server death.
+Failures retain the managed run/grant. No routes, coordinator admission, handoff
+release or personal AI are enabled by this increment.
+
+Inputs are an explicit native `opencodeCliPath` (or `OPENCODE_CLI_PATH`), `model`,
+`modelBaseUrl` for an OpenAI-compatible model server, optional `apiKey`, and
+`contextWindow` / `maxOutputTokens` (defaults 32768 / 4096; output < context).
+A fresh built-in build agent allows read/glob/grep/list/edit/bash and denies other
+tools. Only process lifetime is contained, not arbitrary filesystem/network access.
+The independent model server may continue inference; this receipt cannot attest
+that it stopped. Ordinary OpenCode API transport and its `NONE` usage declaration
+are unchanged. Native result usage is explicitly null; session IDs are ephemeral
+and do not authorize resume.
+
+The worker isolates HOME/XDG/temp paths and credentials, disables plugins, remote
+MCP, external skills, LSP/formatters, snapshots, auto-updates and model downloads.
+Npm dependency resolution is offline with scripts disabled in the private home.
+Project/ancestor `opencode.json` / `opencode.jsonc` / `.opencode` (including
+above Git roots) and managed machine config
+are rejected before launch: a versioned configuration admission policy is still
+needed for those paths. Private storage is removed only after native stop and
+journal acknowledgement. After coordinator death or unproven stop, storage can
+remain under the OS temp `aif-opencode-*` directory; native recovery records stop
+without deleting arbitrary paths or releasing authority. It is not synced.
+
+The implementation was checked against the official
+[server API](https://opencode.ai/docs/server/),
+[pinned flags](https://github.com/anomalyco/opencode/blob/v1.18.34/packages/core/src/flag/flag.ts),
+[configuration loader](https://github.com/anomalyco/opencode/blob/v1.18.34/packages/opencode/src/config/config.ts)
+and [server launcher](https://github.com/anomalyco/opencode/blob/v1.18.34/packages/opencode/src/cli/cmd/serve.ts).
+It requires this audited CLI version; upgrading requires revalidation. The native
+binary remains a user-installed Windows/macOS prerequisite, not a new repository
+package or Linux/Docker service. No migration is changed.
+
+Targeted Windows checks: **241 runtime tests** across all four adapters; native
+API fixtures include success, abort, timeout, callback failure, server death,
+wrong session/version/config, malformed/oversized responses, HTTP errors and
+coordinator-death recovery. The actual installed Windows CLI also performed a
+file-write tool call against a local synthetic model, with ambient config excluded.
+The final Windows `ai:validate` exited 0 on 2026-10-04: **3784 passed /
+10 skipped**, all package coverage metrics ≥70% (runtime minimum 76.16%, API
+minimum 70.31%), build 7/7, Chromium 8/8, k6 3/3 and protocol CLI 0.145.0. All
+14 OpenCode API cases passed both ordinary and coverage runs, including the real
+CLI; its path was set through `OPENCODE_NATIVE_TEST_PATH` and participates in
+Turbo test/coverage hashes. The final source/test/config hashes (17 files)
+matched before/after the gate. Log: `.codex/m2/logs/native-opencode-final-validate.log`.
+Root/runtime/API checklists and all four adapters were reviewed. No new package,
+dependency, migration, public route/event or UI requires Docker/Pencil/route
+validation; the Dockerfile documents the host-only prerequisite.
+
+After the branch is published and pulled, run on Mac in the Handoff directory:
+
+```bash
+git pull --ff-only
+npm run build
+npm test --workspace @aif/runtime -- nativeOpenCode.test.ts nativeHttp.test.ts nativeProcessScope.test.ts opencodeApi.test.ts opencodeAdapter.test.ts claudeNative.test.ts codexSdkNative.test.ts codexCliNative.test.ts --bail=1
+OPENCODE_NATIVE_TEST_PATH="$(command -v opencode)" npm test --workspace @aif/api -- deviceOpenCode.test.ts --bail=1
+```
+
+Expected **241 runtime + 14 API = 255 passed**. The last API case uses the installed
+OpenCode 1.18.34; it must pass, not skip. Without `OPENCODE_NATIVE_TEST_PATH`, the
+portable API suite has 13 passed / 1 explicit skip, which does not accept the real
+CLI. No running LM Studio/Ollama, model download, provider key or paid request is
+required: the model is an ephemeral loopback fixture. Existing clang/macOS SDK
+requirements still apply. This accepts only the internal transport increment;
+full Mac `ai:validate`, a real local LLM, runtime-backed release and physical
+Win→Mac→Win handoff remain separate M2 work.
+
 ## Text-only HTTP native integration (targeted Mac smoke accepted)
 
 Internal `runTaskDeviceHttp` admits Codex API and OpenRouter Chat Completions

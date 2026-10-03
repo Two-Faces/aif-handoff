@@ -10,10 +10,33 @@ import {
   runTaskDeviceClaudeCli,
   runTaskDeviceClaudeApi,
   runTaskDeviceHttp,
+  runTaskDeviceOpenCode,
 } from "../../services/deviceProcessSupervisor.js";
 const [database, taskId, projectRoot, cwd, marker, mode] = process.argv.slice(2);
 getDb(database);
 await withTaskDeviceExecution({ taskId, projectRoot }, async () => {
+  if (mode === "opencode") {
+    await runTaskDeviceOpenCode(taskId, {
+      runtimeId: "opencode",
+      transport: "api",
+      cwd,
+      model: "fixture",
+      prompt: "fixture",
+      options: { opencodeCliPath: marker, modelBaseUrl: "http://127.0.0.1:1234/v1" },
+      usageContext: {
+        source: UsageSource.TEST,
+        taskId,
+        projectId: findTaskById(taskId)!.projectId,
+      },
+      execution: {
+        runTimeoutMs: 10000,
+        onEvent: (event) => {
+          if (event.type === "system:init") process.exit(86);
+        },
+      },
+    });
+    throw new Error("OpenCode crash fixture unexpectedly completed");
+  }
   if (mode === "http-codex" || mode === "http-openrouter") {
     await runTaskDeviceHttp(taskId, {
       runtimeId: mode === "http-codex" ? "codex" : "openrouter",

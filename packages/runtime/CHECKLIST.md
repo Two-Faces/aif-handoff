@@ -48,3 +48,5 @@ Every feature or fix in the runtime layer must cover **every** adapter, not just
 - [ ] `npm run lint`
 - [ ] `npm test`
 - [ ] Manually re-read the diff with the question: "did I leave one adapter behind?"
+
+- [ ] Owned-server adapters create fresh private auth/storage inside the native lifecycle; never attach a native scope to an external executor. Audit CLI version/config loading and test the installed binary with a local model/tool call. Cleanup waits for verified stop; uncertain stop/crash retains artifacts.

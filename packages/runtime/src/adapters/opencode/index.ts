@@ -47,10 +47,8 @@ const API_CAPABILITIES: RuntimeCapabilities = {
   supportsModelDiscovery: true,
   supportsApprovals: false,
   supportsCustomEndpoint: true,
-  // OpenCode server returns messages but does not surface token counts in its
-  // message payload. The run() path never populates RuntimeRunResult.usage,
-  // so declare the contract honestly as NONE — dashboards will show this
-  // provider as opted-out of usage tracking rather than showing phantom zeros.
+  // Legacy server runs do not normalize token accounting. Keep NONE, including
+  // the new native path, until accounting is supported consistently across both.
   usageReporting: UsageReporting.NONE,
 };
 
@@ -167,7 +165,8 @@ export function createOpenCodeRuntimeAdapter(
     },
 
     async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {
-      assertOpenCodeNativeAdmission(input);
+      assertOpenCodeNativeAdmission(input, true);
+      if (input.execution?.nativeProcessScope) return runOpenCodeApi(input, logger);
       logger.info?.(
         {
           runtimeId,

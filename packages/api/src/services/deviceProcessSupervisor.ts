@@ -66,6 +66,11 @@ export async function runTaskDeviceHttp(taskId: string, input: RuntimeRunInput) 
   return runTaskDeviceRuntime(taskId, input, RuntimeTransport.API, input.runtimeId);
 }
 
+/** Fresh OpenCode server inside the native unit, never an existing API server. */
+export async function runTaskDeviceOpenCode(taskId: string, input: RuntimeRunInput) {
+  return runTaskDeviceRuntime(taskId, input, RuntimeTransport.API, "opencode");
+}
+
 async function runTaskDeviceRuntime(
   taskId: string,
   input: RuntimeRunInput,
@@ -74,7 +79,7 @@ async function runTaskDeviceRuntime(
     | typeof RuntimeTransport.CLI
     | typeof RuntimeTransport.SDK
     | typeof RuntimeTransport.API,
-  runtimeId: "codex" | "claude" | "openrouter" = "codex",
+  runtimeId: "codex" | "claude" | "openrouter" | "opencode" = "codex",
 ) {
   const root = input.cwd ?? input.projectRoot;
   assertTaskDeviceExecution(taskId, root);
