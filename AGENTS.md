@@ -169,6 +169,12 @@ Claude/Codex/OpenRouter/OpenCode transport integration and macOS supervision rem
 open. Unsupported platforms must reject; never substitute PID/group signals or
 elapsed time for native stop proof. Existing personal AI guards remain enabled.
 
+The next macOS step is the standalone runtime `probe:macos-supervision` command
+(`scripts/macos-supervision-probe.mjs` plus its fixed native C fixture). It checks
+an isolated launchd resource coalition, double-fork/setsid orphan accounting and
+audit-token signaling. It never reads the task DB or enables Mac execution.
+Native Mac results are pending; Windows protocol tests cannot accept this gate.
+
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |
 | `packages/api/src/index.ts`             | API server entry (Hono, port 3009)    |

@@ -81,6 +81,14 @@ skip, coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3; 
 Полный P14 ещё открыт: transport integration всех четырёх adapters, macOS
 supervision, autonomous checkpoint/release и native Win/Mac acceptance.
 Personal AI не включать; manual confirmation не заменяет native proof.
+Подготовлен Mac capability probe: `npm run probe:macos-supervision --workspace @aif/runtime`.
+Он компилирует фиксированный C fixture в private temp, использует отдельный nonce
+launchd service, проверяет resource-coalition counters, orphan после double-fork/setsid,
+kernel stale-token rejection и cleanup. Это не production backend и не execution grant.
+Нужен полный JSON report с реального Mac; пока Mac execution остаётся unsupported.
+Windows gate для probe принят: `ai:validate` exit 0, 3432 passed / 1 existing skip,
+coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3. Native C на Mac ещё
+не компилировался в рамках подтверждённой приёмки; не подменяй её portable tests.
 Детали и текущие проверки — в плане и docs/local-device-sync.md.
 P15: onboarding, local session existence и continuation UI.
 M3/M4 не отмечай готовыми после M2.

@@ -22,6 +22,7 @@ Every feature or fix in the runtime layer must cover **every** adapter, not just
 
 - [ ] Native supervision persists host/child identities before creation/resume; target output cannot forge control receipts. Test detached descendants, a full stdin pipe, lost parent/helper processes, reused PID rejection and live-orphan recovery. Unsupported OS mechanisms fail closed without a version allowlist.
 - [ ] A native job-empty receipt proves only that containment unit. Do not claim adapter coverage or release device authority until all launch paths and external services for that transport are covered.
+- [ ] A macOS capability probe must use only its nonce-scoped launchd service and temporary fixture binary, verify kernel rejection of a stale PID generation, observe an orphan and zero native membership, and confirm cleanup. Probe success never enables production execution or substitutes for a persisted stop receipt.
 
 - [ ] CLI fallback tests explicitly stub and restore `CODEX_CLI_PATH`; do not assume the developer's shell has no override. Keep real override cases covered.
 - [ ] Add or update unit tests in `packages/runtime/src/__tests__/` for every adapter you touched.

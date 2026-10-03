@@ -648,6 +648,56 @@ These checks exercise portable contracts, migration and fencing; they do not
 certify full Mac `ai:validate`, native Mac process stop or physical handoff.
 The Windows-specific supervisor/bridge fixtures run only on Windows.
 
+## macOS supervision capability probe (native result pending)
+
+Before implementing the Mac backend, test the actual installed kernel interfaces
+and launchd behavior with the fixed diagnostic fixture:
+
+```sh
+npm run probe:macos-supervision --workspace @aif/runtime
+```
+
+Run as the logged-in Mac user, without sudo. The command uses the existing clang
+from `xcrun`, compiles a small helper inside a private temporary directory, and
+registers one nonce-named job under that user's GUI launchd domain. It creates
+only its own bounded fixture processes; it does not start an AI provider, read
+the task database or change project checkouts or runtime profiles.
+
+The probe requires a fresh, dedicated resource coalition before allowing the
+fixture to fork. A double-fork/setsid child must remain accounted for after its
+parent exits and must demonstrate continued writes. Signals use an audit token
+and the kernel must reject a deliberately stale PID generation. The signaling
+helper also verifies that the target runs this exact temporary fixture executable.
+The final result requires the child to be gone, native accounting to be empty
+(or the previously observed coalition to be reaped after service removal), an
+unrelated control process to remain unchanged, and cleanup to complete.
+
+The output is a JSON report with `status: probe_passed` or `blocked`, structured
+blockers, observations and `grantsExecution: false`. Send the complete report,
+including blockers on failure. Missing APIs, changed ABI sizes, a shared coalition
+or denied signaling remain blockers; no OS version number admits a fallback.
+The diagnostic process lifetime is bounded only to limit fixture leaks; a timeout
+never establishes successful stop. Failed cleanup preserves the temporary folder
+and returns its exact `--cleanup` command. Cleanup verifies the directory owner,
+nonce service identity and the compiled binary hash before using that helper.
+An explicit cleanup refuses to race a still-running probe driver. A changed
+process incarnation, image or coalition is treated as unverified, not as exit.
+
+The probe has portable protocol/negative tests, but its C compilation and actual
+Mac behavior still require the user's native run. A passed report only establishes
+a candidate mechanism for the next implementation: Mac launch/recovery integration,
+durable stop receipts, all adapter transports and P14/M2 acceptance remain open.
+`launchSupervisedProcess` still rejects macOS; personal AI stays disabled.
+
+Windows verification on 2026-10-03: final `ai:validate` exited 0 with 3432 tests
+passed and one existing skip, including 22 probe protocol/negative tests. All
+package coverage minima remained above 70%; build 7/7, Chromium 8/8 and k6 3/3
+passed. The six changed/new runtime files had identical SHA-256 hashes before
+and after validation. The CLI also passed ESLint and `node --check`. Evidence:
+`.codex/m2/logs/macos-probe-final-validate.log`. Root/runtime checklists were
+reviewed; adapter contracts, dependencies, migrations, UI and Docker are unchanged.
+This evidence does not include compilation or execution of the C helper on Mac.
+
 ## Implementation references
 
 - [ADR](decisions/personal-lan-sync.md)
@@ -658,3 +708,6 @@ The Windows-specific supervisor/bridge fixtures run only on Windows.
 - [Windows session namespaces for named job objects](https://learn.microsoft.com/en-us/windows/win32/termserv/kernel-object-namespaces)
 - [Apple setsid: new sessions/process groups](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/setsid.2.html)
 - [Apple XNU: deprecated NOTE_TRACK/NOTE_CHILD support](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/event.h)
+- [Apple XNU: native process identity and audit-token signal implementation](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/proc_info.c)
+- [Apple XNU: libproc wrappers](https://github.com/apple-oss-distributions/xnu/blob/main/libsyscall/wrappers/libproc/libproc.c)
+- [Apple XNU: resource coalition accounting layout](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/mach/coalition.h)
