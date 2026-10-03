@@ -23,8 +23,12 @@ vi.mock("@aif/shared/server", async (original) => ({
 const actualServer =
   await vi.importActual<typeof import("@aif/shared/server")>("@aif/shared/server");
 const data = await import("@aif/data");
-const { startTaskDeviceProcess, recoverTaskDeviceProcess, runTaskDeviceAppServer } =
-  await import("../services/deviceProcessSupervisor.js");
+const {
+  startTaskDeviceProcess,
+  recoverTaskDeviceProcess,
+  runTaskDeviceAppServer,
+  runTaskDeviceCli,
+} = await import("../services/deviceProcessSupervisor.js");
 let root: string, database: string;
 beforeEach(() => {
   vi.stubEnv("AIF_PERSONAL_MODE", "false");
@@ -116,9 +120,102 @@ function appServerFixture(worktreePath: string, mode: "success" | "abort") {
   writeFileSync(join(worktreePath, "app-server"), header + source);
   return marker;
 }
+function cliFixture(worktreePath: string, mode: "success" | "abort" | "timeout") {
+  const marker = join(worktreePath, "native-cli-writer.txt"),
+    promptPath = join(worktreePath, "prompt.txt");
+  const writer =
+    "const fs=require('fs');setInterval(()=>fs.appendFileSync(" +
+    JSON.stringify(marker) +
+    ",'x'),10)";
+  // Node loads the default CLI's literal `exec` argument as this owned fixture.
+  // Custom CLI argv and the native process layer are not mocked or bypassed.
+  writeFileSync(
+    join(worktreePath, "exec"),
+    `
+const fs = require('fs');
+const child = require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(writer)}], {stdio:'ignore',detached:true});
+child.unref();
+const input = [];
+process.stdin.on('data', bytes => input.push(bytes));
+process.stdin.on('end', () => {
+  fs.writeFileSync(${JSON.stringify(promptPath)}, Buffer.concat(input));
+  function emit() {
+    if (!fs.existsSync(${JSON.stringify(marker)})) { setTimeout(emit, 5); return; }
+    process.stderr.write('CLI fixture stderr');
+    const events = [
+      {type:'thread.started', thread_id:'cli-native-thread'},
+      {type:'item.completed', item:{type:'agent_message', text:${JSON.stringify(mode === "abort" ? "abort now" : "CLI result 🧪")}}}
+    ];
+    if (${JSON.stringify(mode)} === 'success') events.push({type:'turn.completed', usage:{input_tokens:2, output_tokens:3}});
+    process.stdout.write(events.map(event => JSON.stringify(event)).join('\\n'), () => {
+      if (${JSON.stringify(mode)} === 'success') process.exit(0);
+      else { process.stdout.write('\\n'); setInterval(() => {}, 1000); }
+    });
+  }
+  emit();
+});
+`,
+  );
+  return { marker, promptPath };
+}
 describe.skipIf(!["win32", "darwin"].includes(process.platform))(
   "native process and durable task journal bridge",
   () => {
+    it.each(["success", "abort", "timeout"] as const)(
+      "runs the CLI through native stop and durable fencing: %s",
+      async (mode) => {
+        const { task, workspace, input } = fixture();
+        const { marker, promptPath } = cliFixture(workspace.worktreePath, mode);
+        const prompt = "CLI fixture 🧪".repeat(6000),
+          abort = new AbortController(),
+          stderr: string[] = [];
+        let runId = "";
+        const running = data.withTaskDeviceExecution(input, async () => {
+          runId = data.currentTaskDeviceRunId()!;
+          const result = await runTaskDeviceCli(task.id, {
+            runtimeId: "codex",
+            transport: "cli",
+            prompt,
+            cwd: workspace.worktreePath,
+            options: { codexCliPath: process.execPath },
+            usageContext: { source: UsageSource.TEST, taskId: task.id, projectId: task.projectId },
+            execution: {
+              runTimeoutMs: mode === "timeout" ? 2000 : 10000,
+              abortController: abort,
+              onEvent: (event) => {
+                if (event.message === "abort now") abort.abort();
+              },
+              onStderr: (text) => stderr.push(text),
+            },
+          });
+          expect(data.listTaskDeviceProcesses(runId)[0].state).toBe("stopped");
+          return result;
+        });
+        if (mode === "success") {
+          expect(await running).toMatchObject({
+            outputText: "CLI result 🧪",
+            usage: { totalTokens: 5 },
+          });
+          expect(data.getTaskDeviceGrant(task.id)?.activeRunId).toBeNull();
+        } else {
+          if (mode === "timeout")
+            await expect(running).rejects.toMatchObject({ category: "timeout" });
+          else await expect(running).rejects.toBeInstanceOf(Error);
+          if (mode === "abort") expect(abort.signal.aborted).toBe(true);
+          expect(data.getTaskDeviceGrant(task.id)?.activeRunId).toBe(runId);
+        }
+        const journals = data.listTaskDeviceProcesses(runId);
+        expect(journals).toHaveLength(1);
+        expect(journals[0].state).toBe("stopped");
+        expect(JSON.parse(journals[0].evidenceJson!).activeProcesses).toBe(0);
+        expect(readFileSync(promptPath, "utf8").endsWith(prompt)).toBe(true);
+        expect(stderr.join("")).toBe("CLI fixture stderr");
+        const length = readFileSync(marker).length;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(readFileSync(marker).length).toBe(length);
+      },
+      20000,
+    );
     it("runs the real app-server adapter and persists native stop before returning its result", async () => {
       const { task, workspace, input } = fixture();
       const marker = appServerFixture(workspace.worktreePath, "success");
@@ -180,50 +277,60 @@ describe.skipIf(!["win32", "darwin"].includes(process.platform))(
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(readFileSync(marker).length).toBe(length);
     }, 20000);
-    it("rejects runtime scope substitutions before reserving or creating a process", async () => {
-      const { task, workspace, input } = fixture();
-      await expect(
-        runTaskDeviceAppServer(task.id, {
-          runtimeId: "codex",
-          transport: "app-server",
-          prompt: "fixture",
-          cwd: workspace.worktreePath,
-          usageContext: { source: UsageSource.TEST, taskId: task.id, projectId: task.projectId },
-        }),
-      ).rejects.toMatchObject({ code: "run_scope_required" });
-      await data.withTaskDeviceExecution(input, async () => {
-        const base: RuntimeRunInput = {
-          runtimeId: "codex",
-          transport: "app-server",
-          prompt: "fixture",
-          cwd: workspace.worktreePath,
-          options: { codexCliPath: process.execPath },
-          usageContext: { source: UsageSource.TEST, taskId: task.id, projectId: task.projectId },
-        };
-        for (const patch of [
-          { runtimeId: "opencode" },
-          { transport: "sdk" as const },
-          { sessionId: "unbound-session", resume: true },
-          { sourceSessionId: "unbound-fork" },
-          { projectRoot: input.projectRoot },
-          { usageContext: { ...base.usageContext, projectId: "foreign" } },
-        ])
-          await expect(
-            runTaskDeviceAppServer(task.id, { ...base, ...patch }),
-          ).rejects.toMatchObject({ adapterCode: "native_task_input_invalid" });
-        vi.stubEnv("AIF_PERSONAL_MODE", "true");
-        resetEnvCache();
-        try {
-          await expect(runTaskDeviceAppServer(task.id, base)).rejects.toMatchObject({
-            code: "personal_execution_disabled",
-          });
-        } finally {
-          vi.stubEnv("AIF_PERSONAL_MODE", "false");
+    it.each([
+      ["app-server", runTaskDeviceAppServer],
+      ["cli", runTaskDeviceCli],
+    ] as const)(
+      "rejects %s scope substitutions before reserving or creating a process",
+      async (transport, run) => {
+        const { task, workspace, input } = fixture();
+        await expect(
+          run(task.id, {
+            runtimeId: "codex",
+            transport,
+            prompt: "fixture",
+            cwd: workspace.worktreePath,
+            usageContext: { source: UsageSource.TEST, taskId: task.id, projectId: task.projectId },
+          }),
+        ).rejects.toMatchObject({ code: "run_scope_required" });
+        await data.withTaskDeviceExecution(input, async () => {
+          const base: RuntimeRunInput = {
+            runtimeId: "codex",
+            transport,
+            prompt: "fixture",
+            cwd: workspace.worktreePath,
+            options: { codexCliPath: process.execPath },
+            usageContext: { source: UsageSource.TEST, taskId: task.id, projectId: task.projectId },
+          };
+          for (const patch of [
+            { runtimeId: "opencode" },
+            { transport: "sdk" as const },
+            { sessionId: "unbound-session", resume: true },
+            { sourceSessionId: "unbound-fork" },
+            { projectRoot: input.projectRoot },
+            { usageContext: { ...base.usageContext, projectId: "foreign" } },
+          ])
+            await expect(run(task.id, { ...base, ...patch })).rejects.toMatchObject({
+              adapterCode: "native_task_input_invalid",
+            });
+          if (transport === "cli")
+            await expect(
+              run(task.id, { ...base, options: { codexCliArgs: ["exec", "resume", "--last"] } }),
+            ).rejects.toMatchObject({ adapterCode: "native_task_input_invalid" });
+          vi.stubEnv("AIF_PERSONAL_MODE", "true");
           resetEnvCache();
-        }
-        expect(data.listTaskDeviceProcesses(data.currentTaskDeviceRunId()!)).toHaveLength(0);
-      });
-    });
+          try {
+            await expect(run(task.id, base)).rejects.toMatchObject({
+              code: "personal_execution_disabled",
+            });
+          } finally {
+            vi.stubEnv("AIF_PERSONAL_MODE", "false");
+            resetEnvCache();
+          }
+          expect(data.listTaskDeviceProcesses(data.currentTaskDeviceRunId()!)).toHaveLength(0);
+        });
+      },
+    );
     it("persists the native empty-job proof before settling the managed run", async () => {
       const { task, workspace, input } = fixture();
       let id = "";

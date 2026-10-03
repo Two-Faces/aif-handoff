@@ -82,9 +82,12 @@
  * option. Every run/resume/fork/stream entry must call assertNativeProcessMode
  * before provider activity. Pass false until that transport uses the native
  * launcher and awaits durable stop proof; ignoring the scope is forbidden.
- * Only Codex app-server currently integrates this internal launch path. It does
+ * Codex app-server and the default JSONL CLI integrate this internal launch path. It does
  * not advertise whole-adapter containment or enable personal execution. Do not
  * fall back to a shell, retry another launch, or run discovery outside the scope.
+ * Batch CLI completion must await both native stop and drained stdout/stderr,
+ * including completion before listeners attach. Bound total collected output,
+ * decode split UTF-8, and reject incomplete/failed protocol and callback errors.
  *
  * ```ts
  * async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {

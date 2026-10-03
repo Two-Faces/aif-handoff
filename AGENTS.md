@@ -191,7 +191,7 @@ open; personal AI stays disabled.
 The first P14 adapter increment adds runtime `nativeProcessScope.ts`: an opaque
 host capability for one exact-root launch, bounded stdio and awaited native stop
 including journal acknowledgement. Codex app-server uses its async launcher;
-native start timeout never retries. All other built-in transports reject this
+native start timeout never retries. Unintegrated built-in transports reject this
 scope before work, and the registry skips process-spawning model discovery.
 API `runTaskDeviceAppServer` is an internal new-session bridge for an already
 enrolled standalone task; it rejects resume/fork, other runtimes and scope
@@ -203,6 +203,18 @@ handoff authority. The separate adapter Mac smoke passed on 2026-10-03 from user
 logs: 16 scope/parity + 21 app-server + 5 native API = 42 tests. The native API uses
 an offline protocol fixture; this is not a live provider run or complete P14/M2.
 See the current plan and device-sync instructions.
+
+P14's second adapter increment connects the default Codex JSONL CLI through
+`runTaskDeviceCli` and the same internal host/journal gates. It accepts only new
+sessions and generated argv (no custom argv, shell or unknown-transport fallback).
+Batch completion joins native proof and drained stdio, including already-finished
+children. It decodes split UTF-8, bounds total output, requires `turn.completed`
+and zero exit, and rejects abort/protocol/callback errors without retry. Global
+session-limit scans are skipped in this scope; stream usage remains PARTIAL.
+The Windows native fixture covers success, cancellation and timeout with a
+detached writer and large stdin. Native Mac acceptance of this new CLI block is
+pending. Claude, Codex SDK/API, OpenRouter and OpenCode still reject native scope.
+Personal AI, normal runner admission and runtime-backed release remain closed.
 
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |

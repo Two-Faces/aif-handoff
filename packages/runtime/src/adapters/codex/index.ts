@@ -186,9 +186,9 @@ function resolveTransport(input: {
       fellBackToDefault: false,
     };
   }
-  if (requested === RuntimeTransport.SDK) {
+  if (requested === RuntimeTransport.SDK || requested === RuntimeTransport.CLI) {
     return {
-      transport: RuntimeTransport.SDK,
+      transport: requested,
       requested,
       source,
       normalizedFromLegacy: false,
@@ -397,7 +397,11 @@ export function createCodexRuntimeAdapter(
       options: input.options,
     });
     const transport = transportResolution.transport;
-    assertNativeProcessMode(input, transport === RuntimeTransport.APP_SERVER);
+    assertNativeProcessMode(
+      input,
+      transport === RuntimeTransport.APP_SERVER ||
+        (transport === RuntimeTransport.CLI && !transportResolution.fellBackToDefault),
+    );
     const wantsStreaming = input.execution?.onEvent != null;
     if (
       transportResolution.requested === RuntimeTransport.APP_SERVER &&

@@ -150,7 +150,23 @@ API min 70.67%), build 7/7, Chromium 8/8, k6 3/3, protocol CLI 0.145.0.
 Лог .codex/m2/logs/native-adapter-final-validate.log; sources во время прогона
 не менялись. Root/runtime/API checklists и все четыре adapters проверены.
 
-Далее P14 — остальные adapter transports (Claude/Codex/OpenRouter/OpenCode),
+Следующий внутренний increment уже добавляет Codex CLI: runTaskDeviceCli делит
+gate/journal с app-server, допускает только новую сессию и generated JSONL argv.
+Custom argv, resume/fork, unknown fallback, глобальные session-limit scans и retry
+запрещены. Explicit cli распознаётся корректно. Collector ждёт native proof и
+drained stdio, сохраняет UTF-8/final line, ограничивает combined output 16 MiB,
+требует zero exit + turn.completed и отвергает abort/protocol/callback failures.
+SupervisedStdioProcess.waitForExit учитывает completion до установки listeners; stop не зависит
+от consumer drain. Windows targeted: 106 runtime + 9 API. Финальный ai:validate
+CLI блока прошёл 03.10.2026: exit 0, 3534 passed / 10 skipped, coverage всех пакетов
+≥70% (runtime минимум 75.09%, API 70.72%), build 7/7, Chromium 8/8, k6 3/3,
+protocol CLI 0.145.0. Лог .codex/m2/logs/native-cli-final-validate.log; восемь
+package source/test hashes не изменились. Root/runtime/API checklists проверены.
+Новая Mac acceptance пока ожидается: 85 runtime + 9 API = 94; команды в
+docs/local-device-sync.md. Это offline protocol fixture с реальным supervisor,
+не платный provider smoke и не включение обычного исполнения/personal AI.
+
+Далее P14 — остальные transports (Claude, Codex SDK/API, OpenRouter/OpenCode),
 normal runner admission/external-service coverage, runtime-backed checkpoint/release и
 физическая передача Win→Mac→Win. Native stop receipt сам по себе не освобождает
 grant/run и не подтверждает остановку внешних/делегированных services.

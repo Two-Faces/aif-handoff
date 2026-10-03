@@ -742,7 +742,62 @@ handoff acceptance. Mac launch/recovery supervision is implemented below but
 awaits its own native tests, followed by adapter transport integration.
 P14/M2 remain open and personal AI remains disabled.
 
-## Codex app-server native integration (internal P14 increment)
+## Codex CLI native integration (internal P14 increment; Mac acceptance pending)
+
+`runTaskDeviceCli` shares the internal task/run/root/personal admission gate with
+app-server. It is not called by ordinary routes, chat or the worker. Only a new
+session with generated `exec --json` arguments is admitted; custom argv,
+resume/fork and unknown-transport fallback are rejected before launch. Explicit
+`cli` is now recognized as a known transport rather than an unknown fallback.
+Literal executables and the Windows `.exe` requirement remain unchanged.
+
+The collector waits for both the durable native stop promise and fully drained
+stdout/stderr, even if completion happened before the consumer attached. UTF-8 is
+decoded across chunk boundaries and a final JSONL line need not end with newline.
+Combined stdout/stderr is limited to 16 MiB; overflow stops the unit and fails the
+run. Success requires zero exit and `turn.completed`; malformed/incomplete JSONL,
+`turn.failed`, `error`, callback failures, cancellation and timeouts reject. No
+native retry or fallback occurs. Stop still grants no release or takeover rights.
+
+Native CLI calls do not scan global session-limit files or use custom CLI argv.
+Their environment drops ambient `NODE_OPTIONS`/`NODE_PATH` while retaining the
+existing curated provider-auth policy and Windows OS essentials. Usage from JSONL
+is still `PARTIAL`. External MCP/services and configuration admission, other
+transports, bound continuation and runtime-backed checkpoint/release remain open.
+Personal AI stays disabled; these internal helpers do not enable it.
+
+Windows targeted regression covers **106 runtime + 9 API tests**. The new API
+cases execute the actual CLI collector and native supervisor with an offline
+Node fixture using default argv. They verify large UTF-8 stdin, trailing JSONL,
+stderr, a detached writer, and durable success/abort/timeout semantics. Cancellation
+and timeout retain the fenced run after native stop. There are no paid provider
+calls, remote side effects or changes to real project checkouts in these fixtures.
+
+Final Windows `ai:validate` passed on 2026-10-03 (exit 0): **3534 passed / 10
+skipped**, coverage at least 70% in every package (runtime minimum 75.09%, API
+70.72%), build 7/7, Chromium 8/8, k6 3/3 and protocol CLI 0.145.0. Evidence:
+`.codex/m2/logs/native-cli-final-validate.log`. Eight package source/test hashes
+matched the snapshot captured near the start of the gate; no sources changed
+during it. Root/runtime/API checklists, all four adapter registrations/usage
+contracts and native deny parity were reviewed. No dependencies/packages,
+migrations, public REST/WS/MCP or UI changed, so their conditional Docker/Pencil/
+route checks do not apply. The gate used private SQLite and ports 3309/5480.
+
+After publication/pull, the required Mac subset is:
+
+```bash
+cd /Users/aries/Projects/aif-handoff
+npm run build
+npm test --workspace @aif/runtime -- codexCliNative.test.ts nativeProcessScope.test.ts codexCli.test.ts codexAdapter.test.ts --bail=1
+npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts --bail=1
+```
+
+Expected **85 runtime + 9 API = 94 passed** (15 native CLI protocol, 16 scope/parity,
+33 legacy CLI and 21 adapter tests; 9 native API/journal cases). This increment
+needs its own Mac acceptance; the previous 42-test app-server acceptance does not
+cover it. Installed clang/macOS SDK is required. Full P14/M2 acceptance is separate.
+
+## Codex app-server native integration (first internal P14 increment, accepted)
 
 `runTaskDeviceAppServer` now connects the existing protocol adapter to the native
 supervisor and durable process journal. It admits only an already enrolled,
@@ -760,8 +815,9 @@ input with 64 KiB chunks and bounds unread output at 4 MiB per stream. Registry
 model-effort checks retain static validation but skip dynamic discovery that
 could spawn an uncontained process.
 
-All four built-in adapters were audited: Codex app-server consumes this scope;
-Claude, Codex SDK/CLI/API, OpenRouter and OpenCode reject it before provider work.
+In this first increment Codex app-server consumed the native scope; Claude,
+Codex SDK/CLI/API, OpenRouter and OpenCode rejected it before provider work. The
+following CLI increment above now supports the default JSONL CLI path too.
 This is not whole-adapter stop coverage: configured MCP/external services,
 remaining transports, normal runner admission, local session provenance for
 resume/fork and runtime-backed checkpoint/release are still P14/P15 work. No
@@ -814,7 +870,9 @@ npm test --workspace @aif/runtime -- nativeProcessScope.test.ts run.test.ts --ba
 npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts --bail=1
 ```
 
-Expected: **37 runtime + 5 API = 42 passed**. The API cases require the installed
+Accepted scope at `0195064`: **37 runtime + 5 API = 42 passed**. The subsequent
+CLI increment expands the shared API file to 9 cases; use its current acceptance
+commands above. The API cases require the installed
 clang/macOS SDK and use private temporary checkouts/SQLite. Preserve full error
 output on failure; do not replace native proof with longer sleeps or PID kills.
 
@@ -962,9 +1020,9 @@ npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts
 Scope at `2f62264`: 13 shared contract tests, 7 data journal tests, 25 simulated
 protocol tests, 20 simulated OS-boundary tests, **9 real Mac process tests** and
 **2 real native SQLite bridge tests** (76 total; the latest supplied report covers
-the 56 runtime/API tests). The later adapter increment above expands this API
-file to 5 cases (79 total for these commands); all five Mac API cases are accepted
-in the separate 42-test increment above.
+the 56 runtime/API tests). Later adapter increments expand this API file; refer
+to their separate acceptance records and current commands above rather than
+attributing those added cases to the original backend report.
 The native cases exercise
 suspended preparation, literal argv/output, forged output, full stdin, detached
 grandchildren, an unrelated live process, failed persistence, helper death and

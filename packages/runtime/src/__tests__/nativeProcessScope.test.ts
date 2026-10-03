@@ -225,6 +225,25 @@ describe("host-owned native runtime scope", () => {
     ).rejects.toMatchObject({ adapterCode: "native_output_overflow" });
     expect(f.child.stop).toHaveBeenCalled();
   });
+  it("drains buffered stdio even when native completion predates the batch consumer", async () => {
+    const f = fixture();
+    f.launch.mockImplementation(async (input) => {
+      input.onOutput?.("stdout", Buffer.from("completed before attach"));
+      input.onOutput?.("stderr", Buffer.from("diagnostic"));
+      f.stopped.resolve(f.evidence);
+      return f.child;
+    });
+    await withNativeProcessScope(root, f.launch, async (scope) => {
+      const child = await launchNativeStdioProcess(scope, command);
+      const stdout: Buffer[] = [],
+        stderr: Buffer[] = [];
+      child.stdout.on("data", (chunk) => stdout.push(chunk));
+      child.stderr.on("data", (chunk) => stderr.push(chunk));
+      expect(await child.waitForExit()).toBe(0);
+      expect(Buffer.concat(stdout).toString()).toBe("completed before attach");
+      expect(Buffer.concat(stderr).toString()).toBe("diagnostic");
+    });
+  });
   it("resolves literal PATH executables and rejects relative paths and shell wrappers", () => {
     expect(
       resolveNativeExecutable(basename(process.execPath), { PATH: dirname(process.execPath) }),
@@ -259,7 +278,6 @@ describe("host-owned native runtime scope", () => {
   });
   it.each([
     ["claude", "sdk", createClaudeRuntimeAdapter],
-    ["codex", "cli", createCodexRuntimeAdapter],
     ["codex", "sdk", createCodexRuntimeAdapter],
     ["codex", "api", createCodexRuntimeAdapter],
     ["openrouter", "api", createOpenRouterRuntimeAdapter],

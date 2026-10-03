@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { accessSync, realpathSync, statSync, constants } from "node:fs";
 import { delimiter, isAbsolute, join, relative, resolve } from "node:path";
 import { PassThrough, Writable, type Readable } from "node:stream";
+import { finished } from "node:stream/promises";
 import type { RuntimeRunInput } from "../types.js";
 import { RuntimeExecutionError } from "../errors.js";
 import type { SupervisedProcess, SupervisedProcessInput } from "./processSupervisor.js";
@@ -236,6 +237,19 @@ export class SupervisedStdioProcess extends EventEmitter implements RuntimeStdio
     if (!this.child) throw failure("native_process_not_ready");
     await this.child.stop();
     await this.completion;
+  }
+  /** Batch transports also need all buffered output, including a process that
+   * finished before the caller attached listeners. Stop alone must not depend
+   * on a consumer draining its streams. */
+  async waitForExit(): Promise<number | null> {
+    if (!this.completion) throw failure("native_process_not_ready");
+    await this.completion;
+    await Promise.all(
+      [this.stdout, this.stderr].map((stream) =>
+        finished(stream, { readable: true, writable: false, cleanup: true }),
+      ),
+    );
+    return this.exitCode;
   }
 }
 

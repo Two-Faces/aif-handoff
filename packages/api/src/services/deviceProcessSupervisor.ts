@@ -25,6 +25,19 @@ import {
  * the worker yet. Host enrollment, exact root and personal policy are mandatory.
  * Resume/configured external-service coverage remains a separate admission gate. */
 export async function runTaskDeviceAppServer(taskId: string, input: RuntimeRunInput) {
+  return runTaskDeviceCodex(taskId, input, RuntimeTransport.APP_SERVER);
+}
+
+/** Internal CLI increment; same task/run/personal gates as app-server. */
+export async function runTaskDeviceCli(taskId: string, input: RuntimeRunInput) {
+  return runTaskDeviceCodex(taskId, input, RuntimeTransport.CLI);
+}
+
+async function runTaskDeviceCodex(
+  taskId: string,
+  input: RuntimeRunInput,
+  transport: typeof RuntimeTransport.APP_SERVER | typeof RuntimeTransport.CLI,
+) {
   const root = input.cwd ?? input.projectRoot;
   assertTaskDeviceExecution(taskId, root);
   const task = findTaskById(taskId);
@@ -41,8 +54,9 @@ export async function runTaskDeviceAppServer(taskId: string, input: RuntimeRunIn
   if (
     scopeMismatch ||
     input.runtimeId !== "codex" ||
-    input.transport !== RuntimeTransport.APP_SERVER ||
-    reusesSession
+    input.transport !== transport ||
+    reusesSession ||
+    (transport === RuntimeTransport.CLI && input.options?.codexCliArgs !== undefined)
   ) {
     throw new RuntimeExecutionError(
       "Native task runtime input is not admissible",

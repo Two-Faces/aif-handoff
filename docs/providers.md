@@ -42,7 +42,17 @@ The user supplied passing Mac logs on 2026-10-03 for all 42 targeted tests:
 16 scope/parity, 21 app-server protocol and 5 real native/journal cases using an
 offline provider fixture. This accepts the internal increment, not full P14/M2.
 
-All four built-in adapters check this scope. Claude, other Codex transports,
+The second internal integration adds **Codex CLI** through `runTaskDeviceCli`.
+It uses generated `exec --json` arguments, a new session and the same task/root
+and durable journal gates. Custom argv and unknown-transport fallback are denied.
+The batch collector waits for native proof and drained stdout/stderr, including
+early process completion. It preserves split UTF-8, caps combined output at
+16 MiB and requires both zero exit and a completed turn. Abort, protocol failures
+and callback errors reject the run without retry. Global session-limit file scans
+are skipped; JSONL usage remains `PARTIAL`. Native Mac CLI acceptance is pending.
+The output contract follows [Codex non-interactive JSONL](https://learn.chatgpt.com/docs/non-interactive-mode).
+
+All four built-in adapters check this scope. Claude, Codex SDK/API,
 OpenRouter and OpenCode reject it before provider activity. Their cancellation
 callbacks, SDK results and remote service responses are not native stop receipts.
 Configured external MCP/services, normal runner admission, bound resume/fork and
@@ -115,7 +125,7 @@ The API exposes effective selection endpoints:
 Capabilities are **transport-aware**: the same adapter may expose different capabilities depending on the selected transport. For example, Codex supports resume on SDK/CLI/App Server, session fork only on App Server, and session discovery on SDK/App Server. Use `resolveAdapterCapabilities(adapter, transport)` to get the effective set.
 
 The table describes regular runtime features. P14's internal native process path
-is currently Codex App Server only, with new sessions; it does not advertise
+supports Codex App Server and default JSONL CLI, with new sessions; it does not advertise
 whole-adapter containment or change the regular transports' capabilities.
 
 ### Model-specific effort discovery
