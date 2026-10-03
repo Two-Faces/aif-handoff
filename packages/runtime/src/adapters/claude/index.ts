@@ -1,3 +1,4 @@
+import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { getEnv } from "@aif/shared";
 import { findClaudePath, resolveClaudeSdkExecutablePath } from "./findPath.js";
@@ -617,12 +618,15 @@ export function createClaudeRuntimeAdapter(
       }
     },
     async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {
+      assertNativeProcessMode(input, false);
       return runByTransport(input);
     },
     async resume(input: RuntimeRunInput & { sessionId: string }): Promise<RuntimeRunResult> {
+      assertNativeProcessMode(input, false);
       return runByTransport({ ...input, resume: true });
     },
     async forkSession(input: RuntimeSessionForkInput): Promise<RuntimeRunResult> {
+      assertNativeProcessMode(input, false);
       return forkByTransport(input);
     },
     async listSessions(input: RuntimeSessionListInput): Promise<RuntimeSession[]> {

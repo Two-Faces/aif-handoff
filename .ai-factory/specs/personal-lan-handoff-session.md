@@ -117,16 +117,35 @@ SDK-safe names, boolean JSON для stopped, AsyncResource context для callba
 limit. История неуспешных прогонов сохранена в плане и docs/local-device-sync.md;
 не повторять прежние указания о неподтверждённом native backend как текущий статус.
 
-Последний Windows gate исходников `2f62264`: ai:validate exit 0,
+Предыдущий Windows gate исходников `2f62264`: ai:validate exit 0,
 3495 passed / 10 skipped (9 native Mac-only + 1 прежний), coverage всех пакетов
 ≥70% (runtime минимум 74.82%), build 7/7, Chromium 8/8, k6 3/3,
 protocol CLI 0.145.0; .codex/m2/logs/macos-stdin-limit-final-validate.log.
-После этого изменялись только документы приёмки. Полный дополнительный targeted
+Полный дополнительный targeted
 набор включает 13 shared + 7 data + 54 runtime + 2 API = 76; не приписывать
 пользовательскому отчёту 56 tests прохождение всех 76.
 
-Следующий блок P14 — интеграция supervisor со всеми adapter transports
-(Claude/Codex/OpenRouter/OpenCode), затем runtime-backed checkpoint/release и
+Первый adapter increment P14 реализован: nativeProcessScope.ts связывает один
+native stdio launch с host-owned capability/exact root, bounds input/output и
+ожиданием durable native stop перед результатом. Codex app-server использует
+async launcher, без start-timeout retry. Registry пропускает process-spawning
+model discovery при таком scope. Windows native env добавляет OS essentials
+libuv без ambient credentials/NODE_OPTIONS; допускается literal exe без shell.
+API runTaskDeviceAppServer — внутренний bridge для уже enrolled standalone task
+в active run и новом session; task/project/root, resume/fork и personal policy
+проверяются до запуска. Worker/chat/routes пока не вызывают этот helper.
+Все четыре adapters проверены: остальные transports явно отклоняют native scope.
+Целевые Windows tests: 37 runtime (16 scope/parity + 21 app-server), 5 API с
+реальным supervisor/SQLite и offline JSON-RPC fixture. Mac повтор нового блока
+ещё требуется: build, затем эти две команды из docs/local-device-sync.md (42 tests).
+Финальный Windows ai:validate нового блока прошёл 03.10.2026: exit 0,
+3515 passed / 10 skipped, coverage всех пакетов ≥70% (runtime min 74.91%,
+API min 70.67%), build 7/7, Chromium 8/8, k6 3/3, protocol CLI 0.145.0.
+Лог .codex/m2/logs/native-adapter-final-validate.log; sources во время прогона
+не менялись. Root/runtime/API checklists и все четыре adapters проверены.
+
+Далее P14 — остальные adapter transports (Claude/Codex/OpenRouter/OpenCode),
+normal runner admission/external-service coverage, runtime-backed checkpoint/release и
 физическая передача Win→Mac→Win. Native stop receipt сам по себе не освобождает
 grant/run и не подтверждает остановку внешних/делегированных services.
 Personal AI и публичные launch/recovery/handoff actions пока не включать.

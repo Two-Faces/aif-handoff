@@ -4,12 +4,70 @@ import {
   recordTaskDeviceProcessRecovery,
   assertTaskDeviceExecution,
   resolveRegisteredTaskRoot,
+  currentTaskDeviceRunId,
+  findTaskById,
+  createDbUsageSink,
+  createTaskDeviceRuntimeGuard,
 } from "@aif/data";
 import {
   launchSupervisedProcess,
   recoverSupervisedProcess,
+  withNativeProcessScope,
+  bootstrapRuntimeRegistry,
+  RuntimeExecutionError,
+  RuntimeTransport,
+  type RuntimeRunInput,
+  type RuntimeSessionForkInput,
   type SupervisedProcessInput,
 } from "@aif/runtime";
+
+/** Internal P14 transport integration, deliberately not called from routes or
+ * the worker yet. Host enrollment, exact root and personal policy are mandatory.
+ * Resume/configured external-service coverage remains a separate admission gate. */
+export async function runTaskDeviceAppServer(taskId: string, input: RuntimeRunInput) {
+  const root = input.cwd ?? input.projectRoot;
+  assertTaskDeviceExecution(taskId, root);
+  const task = findTaskById(taskId);
+  const reusesSession = Boolean(
+    input.sessionId || input.resume || (input as Partial<RuntimeSessionForkInput>).sourceSessionId,
+  );
+  const scopeMismatch =
+    !currentTaskDeviceRunId() ||
+    !task ||
+    !root ||
+    input.usageContext.taskId !== taskId ||
+    input.usageContext.projectId !== task.projectId ||
+    (input.projectRoot !== undefined && input.projectRoot !== root);
+  if (
+    scopeMismatch ||
+    input.runtimeId !== "codex" ||
+    input.transport !== RuntimeTransport.APP_SERVER ||
+    reusesSession
+  ) {
+    throw new RuntimeExecutionError(
+      "Native task runtime input is not admissible",
+      undefined,
+      "permission",
+      { adapterCode: "native_task_input_invalid" },
+    );
+  }
+  resolveRegisteredTaskRoot(taskId, root);
+  const registry = await bootstrapRuntimeRegistry({ usageSink: createDbUsageSink() });
+  const adapter = registry.resolveRuntime("codex");
+  const guard = createTaskDeviceRuntimeGuard(taskId, input.execution?.abortController);
+  const execution = { ...input.execution, abortController: guard.abortController };
+  if (execution.onEvent) execution.onEvent = guard.bind(execution.onEvent);
+  if (execution.onToolUse) execution.onToolUse = guard.bind(execution.onToolUse);
+  if (execution.onSubagentStart) execution.onSubagentStart = guard.bind(execution.onSubagentStart);
+  if (execution.onStderr) execution.onStderr = guard.bind(execution.onStderr);
+  return guard.run(() =>
+    withNativeProcessScope(
+      root,
+      (launch) => startTaskDeviceProcess(taskId, launch),
+      (scope) => adapter.run({ ...input, execution: { ...execution, nativeProcessScope: scope } }),
+    ),
+  );
+}
 
 /** Internal host bridge. There is deliberately no route or automatic adapter
  * fallback. The caller must already hold the exact task's managed run scope. */

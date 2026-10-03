@@ -1,5 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import type { RuntimeStdioProcess } from "../../../supervision/nativeProcessScope.js";
 import type {
   JsonRpcErrorEnvelope,
   JsonRpcNotificationEnvelope,
@@ -56,7 +56,7 @@ export class JsonlRpcResponseError extends Error {
 }
 
 export class JsonlRpcClient {
-  private readonly childProcess: ChildProcessWithoutNullStreams;
+  private readonly childProcess: RuntimeStdioProcess;
   private readonly requestTimeoutMs: number;
   private readonly logger?: JsonlRpcClientLogger;
   private readonly runtimeId: string;
@@ -72,7 +72,7 @@ export class JsonlRpcClient {
   private stdoutBuffer = "";
   private closed = false;
 
-  constructor(childProcess: ChildProcessWithoutNullStreams, options: JsonlRpcClientOptions) {
+  constructor(childProcess: RuntimeStdioProcess, options: JsonlRpcClientOptions) {
     this.childProcess = childProcess;
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.logger = options.logger;

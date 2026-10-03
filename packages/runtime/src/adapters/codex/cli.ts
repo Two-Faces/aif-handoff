@@ -1,3 +1,4 @@
+import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
 import { spawn, execFileSync } from "node:child_process";
 import type { RuntimeEvent, RuntimeRunInput, RuntimeRunResult, RuntimeUsage } from "../../types.js";
 import { buildRuntimeLimitEvent } from "../../limitEvents.js";
@@ -988,6 +989,7 @@ export async function runCodexCli(
   input: RuntimeRunInput,
   logger?: CodexCliLogger,
 ): Promise<RuntimeRunResult> {
+  assertNativeProcessMode(input, false);
   const cliPath = resolveCliPath(input);
   // Compose once so the same prompt (systemPromptAppend + user prompt) is
   // used for both template substitution in `codexCliArgs` and the stdin

@@ -1,3 +1,4 @@
+import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
 import type {
   RuntimeConnectionValidationInput,
   RuntimeConnectionValidationResult,
@@ -369,6 +370,7 @@ export async function runOpenCodeApi(
   input: RuntimeRunInput,
   logger?: OpenCodeApiLogger,
 ): Promise<RuntimeRunResult> {
+  assertNativeProcessMode(input, false);
   const runtimeId = input.runtimeId;
   const providerId = input.providerId ?? "opencode";
 

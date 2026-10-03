@@ -3,6 +3,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validateRuntimeModelEffort } from "../../../../modelEffort.js";
+import { makeProcessStartTimeoutError } from "../../../../timeouts.js";
+import { withNativeProcessScope } from "../../../../supervision/nativeProcessScope.js";
 import {
   RuntimeTransport,
   UsageSource,
@@ -21,7 +23,7 @@ const terminateCodexAppServerProcessMock = vi.fn();
 const withProcessTimeoutsMock = vi.fn();
 
 vi.mock("../process.js", () => ({
-  spawnCodexAppServerProcess: (...args: unknown[]) => spawnCodexAppServerProcessMock(...args),
+  launchCodexAppServerProcess: (...args: unknown[]) => spawnCodexAppServerProcessMock(...args),
   terminateCodexAppServerProcess: (...args: unknown[]) =>
     terminateCodexAppServerProcessMock(...args),
 }));
@@ -140,6 +142,19 @@ afterEach(async () => {
 });
 
 describe("codex app-server run transport", () => {
+  it("does not retry a native attempt after a start timeout", async () => {
+    spawnCodexAppServerProcessMock.mockRejectedValue(makeProcessStartTimeoutError(10));
+    const launcher = vi.fn();
+    await expect(
+      withNativeProcessScope(process.cwd(), launcher, (scope) =>
+        runCodexAppServer(
+          createRunInput({ execution: { nativeProcessScope: scope, startRetryDelayMs: 0 } }),
+        ),
+      ),
+    ).rejects.toMatchObject({ category: "timeout" });
+    expect(spawnCodexAppServerProcessMock).toHaveBeenCalledOnce();
+    expect(launcher).not.toHaveBeenCalled();
+  });
   it("accumulates streamed output and usage from turn notifications", async () => {
     const observedEvents: string[] = [];
     const result = await runCodexAppServer(

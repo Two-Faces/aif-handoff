@@ -1,3 +1,4 @@
+import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
 import {
   Codex,
   type CodexOptions,
@@ -729,6 +730,7 @@ export async function runCodexSdk(
   input: RuntimeRunInput,
   logger?: CodexSdkLogger,
 ): Promise<RuntimeRunResult> {
+  assertNativeProcessMode(input, false);
   logger?.info?.(
     {
       runtimeId: input.runtimeId,

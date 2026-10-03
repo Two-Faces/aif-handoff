@@ -1,3 +1,4 @@
+import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
 import { redactProviderText, redactProviderTextForLogs } from "@aif/shared";
 import type {
   RuntimeConnectionValidationInput,
@@ -368,6 +369,7 @@ export async function runOpenRouterApi(
   input: RuntimeRunInput,
   logger?: OpenRouterApiLogger,
 ): Promise<RuntimeRunResult> {
+  assertNativeProcessMode(input, false);
   const baseUrl = resolveBaseUrl(input);
   const url = `${baseUrl}/chat/completions`;
   const signal = buildRunTimeoutSignal(input);
@@ -611,6 +613,7 @@ export async function runOpenRouterApiStreaming(
   input: RuntimeRunInput,
   logger?: OpenRouterApiLogger,
 ): Promise<RuntimeRunResult> {
+  assertNativeProcessMode(input, false);
   logger?.info?.(
     {
       runtimeId: input.runtimeId,

@@ -7,6 +7,7 @@ import {
   RuntimeLimitStatus as _RuntimeLimitStatus,
   RuntimeTransport as _RuntimeTransport,
 } from "@aif/shared";
+import type { NativeProcessScope } from "./supervision/nativeProcessScope.js";
 import type {
   RuntimeLimitEventPayload as _RuntimeLimitEventPayload,
   RuntimeLimitSnapshot as _RuntimeLimitSnapshot,
@@ -207,6 +208,9 @@ export type RuntimeSubagentStartCallback = (name: string, id: string) => void;
  * SDK settings). Adapters parse it themselves; the system never inspects it.
  */
 export interface RuntimeExecutionIntent {
+  /** Internal host capability for one native stdio attempt. Never accept this
+   * from profile options or JSON. Unsupported transports must reject it. */
+  nativeProcessScope?: NativeProcessScope;
   maxBudgetUsd?: number | null;
   maxTurns?: number;
   /** Timeout waiting for the first output from the runtime stream (ms). */

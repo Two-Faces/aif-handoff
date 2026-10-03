@@ -1,3 +1,4 @@
+import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
 import type {
   RuntimeConnectionValidationInput,
   RuntimeConnectionValidationResult,
@@ -375,6 +376,7 @@ export async function runCodexAgentApi(
   input: RuntimeRunInput,
   logger?: CodexAgentApiLogger,
 ): Promise<RuntimeRunResult> {
+  assertNativeProcessMode(input, false);
   const baseUrl = resolveBaseUrl(input);
   const url = `${baseUrl}/chat/completions`;
 
@@ -641,6 +643,7 @@ export async function runCodexAgentApiStreaming(
   input: RuntimeRunInput,
   logger?: CodexAgentApiLogger,
 ): Promise<RuntimeRunResult> {
+  assertNativeProcessMode(input, false);
   logger?.info?.(
     {
       runtimeId: input.runtimeId,

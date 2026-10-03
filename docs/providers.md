@@ -31,11 +31,28 @@ for launch and recovery. On 2026-10-03 the user supplied passing Mac logs for
 journal/recovery tests after the fixes in `2f62264`. This accepts the targeted
 backend suite; it is separate from the earlier fixed-fixture capability probe.
 
-This primitive is not yet wired into the Claude, Codex, OpenRouter or OpenCode
-adapter transports. Their cancellation callbacks, SDK results and remote service
-responses are not native stop receipts. No adapter capability has changed and
-personal AI remains disabled. Linux and other unsupported mechanisms reject;
+The first internal transport integration connects **Codex app-server stdio** to
+this supervisor. `runTaskDeviceAppServer` requires an existing host-owned task run,
+the exact registered checkout and a new session. It is not called by routes,
+chat or the worker yet. A host-only `nativeProcessScope` permits one launch and
+awaits native stop plus journal acknowledgement before returning a result. Abort
+retains the fenced run even after its native process unit stops. Start timeouts
+do not retry; dynamic model discovery cannot spawn an uncontained helper.
+
+All four built-in adapters check this scope. Claude, other Codex transports,
+OpenRouter and OpenCode reject it before provider activity. Their cancellation
+callbacks, SDK results and remote service responses are not native stop receipts.
+Configured external MCP/services, normal runner admission, bound resume/fork and
+runtime-backed handoff remain open. No public capability or profile flag grants
+native execution, and personal AI remains disabled. Linux and other unsupported mechanisms reject;
 process-group termination is never substituted for native proof.
+
+Native launch resolves literal executables without a shell; Windows `.cmd`
+wrappers are rejected, so this internal path requires a real `.exe`. Its curated
+environment retains Windows OS defaults normally supplied by libuv without
+adding ambient provider keys or `NODE_OPTIONS`. The RPC contract remains the
+[Codex app-server stdio protocol](https://learn.chatgpt.com/docs/app-server);
+`turn/interrupt` is followed by native stop verification, not treated as proof.
 See [device sync](local-device-sync.md) for scope, recovery and native acceptance.
 
 ## Runtime Profile Model
@@ -93,6 +110,10 @@ The API exposes effective selection endpoints:
 | Custom       | Any          | Any                       | Configurable             | Configurable     | Configurable         | Configurable  | Configurable     | Configurable      | Must declare                             | Configurable        | Via `AIF_RUNTIME_MODULES` |
 
 Capabilities are **transport-aware**: the same adapter may expose different capabilities depending on the selected transport. For example, Codex supports resume on SDK/CLI/App Server, session fork only on App Server, and session discovery on SDK/App Server. Use `resolveAdapterCapabilities(adapter, transport)` to get the effective set.
+
+The table describes regular runtime features. P14's internal native process path
+is currently Codex App Server only, with new sessions; it does not advertise
+whole-adapter containment or change the regular transports' capabilities.
 
 ### Model-specific effort discovery
 

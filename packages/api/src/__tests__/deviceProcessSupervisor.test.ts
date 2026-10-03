@@ -1,11 +1,20 @@
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDb } from "@aif/shared/server";
 import { resetEnvCache } from "@aif/shared";
+import { UsageSource, type RuntimeRunInput } from "@aif/runtime";
 const db = { current: createTestDb() };
 vi.mock("@aif/shared/server", async (original) => ({
   ...(await original<typeof import("@aif/shared/server")>()),
@@ -14,7 +23,7 @@ vi.mock("@aif/shared/server", async (original) => ({
 const actualServer =
   await vi.importActual<typeof import("@aif/shared/server")>("@aif/shared/server");
 const data = await import("@aif/data");
-const { startTaskDeviceProcess, recoverTaskDeviceProcess } =
+const { startTaskDeviceProcess, recoverTaskDeviceProcess, runTaskDeviceAppServer } =
   await import("../services/deviceProcessSupervisor.js");
 let root: string, database: string;
 beforeEach(() => {
@@ -69,9 +78,152 @@ function fixture() {
   data.initializeTaskDeviceGrant(task.id);
   return { task, workspace, input: { taskId: task.id, projectRoot } };
 }
+function appServerFixture(worktreePath: string, mode: "success" | "abort") {
+  const marker = join(worktreePath, "native-writer.txt");
+  const writer =
+    "const fs=require('fs');setInterval(()=>fs.appendFileSync(" +
+    JSON.stringify(marker) +
+    ",'x'),10)";
+  const header =
+    "const fs=require('fs');require('child_process').spawn(process.execPath,['-e'," +
+    JSON.stringify(writer) +
+    "],{stdio:'ignore',detached:true}).unref();\n";
+  let source = readFileSync(
+    new URL(
+      "../../../runtime/src/adapters/codex/appServer/__tests__/fixtures/fake-codex-app-server.mjs",
+      import.meta.url,
+    ),
+    "utf8",
+  )
+    .replace("#!/usr/bin/env node", "")
+    .replace('import readline from "node:readline";', 'const readline = require("node:readline");')
+    .replace(
+      'const scenario = process.env.FAKE_CODEX_SCENARIO ?? "run-success";',
+      'const scenario = "run-success";',
+    );
+  source = source.replace(
+    "function completeTurn(text, usage) {",
+    "function completeTurn(text, usage) {\n" +
+      "if(!fs.existsSync(" +
+      JSON.stringify(marker) +
+      ")){setTimeout(()=>completeTurn(text,usage),5);return;}\n" +
+      (mode === "abort"
+        ? 'sendNotification("item/agentMessage/delta",{threadId,turnId,itemId:"trigger",delta:"abort now"});return;\n'
+        : ""),
+  );
+  // Node is the literal executable; its `app-server` argument loads this owned
+  // fixture. The real protocol adapter and native host are not mocked.
+  writeFileSync(join(worktreePath, "app-server"), header + source);
+  return marker;
+}
 describe.skipIf(!["win32", "darwin"].includes(process.platform))(
   "native process and durable task journal bridge",
   () => {
+    it("runs the real app-server adapter and persists native stop before returning its result", async () => {
+      const { task, workspace, input } = fixture();
+      const marker = appServerFixture(workspace.worktreePath, "success");
+      let runId = "";
+      await data.withTaskDeviceExecution(input, async () => {
+        runId = data.currentTaskDeviceRunId()!;
+        const result = await runTaskDeviceAppServer(task.id, {
+          runtimeId: "codex",
+          transport: "app-server",
+          prompt: "fixture",
+          cwd: workspace.worktreePath,
+          options: { codexCliPath: process.execPath },
+          usageContext: { source: UsageSource.TEST, taskId: task.id, projectId: task.projectId },
+          execution: { runTimeoutMs: 10000 },
+        });
+        expect(result.outputText).toBe("Hello from fake app-server");
+        const journals = data.listTaskDeviceProcesses(runId);
+        expect(journals).toHaveLength(1);
+        expect(journals[0].state).toBe("stopped");
+        expect(JSON.parse(journals[0].evidenceJson!).activeProcesses).toBe(0);
+        expect(existsSync(marker)).toBe(true);
+        const length = readFileSync(marker).length;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(readFileSync(marker).length).toBe(length);
+      });
+      expect(data.getTaskDeviceGrant(task.id)?.activeRunId).toBeNull();
+    }, 20000);
+    it("retains the fenced run on cancellation even after the adapter unit and its writer stop", async () => {
+      const { task, workspace, input } = fixture();
+      const marker = appServerFixture(workspace.worktreePath, "abort");
+      const abort = new AbortController();
+      let runId = "";
+      await expect(
+        data.withTaskDeviceExecution(input, async () => {
+          runId = data.currentTaskDeviceRunId()!;
+          return runTaskDeviceAppServer(task.id, {
+            runtimeId: "codex",
+            transport: "app-server",
+            prompt: "fixture",
+            cwd: workspace.worktreePath,
+            options: { codexCliPath: process.execPath },
+            usageContext: { source: UsageSource.TEST, taskId: task.id, projectId: task.projectId },
+            execution: {
+              runTimeoutMs: 10000,
+              abortController: abort,
+              onEvent: (event) => {
+                if (event.message === "abort now") abort.abort();
+              },
+            },
+          });
+        }),
+      ).rejects.toBeInstanceOf(Error);
+      expect(abort.signal.aborted).toBe(true);
+      const journals = data.listTaskDeviceProcesses(runId);
+      expect(journals).toHaveLength(1);
+      expect(journals[0].state).toBe("stopped");
+      expect(data.getTaskDeviceGrant(task.id)?.activeRunId).toBe(runId);
+      const length = readFileSync(marker).length;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(readFileSync(marker).length).toBe(length);
+    }, 20000);
+    it("rejects runtime scope substitutions before reserving or creating a process", async () => {
+      const { task, workspace, input } = fixture();
+      await expect(
+        runTaskDeviceAppServer(task.id, {
+          runtimeId: "codex",
+          transport: "app-server",
+          prompt: "fixture",
+          cwd: workspace.worktreePath,
+          usageContext: { source: UsageSource.TEST, taskId: task.id, projectId: task.projectId },
+        }),
+      ).rejects.toMatchObject({ code: "run_scope_required" });
+      await data.withTaskDeviceExecution(input, async () => {
+        const base: RuntimeRunInput = {
+          runtimeId: "codex",
+          transport: "app-server",
+          prompt: "fixture",
+          cwd: workspace.worktreePath,
+          options: { codexCliPath: process.execPath },
+          usageContext: { source: UsageSource.TEST, taskId: task.id, projectId: task.projectId },
+        };
+        for (const patch of [
+          { runtimeId: "opencode" },
+          { transport: "sdk" as const },
+          { sessionId: "unbound-session", resume: true },
+          { sourceSessionId: "unbound-fork" },
+          { projectRoot: input.projectRoot },
+          { usageContext: { ...base.usageContext, projectId: "foreign" } },
+        ])
+          await expect(
+            runTaskDeviceAppServer(task.id, { ...base, ...patch }),
+          ).rejects.toMatchObject({ adapterCode: "native_task_input_invalid" });
+        vi.stubEnv("AIF_PERSONAL_MODE", "true");
+        resetEnvCache();
+        try {
+          await expect(runTaskDeviceAppServer(task.id, base)).rejects.toMatchObject({
+            code: "personal_execution_disabled",
+          });
+        } finally {
+          vi.stubEnv("AIF_PERSONAL_MODE", "false");
+          resetEnvCache();
+        }
+        expect(data.listTaskDeviceProcesses(data.currentTaskDeviceRunId()!)).toHaveLength(0);
+      });
+    });
     it("persists the native empty-job proof before settling the managed run", async () => {
       const { task, workspace, input } = fixture();
       let id = "";

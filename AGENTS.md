@@ -165,7 +165,7 @@ host and data `deviceProcesses.ts` / migration v40 for local launch/stop receipt
 Persist host identity before creating the child, and its suspended identity before
 resuming. API `deviceProcessSupervisor.ts` is an internal bridge, with no routes.
 Empty-job evidence does not release a run/grant or establish adapter-wide coverage.
-Claude/Codex/OpenRouter/OpenCode transport integration remains open. The targeted
+Complete Claude/Codex/OpenRouter/OpenCode transport coverage remains open. The targeted
 native Mac runtime/API suite passed on 2026-10-03 (54 + 2 tests, user-supplied logs).
 Unsupported platforms must reject; never substitute PID/group signals or
 elapsed time for native stop proof. Existing personal AI guards remain enabled.
@@ -187,6 +187,20 @@ or user. It records stop only, never releases task authority. All nine native Ma
 process cases and both API journal/recovery cases passed after the fixes in
 `2f62264`. Adapter integration, runtime-backed release and full M2 acceptance remain
 open; personal AI stays disabled.
+
+The first P14 adapter increment adds runtime `nativeProcessScope.ts`: an opaque
+host capability for one exact-root launch, bounded stdio and awaited native stop
+including journal acknowledgement. Codex app-server uses its async launcher;
+native start timeout never retries. All other built-in transports reject this
+scope before work, and the registry skips process-spawning model discovery.
+API `runTaskDeviceAppServer` is an internal new-session bridge for an already
+enrolled standalone task; it rejects resume/fork, other runtimes and scope
+substitution. No routes/coordinator/chat call it yet. Windows needs a literal
+`.exe`, not `.cmd`; native environment restores only libuv's OS essentials.
+External service/config coverage, remaining transports, normal admission and
+runtime-backed checkpoint/release remain open. Stop of this unit grants no
+handoff authority. New adapter Mac acceptance is separate from the 56-test
+backend acceptance above; see the current plan and device-sync instructions.
 
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |

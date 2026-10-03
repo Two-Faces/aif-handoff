@@ -78,6 +78,14 @@
  *
  * ## Reading execution options in run()
  *
+ * `execution.nativeProcessScope` is an internal host capability, never a profile
+ * option. Every run/resume/fork/stream entry must call assertNativeProcessMode
+ * before provider activity. Pass false until that transport uses the native
+ * launcher and awaits durable stop proof; ignoring the scope is forbidden.
+ * Only Codex app-server currently integrates this internal launch path. It does
+ * not advertise whole-adapter containment or enable personal execution. Do not
+ * fall back to a shell, retry another launch, or run discovery outside the scope.
+ *
  * ```ts
  * async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {
  *   const exec = input.execution;            // RuntimeExecutionIntent | undefined

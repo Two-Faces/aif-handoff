@@ -742,6 +742,70 @@ handoff acceptance. Mac launch/recovery supervision is implemented below but
 awaits its own native tests, followed by adapter transport integration.
 P14/M2 remain open and personal AI remains disabled.
 
+## Codex app-server native integration (internal P14 increment)
+
+`runTaskDeviceAppServer` now connects the existing protocol adapter to the native
+supervisor and durable process journal. It admits only an already enrolled,
+locally owned standalone task inside its active run, using the exact registered
+checkout and matching task/project attribution. It rejects resume/fork and other
+transports before process reservation. There are no new routes; ordinary worker
+and chat paths do not call it, and personal AI remains disabled.
+
+The host creates an opaque `nativeProcessScope`, permits one launch and joins
+native stop plus journal acknowledgement before returning an adapter result.
+Cancellation fences the run even when stop succeeds. A start timeout cannot retry
+another unit. Pending launches cannot outlive the scope if an adapter forgets to
+await them; ignored/forged/reused scopes fail. The stdio bridge preserves binary
+input with 64 KiB chunks and bounds unread output at 4 MiB per stream. Registry
+model-effort checks retain static validation but skip dynamic discovery that
+could spawn an uncontained process.
+
+All four built-in adapters were audited: Codex app-server consumes this scope;
+Claude, Codex SDK/CLI/API, OpenRouter and OpenCode reject it before provider work.
+This is not whole-adapter stop coverage: configured MCP/external services,
+remaining transports, normal runner admission, local session provenance for
+resume/fork and runtime-backed checkpoint/release are still P14/P15 work. No
+stop receipt in this increment releases or transfers device authority.
+
+Native launch accepts a literal executable, resolved from absolute PATH entries
+without a shell. Windows `.cmd` wrappers require a separate audited integration;
+the current path requires a real `.exe`. The curated app-server environment adds
+only the Windows OS essentials normally supplied by libuv (including SYSTEMROOT
+and TEMP); omitting them caused a real Node fixture to abort before JSON-RPC.
+Provider credentials and `NODE_OPTIONS` are not restored from the ambient env.
+
+Windows targeted checks on 2026-10-03 passed: **37 runtime + 5 API**. The portable
+runtime set is 16 scope/parity tests plus 21 app-server run tests. The API suite
+uses the actual adapter, native host and isolated SQLite journal with a local
+JSON-RPC fixture. It verifies that a detached writer stops before a successful
+result, cancellation keeps the fenced run, invalid task/root/session inputs do
+not launch, and previous crash/recovery cases still work. It makes no paid model
+requests or provider authentication calls. Mac acceptance for this increment is
+pending and is separate from the accepted 56-test backend suite below.
+
+The final Windows `ai:validate` passed on 2026-10-03 (exit 0): **3515 passed /
+10 skipped**, all package coverage metrics at least 70%, build 7/7, Chromium 8/8,
+k6 3/3 and protocol CLI 0.145.0. Runtime minimum coverage is 74.91%, API 70.67%.
+Log: `.codex/m2/logs/native-adapter-final-validate.log`. Package sources stayed
+unchanged during this run. Root/runtime/API checklists were reviewed, adapter
+template/provider docs updated and all four registrations/usage contracts checked.
+No package, dependency, migration, UI or public REST/WS/MCP change was introduced;
+conditional Docker/Pencil/route checks do not apply. The gate used its private
+SQLite fixture and ports 3309/5480, preserving the native M1 apps and user data.
+
+After manually publishing and pulling this increment, run in the Mac checkout:
+
+```bash
+cd /Users/aries/Projects/aif-handoff
+npm run build
+npm test --workspace @aif/runtime -- nativeProcessScope.test.ts appServer/__tests__/run.test.ts --bail=1
+npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts --bail=1
+```
+
+Expected: **37 runtime + 5 API = 42 passed**. The API cases require the installed
+clang/macOS SDK and use private temporary checkouts/SQLite. Preserve full error
+output on failure; do not replace native proof with longer sleeps or PID kills.
+
 ## macOS native supervisor (targeted native runtime/API suite accepted)
 
 On 2026-10-03 the user supplied passing Mac results after updating the M2 branch
@@ -883,10 +947,12 @@ npm test --workspace @aif/runtime -- macosSupervisor.test.ts macosSupervisorProt
 npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts
 ```
 
-Expected scope: 13 shared contract tests, 7 data journal tests, 25 simulated
+Scope at `2f62264`: 13 shared contract tests, 7 data journal tests, 25 simulated
 protocol tests, 20 simulated OS-boundary tests, **9 real Mac process tests** and
 **2 real native SQLite bridge tests** (76 total; the latest supplied report covers
-the 56 runtime/API tests). The native cases exercise
+the 56 runtime/API tests). The later adapter increment above expands this API
+file to 5 cases (79 total for these commands); its new acceptance is pending.
+The native cases exercise
 suspended preparation, literal argv/output, forged output, full stdin, detached
 grandchildren, an unrelated live process, failed persistence, helper death and
 caller death before/after resume. The bridge records stop without clearing a

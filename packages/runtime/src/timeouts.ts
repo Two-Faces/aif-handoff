@@ -1,4 +1,3 @@
-import type { ChildProcess } from "node:child_process";
 import { RuntimeExecutionError } from "./errors.js";
 
 /* ------------------------------------------------------------------ */
@@ -289,7 +288,12 @@ export interface ProcessTimeoutResult {
  * @returns A handle with cleanup and timeout-status accessors.
  */
 export function withProcessTimeouts(
-  child: ChildProcess,
+  child: {
+    pid?: number;
+    stdout?: import("node:stream").Readable | null;
+    stderr?: import("node:stream").Readable | null;
+    kill(signal?: NodeJS.Signals | number): boolean;
+  },
   intent: TimeoutIntent,
   logger?: TimeoutLogger,
 ): ProcessTimeoutResult {

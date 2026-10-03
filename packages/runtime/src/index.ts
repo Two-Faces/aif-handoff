@@ -255,3 +255,8 @@ export {
   recoverSupervisedProcess,
 } from "./supervision/processSupervisor.js";
 export type { SupervisedProcess, SupervisedProcessInput } from "./supervision/processSupervisor.js";
+export { withNativeProcessScope } from "./supervision/nativeProcessScope.js";
+export type {
+  NativeProcessScope,
+  NativeProcessLauncher,
+} from "./supervision/nativeProcessScope.js";

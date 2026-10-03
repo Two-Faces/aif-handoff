@@ -1,3 +1,4 @@
+import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
 import {
   RuntimeTransport,
   UsageReporting,
@@ -152,6 +153,7 @@ export function createOpenRouterRuntimeAdapter(
     },
 
     async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {
+      assertNativeProcessMode(input, false);
       logger.info?.(
         {
           runtimeId,

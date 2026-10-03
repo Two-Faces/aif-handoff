@@ -32,6 +32,7 @@ import {
   type RuntimeSessionForkInput,
 } from "./types.js";
 import { createNoopUsageSink, type RuntimeUsageSink } from "./usageSink.js";
+import { assertNativeProcessMode } from "./supervision/nativeProcessScope.js";
 
 export interface RuntimeRegistryLogger {
   debug(context: Record<string, unknown>, message: string): void;
@@ -246,6 +247,7 @@ function wrapAdapter(
   }
 
   async function wrappedRun(input: RuntimeRunInput): Promise<RuntimeRunResult> {
+    assertNativeProcessMode(input, true);
     const transformed = applyLanguageDirective(transformPrompt(input));
     const validated = await applyModelEffortPolicy(adapter, transformed);
     const result = await adapter.run(validated);
@@ -256,6 +258,7 @@ function wrapAdapter(
   async function wrappedResume(
     input: RuntimeRunInput & { sessionId: string },
   ): Promise<RuntimeRunResult> {
+    assertNativeProcessMode(input, true);
     if (!adapter.resume) {
       throw new RuntimeExecutionError(
         `Runtime "${adapter.descriptor.id}" does not implement resume()`,
@@ -273,6 +276,7 @@ function wrapAdapter(
   }
 
   async function wrappedForkSession(input: RuntimeSessionForkInput): Promise<RuntimeRunResult> {
+    assertNativeProcessMode(input, true);
     if (!adapter.forkSession) {
       throw new RuntimeExecutionError(
         `Runtime "${adapter.descriptor.id}" does not implement forkSession()`,
@@ -385,7 +389,15 @@ export class RuntimeRegistry {
 
     let models: RuntimeModel[] | null = null;
     const discoveryProfile = this.buildModelEffortDiscoveryProfile(adapter, input);
-    if (configuredEffort && discoveryProfile && input.model && adapter.listModels) {
+    // Discovery may itself spawn a CLI. Native attempts use the static effort
+    // allowlist until discovery has its own supervised lifecycle.
+    if (
+      !input.execution?.nativeProcessScope &&
+      configuredEffort &&
+      discoveryProfile &&
+      input.model &&
+      adapter.listModels
+    ) {
       try {
         models = await this.getModelEffortDiscoveryService().listModels(discoveryProfile);
       } catch (error) {
