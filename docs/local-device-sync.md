@@ -796,7 +796,10 @@ minimum 70.31%), build 7/7, Chromium 8/8, k6 3/3 and protocol CLI 0.145.0. All
 14 OpenCode API cases passed both ordinary and coverage runs, including the real
 CLI; its path was set through `OPENCODE_NATIVE_TEST_PATH` and participates in
 Turbo test/coverage hashes. The final source/test/config hashes (17 files)
-matched before/after the gate. Log: `.codex/m2/logs/native-opencode-final-validate.log`.
+matched before/after the gate. A follow-up canonicalized only runtime fixture
+temp roots for macOS `/var` versus `/private/var`; production code is unchanged.
+The repeated full gate passed with the same results. Final log:
+`.codex/m2/logs/native-opencode-portable-final-validate.log`.
 Root/runtime/API checklists and all four adapters were reviewed. No new package,
 dependency, migration, public route/event or UI requires Docker/Pencil/route
 validation; the Dockerfile documents the host-only prerequisite.

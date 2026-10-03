@@ -272,7 +272,10 @@ Project/managed config и MCP не допускаются. Private storage уд�
 coverage ≥70% (runtime min 76.16%, API min 70.31%), build 7/7, Chromium 8/8,
 k6 3/3, protocol CLI 0.145.0. Все 14 OpenCode API cases, включая actual CLI,
 прошли обычный и coverage прогоны; hashes 17 source/test/config файлов совпали.
-Лог .codex/m2/logs/native-opencode-final-validate.log. Mac subset 241 + 14 = 255
+После feature commit 34b91cb исправлена только канонизация temp roots в
+runtime fixture (macOS /var vs /private/var); рабочий код не менялся. Повторный
+полный gate прошёл с теми же результатами. Финальный лог:
+.codex/m2/logs/native-opencode-portable-final-validate.log. Mac subset 241 + 14 = 255
 ожидает пользователя: OPENCODE_NATIVE_TEST_PATH="$(command -v opencode)" для
 API deviceOpenCode.test.ts обязателен, чтобы последний actual CLI case не был skip.
 Команды в docs/local-device-sync.md. Никакой LLM/model download/paid API для них не нужен.

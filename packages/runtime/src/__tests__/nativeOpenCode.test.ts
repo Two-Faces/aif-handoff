@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -26,13 +34,13 @@ function deferred<T>() {
 let root: string;
 const privateDirectories: string[] = [];
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "aif-opencode-unit-"));
+  root = realpathSync(mkdtempSync(join(tmpdir(), "aif-opencode-unit-")));
   mkdirSync(join(root, ".git"));
   writeFileSync(join(root, "cli.mjs"), "// fixture");
 });
 afterEach(() => {
   for (const path of privateDirectories.splice(0)) {
-    expect(path.startsWith(join(tmpdir(), "aif-opencode-"))).toBe(true);
+    expect(path.startsWith(join(realpathSync(tmpdir()), "aif-opencode-"))).toBe(true);
     rmSync(path, { recursive: true, force: true });
   }
   rmSync(root, { recursive: true, force: true });
