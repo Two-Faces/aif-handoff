@@ -278,7 +278,6 @@ describe("host-owned native runtime scope", () => {
   });
   it.each([
     ["claude", "sdk", createClaudeRuntimeAdapter],
-    ["codex", "sdk", createCodexRuntimeAdapter],
     ["codex", "api", createCodexRuntimeAdapter],
     ["openrouter", "api", createOpenRouterRuntimeAdapter],
     ["opencode", "api", createOpenCodeRuntimeAdapter],

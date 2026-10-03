@@ -169,7 +169,22 @@ API 20:52:26 / 15.06s; все три native CLI случая success/abort/timeo
 платный provider smoke или включение обычного исполнения/personal AI.
 Повтор этих команд без новых изменений не нужен; детали в docs/local-device-sync.md.
 
-Далее P14 — остальные transports (Claude, Codex SDK/API, OpenRouter/OpenCode),
+Новый SDK increment: runTaskDeviceSdk запускает реальный SDK 0.145.0 в фиксированном
+Node worker под native supervisor; private CLI spawn SDK наследует ту же unit.
+Host-resolved module URL, payload ≤1 MiB через stdin без secrets в argv, validated
+SDK events и fenced host callbacks. Общий nativeBatch.ts используется CLI/SDK:
+bounded output, UTF-8/drain, native stop/journal, без retries. Новая text-only
+session; custom config/argv, execution hooks/env, outputSchema, resume/fork и
+глобальные session scans запрещены. SDK schema cleanup/внутренний stderr buffer
+не считать покрытыми. Windows targeted 109 runtime + 15 API, включая настоящий SDK
+с offline CLI fixture, parent PID, abort/timeout и crash recovery. Финальный Windows
+ai:validate прошёл: exit 0, 3572 passed / 10 skipped, coverage всех пакетов ≥70%
+(runtime минимум 75.30%, API 70.65%), build 7/7, Chromium 8/8, k6 3/3, protocol
+CLI 0.145.0. Лог .codex/m2/logs/native-sdk-final-validate.log; все 12 package
+source/test hashes совпали до/после gate. Новая Mac acceptance ожидается: 124 tests, команды в
+docs/local-device-sync.md. Public/normal/personal execution ещё не включать.
+
+Далее P14 — остальные transports (Claude, Codex API, OpenRouter/OpenCode),
 normal runner admission/external-service coverage, runtime-backed checkpoint/release и
 физическая передача Win→Mac→Win. Native stop receipt сам по себе не освобождает
 grant/run и не подтверждает остановку внешних/делегированных services.

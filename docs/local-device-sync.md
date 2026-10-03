@@ -742,6 +742,71 @@ handoff acceptance. Mac launch/recovery supervision is implemented below but
 awaits its own native tests, followed by adapter transport integration.
 P14/M2 remain open and personal AI remains disabled.
 
+## Codex SDK native integration (internal increment; Mac acceptance pending)
+
+`runTaskDeviceSdk` uses the same task/run/root/personal gate as the other internal
+Codex bridges. It starts a fixed Node worker through both native launch barriers;
+the actual installed `@openai/codex-sdk` 0.145.0 then spawns its CLI inside that
+native unit. No global spawn monkey-patch, private SDK API override, transport
+fallback or paid model is used by this increment's tests. Normal routes, chat
+and worker admission remain unchanged and personal AI stays disabled.
+
+The SDK module URL is resolved by the host, not supplied by task input. A minimal
+worker environment excludes provider credentials and Node injection options.
+The SDK receives the existing curated child environment and explicit auth via a
+stdin payload capped at 1 MiB, with NODE_OPTIONS/NODE_PATH removed. Prompt/API key
+are absent from worker argv and receipts; the SDK retains its own child argument
+contract. The worker reads the payload only after durable native preparation.
+Worker errors are fixed diagnostic codes; SDK parse errors cannot
+echo entire malformed responses, prompts or secrets to the host.
+
+`nativeBatch.ts` now shares the proven CLI lifecycle with SDK: split UTF-8 and
+trailing-line handling, 16 MiB combined worker output, no retry, drained streams,
+native stop and durable journal acknowledgement. `nativeSdkProtocol.ts` projects
+validated SDK events into host callbacks. A matching thread ID, completed turn,
+worker completion, zero exit and native proof are all required for success.
+Cancellation, malformed/failed protocol, callbacks and coordinator death retain
+the fenced run as appropriate; recovery records stop without restoring authority.
+The 16 MiB limit covers worker I/O, not buffers inside the third-party SDK.
+
+This internal gate admits new text-only sessions. Resume/fork, custom CLI args,
+codexConfig, execution hooks/environment and outputSchema reject before launch.
+In particular, SDK-created temporary output-schema files need an owned cleanup
+design before schema support is admitted. Global session-limit scans remain off.
+Ordinary SDK behavior/capabilities and usage FULL are preserved. External services,
+remaining transports, normal admission and runtime-backed release remain open.
+
+Targeted Windows checks passed: **109 runtime + 15 API**. The API suite loads the
+real SDK and uses an offline Node CLI fixture, asserting its SDK originator,
+`--experimental-json` argv and parent PID matching the journaled worker. It proves
+native success/abort/timeout, large stdin and a detached writer, sanitizes SDK
+parse failures, and recovers the original native unit after coordinator death.
+The fixture clears inherited SDK originator overrides; a developer's launcher
+identity must not mask SDK execution or make the test environment-dependent.
+
+The final Windows `ai:validate` passed on 2026-10-03 (exit 0): **3572 passed / 10
+skipped**, every package coverage metric at least 70% (runtime minimum 75.30%, API
+70.65%), build 7/7, Chromium 8/8, k6 3/3 and protocol CLI 0.145.0. Log:
+`.codex/m2/logs/native-sdk-final-validate.log`. All 12 changed/new package source
+and test hashes matched before and after the gate. Root/runtime/API checklists,
+all four adapters and registration/usage contracts were reviewed. No dependencies,
+packages, migrations, public REST/WS/MCP or UI changed; conditional Docker/Pencil/
+route checks do not apply. Tests used private SQLite and ports 3309/5480.
+
+After manual publication/pull, run on Mac:
+
+```bash
+cd /Users/aries/Projects/aif-handoff
+npm run build
+npm test --workspace @aif/runtime -- codexSdkNative.test.ts codexSdk.test.ts codexAdapterSdk.test.ts codexCliNative.test.ts nativeProcessScope.test.ts --bail=1
+npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts --bail=1
+```
+
+Expected **109 runtime + 15 API = 124 passed** (33 native SDK, 29 existing SDK,
+17 adapter SDK, 15 native CLI and 15 scope/parity tests; 15 API/journal cases).
+The installed clang/macOS SDK is still required. Earlier native acceptances do
+not accept this new worker; this is not a full Mac gate or complete P14/M2.
+
 ## Codex CLI native integration (targeted Mac smoke accepted)
 
 `runTaskDeviceCli` shares the internal task/run/root/personal admission gate with
@@ -802,11 +867,13 @@ npm test --workspace @aif/runtime -- codexCliNative.test.ts nativeProcessScope.t
 npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts --bail=1
 ```
 
-Expected **85 runtime + 9 API = 94 passed** (15 native CLI protocol, 16 scope/parity,
+Accepted scope at `ba3347e`: **85 runtime + 9 API = 94 passed** (15 native CLI protocol, 16 scope/parity,
 33 legacy CLI and 21 adapter tests; 9 native API/journal cases). Installed
 clang/macOS SDK is required. This targeted acceptance is separate from the earlier
 42-test app-server report, a full Mac quality gate, a live provider run and full
 P14/M2 acceptance. Application sources did not change during this acceptance.
+Later SDK changes expand this shared API suite and update scope parity; use the
+current SDK commands above for that increment's acceptance.
 
 ## Codex app-server native integration (first internal P14 increment, accepted)
 

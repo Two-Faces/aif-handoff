@@ -1,4 +1,11 @@
-import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
+import {
+  assertNativeProcessMode,
+  nativeProcessEnvironment,
+  resolveNativeExecutable,
+} from "../../supervision/nativeProcessScope.js";
+import { runNativeBatch } from "../../supervision/nativeBatch.js";
+import { NATIVE_CODEX_SDK_WORKER } from "./nativeSdkWorker.js";
+import { nativeSdkFailure, parseNativeSdkFrame } from "./nativeSdkProtocol.js";
 import {
   Codex,
   type CodexOptions,
@@ -726,11 +733,112 @@ async function runCodexSdkAttempt(
   return appendCodexSessionLimitEvent(input, result);
 }
 
+/** Run the real SDK in a fixed native worker because its public API owns spawn
+ * internally. Host callbacks stay outside that worker and retain data fencing. */
+async function runNativeCodexSdk(
+  input: RuntimeRunInput,
+  logger?: CodexSdkLogger,
+): Promise<RuntimeRunResult> {
+  const options = asRecord(input.options),
+    execution = input.execution;
+  const unsupported =
+    input.sessionId ||
+    input.resume ||
+    asRecord(input).sourceSessionId ||
+    options.codexConfig !== undefined ||
+    options.codexCliArgs !== undefined ||
+    execution?.outputSchema !== undefined ||
+    execution?.hooks !== undefined ||
+    execution?.environment !== undefined;
+  if (unsupported) throw nativeSdkFailure("input_invalid");
+  const codex = buildCodexOptions(input, logger),
+    thread = buildThreadOptions(input, logger);
+  const environment = nativeProcessEnvironment(codex.env ?? {});
+  for (const key of Object.keys(environment))
+    if (["NODE_OPTIONS", "NODE_PATH"].includes(key.toUpperCase())) delete environment[key];
+  codex.env = Object.fromEntries(
+    Object.entries(environment).filter(
+      (entry): entry is [string, string] => entry[1] !== undefined,
+    ),
+  );
+  codex.codexPathOverride = resolveNativeExecutable(
+    codex.codexPathOverride ?? "codex",
+    environment,
+  );
+  const append = execution?.systemPromptAppend?.trim();
+  const stdin = JSON.stringify({
+    version: 1,
+    codex,
+    thread,
+    prompt: append ? `${append}\n\n${input.prompt}` : input.prompt,
+  });
+  if (Buffer.byteLength(stdin) > 1024 * 1024) throw nativeSdkFailure("input_limit");
+  let outputText = "",
+    sessionId: string | null = null,
+    completed = false,
+    workerComplete = false;
+  let usage: RuntimeUsage | null = null;
+  const events: RuntimeEvent[] = [];
+  return runNativeBatch({
+    input,
+    stdin,
+    runTimeoutMs: execution?.runTimeoutMs,
+    command: {
+      executable: process.execPath,
+      args: [
+        "--input-type=module",
+        "-e",
+        NATIVE_CODEX_SDK_WORKER,
+        import.meta.resolve("@openai/codex-sdk"),
+      ],
+      environment: nativeProcessEnvironment({}),
+    },
+    failure: nativeSdkFailure,
+    line: (line) => {
+      if (workerComplete) throw nativeSdkFailure("protocol_invalid");
+      const frame = parseNativeSdkFrame(line);
+      if (frame.kind === "complete") {
+        if (!completed || !sessionId || frame.sessionId !== sessionId)
+          throw nativeSdkFailure("incomplete");
+        workerComplete = true;
+        return;
+      }
+      const event = frame.event;
+      if (completed) throw nativeSdkFailure("protocol_invalid");
+      if (event.type === "thread.started") {
+        if (sessionId || !event.thread_id) throw nativeSdkFailure("protocol_invalid");
+        sessionId = event.thread_id;
+      }
+      if (!sessionId) throw nativeSdkFailure("protocol_invalid");
+      if (event.type === "turn.completed") {
+        completed = true;
+        usage = normalizeUsage(event.usage);
+      }
+      if (event.type === "item.completed") {
+        if (event.item.type === "agent_message")
+          outputText += (outputText ? "\n\n" : "") + event.item.text;
+        const tool = itemToToolUseSummary(event.item);
+        if (tool) execution?.onToolUse?.(tool.toolName, tool.detail);
+      }
+      const mapped = threadEventToRuntimeEvent(event);
+      if (mapped) {
+        events.push(mapped);
+        execution?.onEvent?.(mapped);
+      }
+    },
+    complete: () => {
+      if (!workerComplete) throw nativeSdkFailure("incomplete");
+      return { outputText, sessionId, usage, events };
+    },
+  });
+}
+
 export async function runCodexSdk(
   input: RuntimeRunInput,
   logger?: CodexSdkLogger,
 ): Promise<RuntimeRunResult> {
-  assertNativeProcessMode(input, false);
+  assertNativeProcessMode(input, true);
+  if (input.execution?.nativeProcessScope) return runNativeCodexSdk(input, logger);
   logger?.info?.(
     {
       runtimeId: input.runtimeId,

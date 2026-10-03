@@ -82,12 +82,15 @@
  * option. Every run/resume/fork/stream entry must call assertNativeProcessMode
  * before provider activity. Pass false until that transport uses the native
  * launcher and awaits durable stop proof; ignoring the scope is forbidden.
- * Codex app-server and the default JSONL CLI integrate this internal launch path. It does
+ * Codex app-server, default JSONL CLI and the fixed SDK worker integrate this path. It does
  * not advertise whole-adapter containment or enable personal execution. Do not
  * fall back to a shell, retry another launch, or run discovery outside the scope.
  * Batch CLI completion must await both native stop and drained stdout/stderr,
  * including completion before listeners attach. Bound total collected output,
  * decode split UTF-8, and reject incomplete/failed protocol and callback errors.
+ * SDKs with private spawn should run inside a fixed supervised worker, never
+ * monkey-patch global spawn or silently switch transports. Keep host callbacks
+ * fenced, SDK imports host-resolved, secrets off argv and worker failures opaque.
  *
  * ```ts
  * async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {

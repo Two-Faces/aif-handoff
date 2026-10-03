@@ -28,10 +28,12 @@ const {
   recoverTaskDeviceProcess,
   runTaskDeviceAppServer,
   runTaskDeviceCli,
+  runTaskDeviceSdk,
 } = await import("../services/deviceProcessSupervisor.js");
 let root: string, database: string;
 beforeEach(() => {
   vi.stubEnv("AIF_PERSONAL_MODE", "false");
+  vi.stubEnv("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", undefined);
   resetEnvCache();
   root = realpathSync.native(mkdtempSync(join(tmpdir(), "aif-native-process-journal-")));
   database = join(root, "fixture.sqlite");
@@ -120,7 +122,7 @@ function appServerFixture(worktreePath: string, mode: "success" | "abort") {
   writeFileSync(join(worktreePath, "app-server"), header + source);
   return marker;
 }
-function cliFixture(worktreePath: string, mode: "success" | "abort" | "timeout") {
+function cliFixture(worktreePath: string, mode: "success" | "abort" | "timeout" | "malformed") {
   const marker = join(worktreePath, "native-cli-writer.txt"),
     promptPath = join(worktreePath, "prompt.txt");
   const writer =
@@ -133,6 +135,7 @@ function cliFixture(worktreePath: string, mode: "success" | "abort" | "timeout")
     join(worktreePath, "exec"),
     `
 const fs = require('fs');
+fs.writeFileSync('cli-launch.json', JSON.stringify({pid:process.pid, ppid:process.ppid, cwd:process.cwd(), argv:process.argv, origin:process.env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE}));
 const child = require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(writer)}], {stdio:'ignore',detached:true});
 child.unref();
 const input = [];
@@ -142,11 +145,12 @@ process.stdin.on('end', () => {
   function emit() {
     if (!fs.existsSync(${JSON.stringify(marker)})) { setTimeout(emit, 5); return; }
     process.stderr.write('CLI fixture stderr');
+    if (${JSON.stringify(mode)} === 'malformed') { process.stdout.write('PRIVATE_FIXTURE_PARSE_ERROR\\n'); setInterval(() => {}, 1000); return; }
     const events = [
       {type:'thread.started', thread_id:'cli-native-thread'},
-      {type:'item.completed', item:{type:'agent_message', text:${JSON.stringify(mode === "abort" ? "abort now" : "CLI result 🧪")}}}
+      {type:'item.completed', item:{id:'message-1', type:'agent_message', text:${JSON.stringify(mode === "abort" ? "abort now" : "CLI result 🧪")}}}
     ];
-    if (${JSON.stringify(mode)} === 'success') events.push({type:'turn.completed', usage:{input_tokens:2, output_tokens:3}});
+    if (${JSON.stringify(mode)} === 'success') events.push({type:'turn.completed', usage:{input_tokens:2, cached_input_tokens:0, output_tokens:3}});
     process.stdout.write(events.map(event => JSON.stringify(event)).join('\\n'), () => {
       if (${JSON.stringify(mode)} === 'success') process.exit(0);
       else { process.stdout.write('\\n'); setInterval(() => {}, 1000); }
@@ -161,9 +165,16 @@ process.stdin.on('end', () => {
 describe.skipIf(!["win32", "darwin"].includes(process.platform))(
   "native process and durable task journal bridge",
   () => {
-    it.each(["success", "abort", "timeout"] as const)(
-      "runs the CLI through native stop and durable fencing: %s",
-      async (mode) => {
+    it.each([
+      ["cli", "success", runTaskDeviceCli],
+      ["cli", "abort", runTaskDeviceCli],
+      ["cli", "timeout", runTaskDeviceCli],
+      ["sdk", "success", runTaskDeviceSdk],
+      ["sdk", "abort", runTaskDeviceSdk],
+      ["sdk", "timeout", runTaskDeviceSdk],
+    ] as const)(
+      "runs %s through native stop and durable fencing: %s",
+      async (transport, mode, run) => {
         const { task, workspace, input } = fixture();
         const { marker, promptPath } = cliFixture(workspace.worktreePath, mode);
         const prompt = "CLI fixture 🧪".repeat(6000),
@@ -172,9 +183,9 @@ describe.skipIf(!["win32", "darwin"].includes(process.platform))(
         let runId = "";
         const running = data.withTaskDeviceExecution(input, async () => {
           runId = data.currentTaskDeviceRunId()!;
-          const result = await runTaskDeviceCli(task.id, {
+          const result = await run(task.id, {
             runtimeId: "codex",
-            transport: "cli",
+            transport,
             prompt,
             cwd: workspace.worktreePath,
             options: { codexCliPath: process.execPath },
@@ -209,13 +220,51 @@ describe.skipIf(!["win32", "darwin"].includes(process.platform))(
         expect(journals[0].state).toBe("stopped");
         expect(JSON.parse(journals[0].evidenceJson!).activeProcesses).toBe(0);
         expect(readFileSync(promptPath, "utf8").endsWith(prompt)).toBe(true);
-        expect(stderr.join("")).toBe("CLI fixture stderr");
+        expect(stderr.join("")).toBe(transport === "cli" ? "CLI fixture stderr" : "");
+        if (transport === "sdk") {
+          const launched = JSON.parse(
+            readFileSync(join(workspace.worktreePath, "cli-launch.json"), "utf8"),
+          );
+          expect(launched).toMatchObject({
+            origin: "codex_sdk_ts",
+            cwd: workspace.worktreePath,
+            ppid: JSON.parse(journals[0].preparedJson!).pid,
+          });
+          expect(launched.argv).toContain("--experimental-json");
+          expect(launched.argv).toContain("--cd");
+        }
         const length = readFileSync(marker).length;
         await new Promise((resolve) => setTimeout(resolve, 50));
         expect(readFileSync(marker).length).toBe(length);
       },
       20000,
     );
+    it("stops the real SDK worker and descendants after malformed CLI output without leaking it", async () => {
+      const { task, workspace, input } = fixture();
+      const { marker } = cliFixture(workspace.worktreePath, "malformed");
+      let runId = "";
+      const running = data.withTaskDeviceExecution(input, () => {
+        runId = data.currentTaskDeviceRunId()!;
+        return runTaskDeviceSdk(task.id, {
+          runtimeId: "codex",
+          transport: "sdk",
+          prompt: "fixture",
+          cwd: workspace.worktreePath,
+          options: { codexCliPath: process.execPath },
+          usageContext: { source: UsageSource.TEST, taskId: task.id, projectId: task.projectId },
+          execution: { runTimeoutMs: 10000 },
+        });
+      });
+      await expect(running).rejects.toMatchObject({
+        cause: { adapterCode: "native_sdk_worker_failed" },
+      });
+      await expect(running).rejects.not.toThrow("PRIVATE_FIXTURE_PARSE_ERROR");
+      expect(data.listTaskDeviceProcesses(runId)[0].state).toBe("stopped");
+      expect(data.getTaskDeviceGrant(task.id)?.activeRunId).toBe(runId);
+      const length = readFileSync(marker).length;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(readFileSync(marker).length).toBe(length);
+    }, 20000);
     it("runs the real app-server adapter and persists native stop before returning its result", async () => {
       const { task, workspace, input } = fixture();
       const marker = appServerFixture(workspace.worktreePath, "success");
@@ -280,6 +329,7 @@ describe.skipIf(!["win32", "darwin"].includes(process.platform))(
     it.each([
       ["app-server", runTaskDeviceAppServer],
       ["cli", runTaskDeviceCli],
+      ["sdk", runTaskDeviceSdk],
     ] as const)(
       "rejects %s scope substitutions before reserving or creating a process",
       async (transport, run) => {
@@ -304,7 +354,7 @@ describe.skipIf(!["win32", "darwin"].includes(process.platform))(
           };
           for (const patch of [
             { runtimeId: "opencode" },
-            { transport: "sdk" as const },
+            { transport: "api" as const },
             { sessionId: "unbound-session", resume: true },
             { sourceSessionId: "unbound-fork" },
             { projectRoot: input.projectRoot },
@@ -313,10 +363,20 @@ describe.skipIf(!["win32", "darwin"].includes(process.platform))(
             await expect(run(task.id, { ...base, ...patch })).rejects.toMatchObject({
               adapterCode: "native_task_input_invalid",
             });
-          if (transport === "cli")
+          if (transport === "cli" || transport === "sdk")
             await expect(
               run(task.id, { ...base, options: { codexCliArgs: ["exec", "resume", "--last"] } }),
             ).rejects.toMatchObject({ adapterCode: "native_task_input_invalid" });
+          if (transport === "sdk")
+            for (const patch of [
+              { options: { codexConfig: {} } },
+              { execution: { outputSchema: {} } },
+              { execution: { hooks: {} } },
+              { execution: { environment: {} } },
+            ])
+              await expect(run(task.id, { ...base, ...patch })).rejects.toMatchObject({
+                adapterCode: "native_task_input_invalid",
+              });
           vi.stubEnv("AIF_PERSONAL_MODE", "true");
           resetEnvCache();
           try {
@@ -356,47 +416,55 @@ describe.skipIf(!["win32", "darwin"].includes(process.platform))(
       const saved = data.getTaskDeviceProcess(id);
       expect(await recoverTaskDeviceProcess(id)).toEqual(saved);
     }, 20000);
-    it("recovers from a new process after coordinator death without clearing its active grant/run", async () => {
-      const { task, workspace, input } = fixture(),
-        marker = join(workspace.worktreePath, "writer.txt");
-      const host = spawn(
-        process.execPath,
-        [
-          "--import",
-          "tsx",
-          fileURLToPath(new URL("./fixtures/deviceProcessCrash.ts", import.meta.url)),
-          database,
-          task.id,
-          input.projectRoot,
-          workspace.worktreePath,
-          marker,
-        ],
-        {
-          stdio: ["ignore", "ignore", "pipe"],
-          windowsHide: true,
-          env: { ...process.env, AIF_PERSONAL_MODE: "false" },
-        },
-      );
-      let stderr = "";
-      host.stderr.on("data", (bytes) => {
-        stderr += bytes.toString();
-      });
-      const code = await new Promise<number | null>((resolve, reject) => {
-        host.once("error", reject);
-        host.once("close", resolve);
-      });
-      expect(code, stderr).toBe(86);
-      expect(existsSync(marker)).toBe(true);
-      const head = data.getTaskDeviceGrant(task.id)!;
-      const journal = data.listTaskDeviceProcesses(head.activeRunId!)[0];
-      expect(journal.state).toBe("prepared");
-      const recovered = await recoverTaskDeviceProcess(journal.id);
-      expect(recovered.state).toBe("stopped");
-      expect(JSON.parse(recovered.evidenceJson!).reason).toBe("recovered");
-      expect(data.getTaskDeviceGrant(task.id)).toEqual(head);
-      await expect(
-        data.withTaskDeviceExecution(input, async () => undefined),
-      ).rejects.toMatchObject({ code: "run_busy" });
-    }, 20000);
+    it.each(["raw", "sdk"] as const)(
+      "recovers %s from a new process after coordinator death without clearing its active grant/run",
+      async (mode) => {
+        const { task, workspace, input } = fixture(),
+          marker =
+            mode === "sdk"
+              ? cliFixture(workspace.worktreePath, "timeout").marker
+              : join(workspace.worktreePath, "writer.txt");
+        const host = spawn(
+          process.execPath,
+          [
+            "--import",
+            "tsx",
+            fileURLToPath(new URL("./fixtures/deviceProcessCrash.ts", import.meta.url)),
+            database,
+            task.id,
+            input.projectRoot,
+            workspace.worktreePath,
+            marker,
+            mode,
+          ],
+          {
+            stdio: ["ignore", "ignore", "pipe"],
+            windowsHide: true,
+            env: { ...process.env, AIF_PERSONAL_MODE: "false" },
+          },
+        );
+        let stderr = "";
+        host.stderr.on("data", (bytes) => {
+          stderr += bytes.toString();
+        });
+        const code = await new Promise<number | null>((resolve, reject) => {
+          host.once("error", reject);
+          host.once("close", resolve);
+        });
+        expect(code, stderr).toBe(86);
+        expect(existsSync(marker)).toBe(true);
+        const head = data.getTaskDeviceGrant(task.id)!;
+        const journal = data.listTaskDeviceProcesses(head.activeRunId!)[0];
+        expect(journal.state).toBe("prepared");
+        const recovered = await recoverTaskDeviceProcess(journal.id);
+        expect(recovered.state).toBe("stopped");
+        expect(JSON.parse(recovered.evidenceJson!).reason).toBe("recovered");
+        expect(data.getTaskDeviceGrant(task.id)).toEqual(head);
+        await expect(
+          data.withTaskDeviceExecution(input, async () => undefined),
+        ).rejects.toMatchObject({ code: "run_busy" });
+      },
+      20000,
+    );
   },
 );

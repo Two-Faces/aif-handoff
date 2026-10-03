@@ -400,6 +400,7 @@ export function createCodexRuntimeAdapter(
     assertNativeProcessMode(
       input,
       transport === RuntimeTransport.APP_SERVER ||
+        transport === RuntimeTransport.SDK ||
         (transport === RuntimeTransport.CLI && !transportResolution.fellBackToDefault),
     );
     const wantsStreaming = input.execution?.onEvent != null;

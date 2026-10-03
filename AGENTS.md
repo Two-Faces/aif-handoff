@@ -218,6 +218,18 @@ This uses an offline provider fixture, not a live model or full P14/M2 acceptanc
 Claude, Codex SDK/API, OpenRouter and OpenCode still reject native scope.
 Personal AI, normal runner admission and runtime-backed release remain closed.
 
+P14's SDK increment uses `runTaskDeviceSdk` and a fixed Node worker under the
+native supervisor. Managed SDK execution occurs inside that worker; its private
+CLI spawn inherits the same native unit. `nativeBatch.ts`
+shares bounded collection/stop handling with CLI; `nativeSdkProtocol.ts` validates
+projected events before host callbacks. Secrets travel through bounded stdin,
+not argv, and worker failures are opaque. New text-only sessions are admitted;
+custom config/argv, hooks/env, output schema and resume/fork remain denied.
+No global session scans or native retries occur. Windows tests cover actual SDK
+topology, success/abort/timeout, malformed output and coordinator-death recovery.
+Mac SDK acceptance remains pending. Claude, Codex API, OpenRouter and OpenCode
+still reject native scope; normal/personal execution and full P14/M2 remain open.
+
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |
 | `packages/api/src/index.ts`             | API server entry (Hono, port 3009)    |

@@ -55,7 +55,22 @@ an offline provider fixture, including CLI success, cancellation and timeout.
 This does not establish complete P14/M2 acceptance or a live provider run.
 The output contract follows [Codex non-interactive JSONL](https://learn.chatgpt.com/docs/non-interactive-mode).
 
-All four built-in adapters check this scope. Claude, Codex SDK/API,
+The next internal integration adds **Codex SDK** through `runTaskDeviceSdk`.
+The installed SDK owns its subprocess launch and exposes no public spawn hook,
+so the real SDK runs in a fixed native Node worker. Its CLI and descendants stay
+in the same native unit. Host callbacks retain task fencing; a worker-complete
+frame is not stop evidence. The host resolves the SDK module, sends a bounded
+stdin payload rather than placing secrets in argv, validates projected events,
+and awaits native proof. CLI and SDK share the same batch collector.
+Only new text-only SDK sessions are admitted here. Custom config/argv, execution
+hooks/environment, output schemas and resume/fork fail before launch. This avoids
+uncovered SDK temporary-schema cleanup and alternate launch paths. Global session
+scans and native retries are disabled; ordinary SDK capabilities and `FULL` usage
+declaration are unchanged. The host bounds worker I/O, not the SDK's private
+stderr buffer. Native Mac acceptance of this increment is pending. See the
+[Codex SDK documentation](https://learn.chatgpt.com/docs/codex-sdk) for the public API.
+
+All four built-in adapters check this scope. Claude, Codex API,
 OpenRouter and OpenCode reject it before provider activity. Their cancellation
 callbacks, SDK results and remote service responses are not native stop receipts.
 Configured external MCP/services, normal runner admission, bound resume/fork and
@@ -128,7 +143,7 @@ The API exposes effective selection endpoints:
 Capabilities are **transport-aware**: the same adapter may expose different capabilities depending on the selected transport. For example, Codex supports resume on SDK/CLI/App Server, session fork only on App Server, and session discovery on SDK/App Server. Use `resolveAdapterCapabilities(adapter, transport)` to get the effective set.
 
 The table describes regular runtime features. P14's internal native process path
-supports Codex App Server and default JSONL CLI, with new sessions; it does not advertise
+supports Codex App Server, default JSONL CLI and the SDK worker, with new sessions; it does not advertise
 whole-adapter containment or change the regular transports' capabilities.
 
 ### Model-specific effort discovery

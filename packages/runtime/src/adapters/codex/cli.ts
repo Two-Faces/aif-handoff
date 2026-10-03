@@ -1,8 +1,5 @@
-import {
-  assertNativeProcessMode,
-  launchNativeStdioProcess,
-} from "../../supervision/nativeProcessScope.js";
-import { StringDecoder } from "node:string_decoder";
+import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
+import { runNativeBatch } from "../../supervision/nativeBatch.js";
 import { RuntimeExecutionError } from "../../errors.js";
 import { spawn, execFileSync } from "node:child_process";
 import type { RuntimeEvent, RuntimeRunInput, RuntimeRunResult, RuntimeUsage } from "../../types.js";
@@ -1014,101 +1011,19 @@ async function runNativeCodexCli(
   environment: Record<string, string>,
   prompt: string,
 ): Promise<RuntimeRunResult> {
-  const execution = input.execution;
-  const scope = execution?.nativeProcessScope;
-  if (!scope) throw nativeCliFailure("native_scope_required");
-  const signal = execution.abortController?.signal;
-  if (signal?.aborted) throw nativeCliFailure("native_cli_aborted");
-  const child = await launchNativeStdioProcess(scope, {
-    executable,
-    args,
-    environment,
-    cwd: input.cwd ?? input.projectRoot ?? "",
-    signal,
-  });
-  const timeouts = withProcessTimeouts(child, {
-    startTimeoutMs: execution.startTimeoutMs,
-    runTimeoutMs: execution.runTimeoutMs ?? resolveTimeoutMs(input),
-  });
   const state = createCodexStreamState(null);
-  const stdoutDecoder = new StringDecoder("utf8"),
-    stderrDecoder = new StringDecoder("utf8");
-  let buffer = "",
-    bytesRead = 0;
-  let failed: RuntimeExecutionError | undefined;
-  const fail = (error: unknown) => {
-    failed ??=
-      error instanceof RuntimeExecutionError
-        ? error
-        : nativeCliFailure("native_cli_callback_failed", error);
-    child.kill();
-  };
-  const consume = (stream: "stdout" | "stderr", chunk: Buffer | string) => {
-    if (failed || signal?.aborted) return;
-    try {
-      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      bytesRead += bytes.length;
-      if (bytesRead > 16 * 1024 * 1024) throw nativeCliFailure("native_cli_output_overflow");
-      if (stream === "stderr") {
-        const text = stderrDecoder.write(bytes);
-        if (text) execution.onStderr?.(text);
-        return;
-      }
-      buffer += stdoutDecoder.write(bytes);
-      let newline = buffer.indexOf("\n");
-      while (newline !== -1) {
-        const line = buffer.slice(0, newline);
-        buffer = buffer.slice(newline + 1);
-        processCodexJsonLine(line, state, execution, true);
-        if (signal?.aborted) return;
-        newline = buffer.indexOf("\n");
-      }
-    } catch (error) {
-      fail(error);
-    }
-  };
-  const stdout = (chunk: Buffer | string) => consume("stdout", chunk);
-  const stderr = (chunk: Buffer | string) => consume("stderr", chunk);
-  const abort = () => {
-    child.kill();
-  };
-  child.stdout.on("data", stdout);
-  child.stderr.on("data", stderr);
-  child.on("error", fail);
-  signal?.addEventListener("abort", abort, { once: true });
-  try {
-    if (signal?.aborted) throw nativeCliFailure("native_cli_aborted");
-    await new Promise<void>((resolve, reject) => {
-      child.stdin.end(prompt, (error?: Error | null) => (error ? reject(error) : resolve()));
-    });
-    const exitCode = await child.waitForExit();
-    timeouts.cleanup();
-    if (failed) throw failed;
-    if (signal?.aborted) throw nativeCliFailure("native_cli_aborted");
-    buffer += stdoutDecoder.end();
-    if (buffer.trim()) processCodexJsonLine(buffer, state, execution, true);
-    const tail = stderrDecoder.end();
-    if (tail) execution.onStderr?.(tail);
-    if (signal?.aborted) throw nativeCliFailure("native_cli_aborted");
-    if (await timeouts.startTimedOut)
-      throw makeProcessStartTimeoutError(execution.startTimeoutMs ?? 0);
-    if (timeouts.runTimedOut)
-      throw makeProcessRunTimeoutError(execution.runTimeoutMs ?? resolveTimeoutMs(input));
-    if (exitCode !== 0) throw nativeCliFailure("native_cli_exit", { exitCode });
-    if (!state.completedTurn) throw nativeCliFailure("native_cli_incomplete");
-    return finalizeCodexResult(state, null);
-  } catch (error) {
-    throw error instanceof RuntimeExecutionError
-      ? error
-      : nativeCliFailure("native_cli_callback_failed", error);
-  } finally {
-    timeouts.cleanup();
-    signal?.removeEventListener("abort", abort);
-    child.stdout.off("data", stdout);
-    child.stderr.off("data", stderr);
-    child.off("error", fail);
-    await child.stop();
-  }
+  return runNativeBatch({
+    input,
+    command: { executable, args, environment },
+    stdin: prompt,
+    runTimeoutMs: input.execution?.runTimeoutMs ?? resolveTimeoutMs(input),
+    failure: (code, cause) => nativeCliFailure("native_cli_" + code, cause),
+    line: (line) => processCodexJsonLine(line, state, input.execution, true),
+    complete: () => {
+      if (!state.completedTurn) throw nativeCliFailure("native_cli_incomplete");
+      return finalizeCodexResult(state, null);
+    },
+  });
 }
 
 export async function runCodexCli(

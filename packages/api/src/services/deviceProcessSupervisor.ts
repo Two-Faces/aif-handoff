@@ -33,10 +33,18 @@ export async function runTaskDeviceCli(taskId: string, input: RuntimeRunInput) {
   return runTaskDeviceCodex(taskId, input, RuntimeTransport.CLI);
 }
 
+/** Internal SDK worker increment; no public route or automatic admission. */
+export async function runTaskDeviceSdk(taskId: string, input: RuntimeRunInput) {
+  return runTaskDeviceCodex(taskId, input, RuntimeTransport.SDK);
+}
+
 async function runTaskDeviceCodex(
   taskId: string,
   input: RuntimeRunInput,
-  transport: typeof RuntimeTransport.APP_SERVER | typeof RuntimeTransport.CLI,
+  transport:
+    | typeof RuntimeTransport.APP_SERVER
+    | typeof RuntimeTransport.CLI
+    | typeof RuntimeTransport.SDK,
 ) {
   const root = input.cwd ?? input.projectRoot;
   assertTaskDeviceExecution(taskId, root);
@@ -56,7 +64,13 @@ async function runTaskDeviceCodex(
     input.runtimeId !== "codex" ||
     input.transport !== transport ||
     reusesSession ||
-    (transport === RuntimeTransport.CLI && input.options?.codexCliArgs !== undefined)
+    (transport === RuntimeTransport.CLI && input.options?.codexCliArgs !== undefined) ||
+    (transport === RuntimeTransport.SDK &&
+      (input.options?.codexCliArgs !== undefined ||
+        input.options?.codexConfig !== undefined ||
+        input.execution?.outputSchema !== undefined ||
+        input.execution?.hooks !== undefined ||
+        input.execution?.environment !== undefined))
   ) {
     throw new RuntimeExecutionError(
       "Native task runtime input is not admissible",
