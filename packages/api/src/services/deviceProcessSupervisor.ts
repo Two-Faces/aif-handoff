@@ -25,26 +25,33 @@ import {
  * the worker yet. Host enrollment, exact root and personal policy are mandatory.
  * Resume/configured external-service coverage remains a separate admission gate. */
 export async function runTaskDeviceAppServer(taskId: string, input: RuntimeRunInput) {
-  return runTaskDeviceCodex(taskId, input, RuntimeTransport.APP_SERVER);
+  return runTaskDeviceRuntime(taskId, input, RuntimeTransport.APP_SERVER);
 }
 
 /** Internal CLI increment; same task/run/personal gates as app-server. */
 export async function runTaskDeviceCli(taskId: string, input: RuntimeRunInput) {
-  return runTaskDeviceCodex(taskId, input, RuntimeTransport.CLI);
+  return runTaskDeviceRuntime(taskId, input, RuntimeTransport.CLI);
 }
 
 /** Internal SDK worker increment; no public route or automatic admission. */
 export async function runTaskDeviceSdk(taskId: string, input: RuntimeRunInput) {
-  return runTaskDeviceCodex(taskId, input, RuntimeTransport.SDK);
+  return runTaskDeviceRuntime(taskId, input, RuntimeTransport.SDK);
 }
 
-async function runTaskDeviceCodex(
+/** Internal fresh Claude SDK worker; project config/external MCP admission is
+ * deliberately deferred. Both providers share the durable task/run bridge. */
+export async function runTaskDeviceClaudeSdk(taskId: string, input: RuntimeRunInput) {
+  return runTaskDeviceRuntime(taskId, input, RuntimeTransport.SDK, "claude");
+}
+
+async function runTaskDeviceRuntime(
   taskId: string,
   input: RuntimeRunInput,
   transport:
     | typeof RuntimeTransport.APP_SERVER
     | typeof RuntimeTransport.CLI
     | typeof RuntimeTransport.SDK,
+  runtimeId: "codex" | "claude" = "codex",
 ) {
   const root = input.cwd ?? input.projectRoot;
   assertTaskDeviceExecution(taskId, root);
@@ -61,7 +68,7 @@ async function runTaskDeviceCodex(
     (input.projectRoot !== undefined && input.projectRoot !== root);
   if (
     scopeMismatch ||
-    input.runtimeId !== "codex" ||
+    input.runtimeId !== runtimeId ||
     input.transport !== transport ||
     reusesSession ||
     (transport === RuntimeTransport.CLI && input.options?.codexCliArgs !== undefined) ||
@@ -81,7 +88,7 @@ async function runTaskDeviceCodex(
   }
   resolveRegisteredTaskRoot(taskId, root);
   const registry = await bootstrapRuntimeRegistry({ usageSink: createDbUsageSink() });
-  const adapter = registry.resolveRuntime("codex");
+  const adapter = registry.resolveRuntime(runtimeId);
   const guard = createTaskDeviceRuntimeGuard(taskId, input.execution?.abortController);
   const execution = { ...input.execution, abortController: guard.abortController };
   if (execution.onEvent) execution.onEvent = guard.bind(execution.onEvent);

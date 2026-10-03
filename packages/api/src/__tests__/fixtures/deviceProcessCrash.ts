@@ -1,21 +1,27 @@
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { getDb } from "@aif/shared/server";
 import { withTaskDeviceExecution, findTaskById } from "@aif/data";
 import { UsageSource } from "@aif/runtime";
 import {
   startTaskDeviceProcess,
   runTaskDeviceSdk,
+  runTaskDeviceClaudeSdk,
 } from "../../services/deviceProcessSupervisor.js";
 const [database, taskId, projectRoot, cwd, marker, mode] = process.argv.slice(2);
 getDb(database);
 await withTaskDeviceExecution({ taskId, projectRoot }, async () => {
-  if (mode === "sdk") {
-    await runTaskDeviceSdk(taskId, {
-      runtimeId: "codex",
+  if (mode === "sdk" || mode === "claude") {
+    const run = mode === "claude" ? runTaskDeviceClaudeSdk : runTaskDeviceSdk;
+    await run(taskId, {
+      runtimeId: mode === "claude" ? "claude" : "codex",
       transport: "sdk",
       prompt: "fixture",
       cwd,
-      options: { codexCliPath: process.execPath },
+      options:
+        mode === "claude"
+          ? { claudeCliPath: join(cwd, "claude-fixture.mjs") }
+          : { codexCliPath: process.execPath },
       usageContext: {
         source: UsageSource.TEST,
         taskId,

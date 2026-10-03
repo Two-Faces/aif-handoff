@@ -230,7 +230,21 @@ topology, success/abort/timeout, malformed output and coordinator-death recovery
 Targeted Mac SDK acceptance was recorded on 2026-10-03 from the user's passing
 confirmation for the requested 109 runtime + 15 API set; detailed logs were not
 supplied in that report. Claude, Codex API, OpenRouter and OpenCode
-still reject native scope; normal/personal execution and full P14/M2 remain open.
+still rejected native scope at that increment; normal/personal execution and full P14/M2 remain open.
+
+P14's Claude SDK increment adds `adapters/claude/native.ts`, `nativeWorker.ts` and
+`nativeProtocol.ts`, plus internal `runTaskDeviceClaudeSdk`. The fixed native
+worker runs the real Agent SDK and its CLI; callbacks stay in the fenced host.
+Success requires a matching result, worker completion, zero exit and durable stop.
+Legacy executable discovery is lazy; explicit version probes run inside the same
+native unit. Settings sources, external MCP config and session persistence are
+disabled. Resume/fork, custom hooks/environment/schema/agent definitions and
+permission bypass remain denied. No retries or host quota/session scans occur.
+Offline actual-SDK tests verify version/CLI parent PID, tool/subagent callbacks,
+stop on failure/cancellation and coordinator-death recovery without release.
+Claude CLI/API, Codex API, OpenRouter and OpenCode remain closed to native scope.
+The Claude increment's Mac smoke is pending; see `docs/local-device-sync.md`.
+No normal/personal runner or handoff admission is enabled by this internal helper.
 
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |

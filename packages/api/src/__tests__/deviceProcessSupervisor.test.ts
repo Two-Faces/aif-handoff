@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDb } from "@aif/shared/server";
 import { resetEnvCache } from "@aif/shared";
 import { UsageSource, type RuntimeRunInput } from "@aif/runtime";
+import { claudeSdkFixture } from "./fixtures/claudeSdkFixture.js";
 const db = { current: createTestDb() };
 vi.mock("@aif/shared/server", async (original) => ({
   ...(await original<typeof import("@aif/shared/server")>()),
@@ -29,6 +30,7 @@ const {
   runTaskDeviceAppServer,
   runTaskDeviceCli,
   runTaskDeviceSdk,
+  runTaskDeviceClaudeSdk,
 } = await import("../services/deviceProcessSupervisor.js");
 let root: string, database: string;
 beforeEach(() => {
@@ -265,6 +267,85 @@ describe.skipIf(!["win32", "darwin"].includes(process.platform))(
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(readFileSync(marker).length).toBe(length);
     }, 20000);
+    it.each(["success", "abort", "timeout", "malformed", "old_version", "nonzero"] as const)(
+      "supervises the actual Claude SDK and its CLI through %s",
+      async (mode) => {
+        const { task, workspace, input } = fixture();
+        const { path, marker } = claudeSdkFixture(workspace.worktreePath, mode);
+        const abortController = new AbortController(),
+          onToolUse = vi.fn(),
+          onSubagentStart = vi.fn();
+        let runId = "";
+        const running = data.withTaskDeviceExecution(input, async () => {
+          runId = data.currentTaskDeviceRunId()!;
+          const result = await runTaskDeviceClaudeSdk(task.id, {
+            runtimeId: "claude",
+            providerId: "anthropic",
+            transport: "sdk",
+            prompt: "Claude задача 🧪",
+            cwd: workspace.worktreePath,
+            options: { claudeCliPath: path },
+            usageContext: { source: UsageSource.TEST, taskId: task.id, projectId: task.projectId },
+            execution: {
+              runTimeoutMs: mode === "timeout" ? 3000 : 10000,
+              abortController,
+              onToolUse,
+              onSubagentStart,
+              onEvent: (event) => {
+                if (mode === "abort" && event.type === "stream:text") abortController.abort();
+              },
+            },
+          });
+          expect(data.listTaskDeviceProcesses(runId)[0].state).toBe("stopped");
+          return result;
+        });
+        if (mode === "success") {
+          expect(await running).toMatchObject({
+            outputText: "Claude result 🧪",
+            usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5, costUsd: 0.01 },
+          });
+          expect(onToolUse).toHaveBeenCalledWith("Bash", " `fixture`");
+          expect(onSubagentStart).toHaveBeenCalledWith("reviewer", "agent");
+          expect(data.getTaskDeviceGrant(task.id)?.activeRunId).toBeNull();
+        } else {
+          await expect(running).rejects.toBeInstanceOf(Error);
+          if (mode === "malformed") {
+            await expect(running).rejects.toMatchObject({
+              adapterCode: "native_claude_worker_failed",
+            });
+            await expect(running).rejects.not.toThrow("PRIVATE_CLAUDE_PARSE_ERROR");
+          }
+          if (mode === "old_version")
+            await expect(running).rejects.toMatchObject({
+              adapterCode: "native_claude_version_unsupported",
+            });
+          if (mode === "abort") expect(abortController.signal.aborted).toBe(true);
+          expect(data.getTaskDeviceGrant(task.id)?.activeRunId).toBe(runId);
+        }
+        const journals = data.listTaskDeviceProcesses(runId);
+        expect(journals).toHaveLength(1);
+        expect(journals[0].state).toBe("stopped");
+        const workerPid = JSON.parse(journals[0].preparedJson!).pid;
+        expect(
+          JSON.parse(readFileSync(join(workspace.worktreePath, "claude-version.json"), "utf8")),
+        ).toMatchObject({ ppid: workerPid, cwd: workspace.worktreePath });
+        if (mode === "old_version") {
+          expect(existsSync(marker)).toBe(false);
+          return;
+        }
+        const launched = JSON.parse(
+          readFileSync(join(workspace.worktreePath, "claude-launch.json"), "utf8"),
+        );
+        expect(launched).toMatchObject({ ppid: workerPid, cwd: workspace.worktreePath });
+        expect(launched.argv).toContain("--setting-sources=");
+        expect(launched.argv).toContain("--strict-mcp-config");
+        expect(launched.argv).toContain("--no-session-persistence");
+        const length = readFileSync(marker).length;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(readFileSync(marker).length).toBe(length);
+      },
+      20000,
+    );
     it("runs the real app-server adapter and persists native stop before returning its result", async () => {
       const { task, workspace, input } = fixture();
       const marker = appServerFixture(workspace.worktreePath, "success");
@@ -327,16 +408,17 @@ describe.skipIf(!["win32", "darwin"].includes(process.platform))(
       expect(readFileSync(marker).length).toBe(length);
     }, 20000);
     it.each([
-      ["app-server", runTaskDeviceAppServer],
-      ["cli", runTaskDeviceCli],
-      ["sdk", runTaskDeviceSdk],
+      ["codex", "app-server", runTaskDeviceAppServer],
+      ["codex", "cli", runTaskDeviceCli],
+      ["codex", "sdk", runTaskDeviceSdk],
+      ["claude", "sdk", runTaskDeviceClaudeSdk],
     ] as const)(
-      "rejects %s scope substitutions before reserving or creating a process",
-      async (transport, run) => {
+      "rejects %s/%s scope substitutions before reserving or creating a process",
+      async (runtimeId, transport, run) => {
         const { task, workspace, input } = fixture();
         await expect(
           run(task.id, {
-            runtimeId: "codex",
+            runtimeId,
             transport,
             prompt: "fixture",
             cwd: workspace.worktreePath,
@@ -345,7 +427,7 @@ describe.skipIf(!["win32", "darwin"].includes(process.platform))(
         ).rejects.toMatchObject({ code: "run_scope_required" });
         await data.withTaskDeviceExecution(input, async () => {
           const base: RuntimeRunInput = {
-            runtimeId: "codex",
+            runtimeId,
             transport,
             prompt: "fixture",
             cwd: workspace.worktreePath,
@@ -416,14 +498,16 @@ describe.skipIf(!["win32", "darwin"].includes(process.platform))(
       const saved = data.getTaskDeviceProcess(id);
       expect(await recoverTaskDeviceProcess(id)).toEqual(saved);
     }, 20000);
-    it.each(["raw", "sdk"] as const)(
+    it.each(["raw", "sdk", "claude"] as const)(
       "recovers %s from a new process after coordinator death without clearing its active grant/run",
       async (mode) => {
         const { task, workspace, input } = fixture(),
           marker =
-            mode === "sdk"
-              ? cliFixture(workspace.worktreePath, "timeout").marker
-              : join(workspace.worktreePath, "writer.txt");
+            mode === "claude"
+              ? claudeSdkFixture(workspace.worktreePath, "timeout").marker
+              : mode === "sdk"
+                ? cliFixture(workspace.worktreePath, "timeout").marker
+                : join(workspace.worktreePath, "writer.txt");
         const host = spawn(
           process.execPath,
           [

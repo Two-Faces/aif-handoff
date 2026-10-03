@@ -1,4 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
 import { RuntimeLimitStatus } from "../../types.js";
 import type {
   RuntimeEvent,
@@ -187,6 +188,7 @@ export async function runClaudeQueryAttempt(
   execution: ClaudeRuntimeExecutionOptions,
   logger?: ClaudeOptionsLogger,
 ): Promise<ClaudeQueryAttemptResult> {
+  assertNativeProcessMode(input, false);
   const { identity: providerIdentity, authToken } = resolveClaudeProviderAuth({
     providerId: input.providerId ?? "anthropic",
     transport: input.transport ?? "sdk",

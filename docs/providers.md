@@ -72,7 +72,30 @@ confirmation that the requested SDK smoke commands passed (109 runtime + 15 API
 expected); no detailed output or timings were supplied in that report. See the
 [Codex SDK documentation](https://learn.chatgpt.com/docs/codex-sdk) for the public API.
 
-All four built-in adapters check this scope. Claude, Codex API,
+The next internal integration adds **Claude Agent SDK** via
+`runTaskDeviceClaudeSdk`. The real pinned SDK 0.3.220 runs in a fixed native Node
+worker, with CLI and descendants in the same native unit. Host callbacks for
+streaming text, tool use and subagent start retain task fencing; a matching
+successful result, worker completion, zero exit and journaled native stop are
+required. Errors from the SDK are opaque, and start/run failures never retry.
+Adapter construction now defers legacy PATH discovery. The native path reads
+the bundled manifest or probes an explicit `claudeCliPath` inside the worker;
+it does not honor the legacy version-check bypass. Literal native binaries or
+absolute `.js`/`.mjs` scripts are supported; the SDK itself selects their launch
+form and scripts run with the journaled worker's Node executable.
+
+This internal path disables settings sources, external MCP configuration and
+session persistence. Resume/fork, custom hooks/environment/schema/agent definitions,
+permission bypass and unsupported profile options reject before launch.
+Ordinary Claude transport capabilities, provider profiles and usage `FULL` remain
+unchanged. Native usage preserves input/output tokens and cost; the limited
+projection does not yet include provider quota refresh or every SDK event.
+Bounded worker I/O does not bound the SDK's private buffers. Targeted Mac
+acceptance for this increment is pending; commands are in `local-device-sync.md`.
+The public query/options contract is documented in the
+[Claude Agent SDK reference](https://platform.claude.com/docs/en/agent-sdk/typescript).
+
+All four built-in adapters check this scope. Claude CLI/API, Codex API,
 OpenRouter and OpenCode reject it before provider activity. Their cancellation
 callbacks, SDK results and remote service responses are not native stop receipts.
 Configured external MCP/services, normal runner admission, bound resume/fork and
@@ -145,7 +168,7 @@ The API exposes effective selection endpoints:
 Capabilities are **transport-aware**: the same adapter may expose different capabilities depending on the selected transport. For example, Codex supports resume on SDK/CLI/App Server, session fork only on App Server, and session discovery on SDK/App Server. Use `resolveAdapterCapabilities(adapter, transport)` to get the effective set.
 
 The table describes regular runtime features. P14's internal native process path
-supports Codex App Server, default JSONL CLI and the SDK worker, with new sessions; it does not advertise
+supports Codex App Server/default JSONL CLI and fixed Codex/Claude SDK workers, with new sessions; it does not advertise
 whole-adapter containment or change the regular transports' capabilities.
 
 ### Model-specific effort discovery

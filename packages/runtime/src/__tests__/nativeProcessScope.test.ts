@@ -277,7 +277,8 @@ describe("host-owned native runtime scope", () => {
     expect(listModels).not.toHaveBeenCalled();
   });
   it.each([
-    ["claude", "sdk", createClaudeRuntimeAdapter],
+    ["claude", "cli", createClaudeRuntimeAdapter],
+    ["claude", "api", createClaudeRuntimeAdapter],
     ["codex", "api", createCodexRuntimeAdapter],
     ["openrouter", "api", createOpenRouterRuntimeAdapter],
     ["opencode", "api", createOpenCodeRuntimeAdapter],

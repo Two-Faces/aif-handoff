@@ -188,7 +188,23 @@ source/test hashes совпали до/после gate. 03.10.2026 пользо�
 изменений не нужен. Это не полный Mac gate или live provider run.
 Public/normal/personal execution ещё не включать.
 
-Далее P14 — остальные transports (Claude, Codex API, OpenRouter/OpenCode),
+Следующий increment Claude SDK: runTaskDeviceClaudeSdk запускает реальный Agent
+SDK 0.3.220 и CLI в фиксированном Node worker внутри native unit. Host callbacks
+fenced; success требует matching init/result, worker completion, zero exit и
+durable stop. Factory PATH discovery теперь lazy; explicit version probe внутри
+worker, bundled version читается из manifest. Native .js/.mjs overrides допустимы,
+.cjs не поддерживается pinned SDK. Settings sources/external MCP/persistence
+отключены; hooks/env/schema/agent, bypass и resume/fork запрещены. Новые ordinary
+runner/routes не включены. Windows targeted 54 runtime + 23 API = 77 passed,
+actual SDK topology/hooks, old version/nonzero exit, abort и crash recovery.
+Полный Windows ai:validate прошёл: exit 0, 3607 passed / 10 skipped, coverage всех
+пакетов ≥70% (runtime минимум 75.59%, API 70.55%), build 7/7, Chromium 8/8,
+k6 3/3, protocol CLI 0.145.0. Лог .codex/m2/logs/native-claude-final-validate.log;
+все 15 package source/test hashes совпали. Native Mac smoke этого increment
+ожидает пользователя, команды в docs/local-device-sync.md. Обычные capabilities
+не менялись; personal AI и полный P14/M2 пока не включать.
+
+Далее P14 — остальные transports (Claude CLI/API, Codex API, OpenRouter/OpenCode),
 normal runner admission/external-service coverage, runtime-backed checkpoint/release и
 физическая передача Win→Mac→Win. Native stop receipt сам по себе не освобождает
 grant/run и не подтверждает остановку внешних/делегированных services.

@@ -742,6 +742,72 @@ handoff acceptance. Mac launch/recovery supervision is implemented below but
 awaits its own native tests, followed by adapter transport integration.
 P14/M2 remain open and personal AI remains disabled.
 
+## Claude SDK native integration (targeted Mac smoke pending)
+
+`runTaskDeviceClaudeSdk` is the next internal P14 bridge. It requires the current
+task run, exact registered checkout, matching task/project attribution and the
+existing personal-mode policy. The fixed supervised Node worker imports the real
+pinned Claude Agent SDK 0.3.220, whose CLI and descendants inherit the native unit.
+The host resolves the SDK module and sends prompt/credentials through stdin
+(1 MiB maximum). Node injection options are removed; secrets are absent from
+worker argv and receipts. No global spawn replacement or paid model is involved.
+
+The adapter factory now defers legacy executable discovery, which can spawn
+`npm`/`which`. Native default selection reads the bundled manifest; an explicit
+`claudeCliPath` is canonicalized locally and its version is checked inside the
+worker, after both launch barriers. The native minimum remains 2.1.191 and unknown
+or older versions fail closed, including when legacy test/bypass flags are set.
+The pinned SDK recognizes `.js`/`.mjs` script overrides (launched with the worker's
+Node), not `.cjs`; native Windows binaries still require a literal `.exe`.
+
+Validated projections deliver text/tool events, post-tool and subagent callbacks
+to the fenced host. Success requires the same session in init/result, a successful
+result, worker completion, zero exit, drained output and journaled native proof.
+The shared collector bounds combined output at 16 MiB and stops on abort, timeout,
+callback error or protocol failure, without retry. Recovery after coordinator
+death records native stop while retaining the active grant/run. SDK exceptions
+are opaque; malformed provider output cannot become the exception message.
+
+Only fresh SDK runs are admitted in this increment. Settings sources, external
+MCP config and session persistence are disabled. Resume/fork, hooks/environment,
+output schema, agent definitions, permission bypass and unrecognized profile
+options are denied. This is deliberately separate from regular Claude profiles;
+their capabilities and usage FULL are unchanged. The native projection supplies
+input/output usage and cost but does not yet include provider quota refresh or
+every SDK event. Private SDK buffers and external delegated services are not
+claimed as covered. Claude CLI/API, Codex API, OpenRouter and OpenCode still
+reject native scope, and normal/personal runner admission remains closed.
+
+Targeted Windows checks passed: **54 runtime + 23 API = 77 tests**. The API
+fixture uses the actual SDK initialization and hook protocol, checks the version
+probe and CLI parent PID against the saved worker PID, and leaves a detached
+writer to prove cessation. Cases include success, abort, timeout, malformed CLI
+output, old version, nonzero exit, scope substitutions and coordinator death.
+The full Windows `ai:validate` passed on 2026-10-03 (exit 0): **3607 passed / 10
+skipped**, coverage metrics for every package at least 70% (runtime minimum
+75.59%, API 70.55%), build 7/7, Chromium 8/8, k6 3/3 and protocol CLI 0.145.0.
+The log is `.codex/m2/logs/native-claude-final-validate.log`. All 15 changed/new
+package source/test hashes matched before and after the gate. Root/runtime/API
+checklists, all four adapters and unchanged registration/usage contracts were
+reviewed. No dependencies, packages, migrations, public routes/WS/MCP or UI were
+added; conditional Docker/Pencil/route checks do not apply. The gate used private
+SQLite and ports 3309/5480, preserving the existing M1 installations and projects.
+
+After publishing the branch and pulling it on Mac, run these commands separately:
+
+```bash
+cd /Users/aries/Projects/aif-handoff
+git pull --ff-only
+npm run build
+npm test --workspace @aif/runtime -- claudeNative.test.ts claudeAdapterTransport.test.ts nativeProcessScope.test.ts --bail=1
+npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts --bail=1
+```
+
+Expected **54 runtime + 23 API = 77 passed**. The API test uses the installed
+Agent SDK with an offline CLI fixture; no Claude login or API payment is needed.
+The existing clang/macOS SDK remains necessary for native supervision. Passing
+this subset does not constitute full P14/M2 or live-provider acceptance.
+
 ## Codex SDK native integration (targeted Mac smoke accepted by user confirmation)
 
 `runTaskDeviceSdk` uses the same task/run/root/personal gate as the other internal

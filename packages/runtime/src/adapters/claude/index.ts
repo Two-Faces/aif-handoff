@@ -512,17 +512,32 @@ export function createClaudeRuntimeAdapter(
   const runtimeId = options.runtimeId ?? "claude";
   const providerId = options.providerId ?? "anthropic";
   const logger = options.logger ?? createFallbackLogger();
-  const executablePath = options.executablePath ?? findClaudePath();
+  // Discovery can spawn npm/which. Defer it until a legacy operation needs it;
+  // native SDK runs use the bundled artifact or an explicit literal override.
+  let discovered = false;
+  let executablePath = options.executablePath;
+  function getExecutablePath() {
+    if (!discovered) {
+      executablePath ??= findClaudePath();
+      discovered = true;
+    }
+    return executablePath;
+  }
 
   // On Windows, PATH discovery often returns npm/nvm wrapper scripts like
   // `claude`, `claude.cmd`, or `claude.ps1`. The Agent SDK requires the real
   // native `claude.exe`, while CLI transport can keep using the shell wrapper.
-  const sdkExecutablePath = normalizeSdkExecutablePath(executablePath, logger, runtimeId);
+  const getSdkExecutablePath = () =>
+    normalizeSdkExecutablePath(getExecutablePath(), logger, runtimeId);
 
   function runByTransport(input: RuntimeRunInput): Promise<RuntimeRunResult> {
+    if (input.execution?.nativeProcessScope)
+      return runClaudeRuntime(input, logger, {
+        pathToClaudeCodeExecutable: options.executablePath,
+      });
     const transport = input.transport ?? RuntimeTransport.SDK;
     if (transport === RuntimeTransport.CLI) {
-      return runClaudeCli(input, logger, { pathToClaudeCodeExecutable: executablePath });
+      return runClaudeCli(input, logger, { pathToClaudeCodeExecutable: getExecutablePath() });
     }
     // SDK and API both go through the Agent SDK runtime. The version guard
     // (inside runClaudeRuntime) inspects the exact binary `query()` launches:
@@ -530,7 +545,7 @@ export function createClaudeRuntimeAdapter(
     // bundled binary read from its manifest. No PATH fallback — probing a
     // different `claude` than the SDK starts would give a false signal.
     return runClaudeRuntime(input, logger, {
-      pathToClaudeCodeExecutable: sdkExecutablePath,
+      pathToClaudeCodeExecutable: getSdkExecutablePath(),
     });
   }
 
@@ -618,7 +633,10 @@ export function createClaudeRuntimeAdapter(
       }
     },
     async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {
-      assertNativeProcessMode(input, false);
+      assertNativeProcessMode(
+        input,
+        (input.transport ?? RuntimeTransport.SDK) === RuntimeTransport.SDK,
+      );
       return runByTransport(input);
     },
     async resume(input: RuntimeRunInput & { sessionId: string }): Promise<RuntimeRunResult> {
@@ -645,11 +663,11 @@ export function createClaudeRuntimeAdapter(
     },
     async listModels(input: RuntimeModelListInput): Promise<RuntimeModel[]> {
       return listClaudeModels(input, logger, {
-        pathToClaudeCodeExecutable: sdkExecutablePath,
+        pathToClaudeCodeExecutable: getSdkExecutablePath(),
       });
     },
     async diagnoseError(input: RuntimeDiagnoseErrorInput): Promise<string> {
-      return diagnoseClaudeError(input, executablePath);
+      return diagnoseClaudeError(input, getExecutablePath());
     },
     sanitizeInput(text: string): string {
       return text
