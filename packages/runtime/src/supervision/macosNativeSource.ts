@@ -331,7 +331,11 @@ static void host(NSString *root) {
                         started = true; emit(@{@"kind": @"started"});
                     } else if ([f[@"kind"] isEqual:@"stop"]) {
                         stopping = true; reason = @"cancelled"; break;
-                    } else if ([f[@"kind"] isEqual:@"input"] && started && !inputEnded && text(f[@"bytes"])) {
+                    } else if ([f[@"kind"] isEqual:@"input"] && started && !inputEnded) {
+                        /* stdin is binary data, not an argv/env string. A 64 KiB
+                         * chunk needs 87384 Base64 characters, above text()'s cap. */
+                        if (![f[@"bytes"] isKindOfClass:NSString.class] ||
+                            [(NSString *)f[@"bytes"] length] > 4 * ((65536 + 2) / 3)) fail(@"input_size", E2BIG);
                         NSData *bytes = [[NSData alloc] initWithBase64EncodedString:f[@"bytes"] options:0];
                         if (!bytes || bytes.length > 65536 || pendingInput.length + bytes.length > 4194304) fail(@"input_size", E2BIG);
                         [pendingInput appendData:bytes];

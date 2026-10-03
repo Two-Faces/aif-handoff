@@ -34,8 +34,19 @@ const validUint64 = (value: string) =>
   /^(0|[1-9][0-9]{0,19})$/.test(value) && BigInt(value) <= 0xffffffffffffffffn;
 
 export function macFailure(code: string, cause?: unknown) {
+  const nativeDetail =
+    cause &&
+    typeof cause === "object" &&
+    "nativeStage" in cause &&
+    typeof cause.nativeStage === "string" &&
+    /^[a-z_]{1,64}$/.test(cause.nativeStage) &&
+    "nativeCode" in cause &&
+    typeof cause.nativeCode === "number" &&
+    Number.isSafeInteger(cause.nativeCode)
+      ? `; stage=${cause.nativeStage}; nativeCode=${cause.nativeCode}`
+      : "";
   return new RuntimeExecutionError(
-    "Native macOS process supervision could not be verified.",
+    `Native macOS process supervision could not be verified. [${code}${nativeDetail}]`,
     cause,
     "transport",
     { adapterCode: code },

@@ -436,4 +436,15 @@ describe("macOS supervisor host protocol (portable simulated native peer)", () =
     });
     expect(f.system.dispose).not.toHaveBeenCalled();
   });
+  it("reports the native failure stage in both the visible error and structured cause", async () => {
+    const f = fixture(),
+      child = await launchMacSupervisedProcess(f.input);
+    f.context.client!.write('{"kind":"error","stage":"input_size","nativeCode":7}\n');
+    await expect(child.completed).rejects.toMatchObject({
+      message: expect.stringContaining("stage=input_size; nativeCode=7"),
+      adapterCode: "supervisor_native_failed",
+      cause: { nativeStage: "input_size", nativeCode: 7 },
+    });
+    expect(f.system.dispose).not.toHaveBeenCalled();
+  });
 });

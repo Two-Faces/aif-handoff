@@ -835,6 +835,24 @@ never resume reading. The OS-boundary mock now reproduces Node's pause side effe
 and its new regression failed before this fix and reads the next frame afterward.
 The corrected native backend still needs the Mac rerun; the earlier timeout is not
 a passing native launch/stop scenario.
+
+On the next Mac run (2026-10-03, 19:10), the first native case passed: suspended
+barriers, literal arguments, separate output and verified completion. The second
+case returned a native error; `--bail=1` left six cases unexecuted (45 passed,
+1 failed across the 52-test runtime scope). Source inspection found that stdin's
+Base64 payload incorrectly used the 32768-character argv/environment text guard.
+A permitted 65536-byte chunk encodes to 87384 characters and was rejected before
+decoding. The binary input path now checks that encoded bound separately while
+retaining the 65536-byte decoded limit and 4 MiB queue limit. A new native round-trip
+case hashes binary chunks of 24573, 24574 and 65536 bytes through EOF and rejects
+65537 bytes at the caller boundary. Native error messages now include adapter code
+and, when valid, stage/nativeCode, while preserving structured error fields. The
+reported failure did not include its native stage; the bound violation is verified
+from source and its correction still needs native confirmation.
+The user separately confirmed both native API bridge tests passed on this Mac run.
+This accepts the targeted journal/stop and separate-process crash-recovery cases
+for the socket/context revision; it does not accept the incomplete runtime suite
+or the subsequent stdin fix.
 The passing capability probe above does not certify this helper or its lifecycle.
 After updating the M2 branch and building, run these commands in the Mac checkout:
 
@@ -846,13 +864,13 @@ npm test --workspace @aif/runtime -- macosSupervisor.test.ts macosSupervisorProt
 npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts
 ```
 
-Expected scope: 13 shared contract tests, 7 data journal tests, 24 simulated
-protocol tests, 20 simulated OS-boundary tests, **8 real Mac process tests** and
-**2 real native SQLite bridge tests** (74 total). The native cases exercise
+Expected scope: 13 shared contract tests, 7 data journal tests, 25 simulated
+protocol tests, 20 simulated OS-boundary tests, **9 real Mac process tests** and
+**2 real native SQLite bridge tests** (76 total). The native cases exercise
 suspended preparation, literal argv/output, forged output, full stdin, detached
 grandchildren, an unrelated live process, failed persistence, helper death and
 caller death before/after resume. The bridge records stop without clearing a
-crashed run's authority. Windows skips the eight Mac-only cases; this is not
+crashed run's authority. Windows skips the nine Mac-only cases; this is not
 native Mac acceptance. P14/M2 remain open and personal AI stays disabled.
 
 Final Windows verification on 2026-10-03: `ai:validate` exited 0 with **3488
@@ -893,6 +911,15 @@ acceptance of the final source. Root/runtime checklists were reviewed and extend
 no adapter capability, dependency, migration, UI or public route changed. Native
 Mac runtime/API acceptance remains open; use `--bail=1` on the rerun to stop at the
 first failed case instead of repeating the same timeout across the suite.
+
+The stdin-bound/error-diagnostic fix passed final Windows `ai:validate` on
+2026-10-03 (exit 0): **3495 passed / 10 skipped** (nine Mac-only native cases and
+one existing skip), all package coverage metrics at least 70% (runtime minimum
+74.82%), lint/tests/coverage 10/10, build 7/7, Chromium 8/8, k6 3/3 and protocol
+CLI 0.145.0. Log: `.codex/m2/logs/macos-stdin-limit-final-validate.log`. The four
+changed runtime source/test files were unchanged during the gate. Root/runtime
+checklists reviewed; no adapter capability, dependency, migration, UI or route
+changed. The current native Mac rerun is **54 runtime + 2 API**, with `--bail=1`.
 
 ## Implementation references
 

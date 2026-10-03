@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   launchSupervisedProcess,
   recoverSupervisedProcess,
@@ -120,6 +121,31 @@ describe.skipIf(process.platform !== "darwin")(
       const blocked = await launch(root, "setInterval(()=>{},100)");
       blocked.write(Buffer.alloc(65536, 65));
       expect(await blocked.stop()).toMatchObject({ reason: "cancelled", activeProcesses: 0 });
+    });
+    it("delivers binary stdin across the former text boundary and the 64 KiB limit before EOF", async () => {
+      const root = fixture(),
+        output: Buffer[] = [];
+      const child = await launch(
+        root,
+        "const h=require('crypto').createHash('sha256');process.stdin.on('data',x=>h.update(x));process.stdin.on('end',()=>process.stdout.write(h.digest('hex')))",
+        {
+          onOutput: (stream, bytes) => {
+            if (stream === "stdout") output.push(bytes);
+          },
+        },
+      );
+      expect(() => child.write(Buffer.alloc(65537))).toThrow(
+        expect.objectContaining({ adapterCode: "supervisor_input_invalid" }),
+      );
+      const expected = createHash("sha256");
+      for (const size of [24573, 24574, 65536]) {
+        const bytes = Buffer.from(Array.from({ length: size }, (_, index) => index % 256));
+        expected.update(bytes);
+        child.write(bytes);
+      }
+      child.endInput();
+      expect(await child.completed).toMatchObject({ exitCode: 0, activeProcesses: 0 });
+      expect(Buffer.concat(output).toString()).toBe(expected.digest("hex"));
     });
     it("accounts for and kills a detached grandchild after the root and intermediate process exit", async () => {
       const root = fixture(),

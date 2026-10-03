@@ -101,8 +101,8 @@ macosSystem.ts / macosNativeSource.ts, но его native приёмка ещё 
 durable host/child callbacks и независимая проверка пустой coalition после exit.
 Mac receipts хранят UID/boot UUID/unique IDs в существующем JSON journal v40;
 старые migrations не менялись. Recovery сохраняет stop, не снимая run/grant.
-Нужны реальные Mac tests: shared 13 + data 7 + runtime (24 protocol + 20 OS-boundary
-+ 8 native) + API 2 native = 74. Команды и ограничения в docs/local-device-sync.md.
+Нужны реальные Mac tests: shared 13 + data 7 + runtime (25 protocol + 20 OS-boundary
++ 9 native) + API 2 native = 76. Команды и ограничения в docs/local-device-sync.md.
 До передачи launch controller проверяет kernel audit token самого Unix socket
 через унаследованный descriptor: hello обязан принадлежать этому процессу.
 До их принятия не считать Mac supervisor подтверждённым; далее интеграция
@@ -149,6 +149,22 @@ build 7/7, Chromium 8/8, k6 3/3, protocol CLI 0.145.0. Лог:
 .codex/m2/logs/macos-socket-lifecycle-final-validate.log. Более ранний
 macos-async-context-validate.log не подтверждает итоговый код, так как socket fix
 был завершён позднее. Следующий шаг — Mac runtime/API 52 + 2 с --bail=1.
+Mac повтор в 19:10: 44 simulated tests + первый native case прошли; второй native
+case падает, оставшиеся шесть не выполнялись из-за bail (45 passed / 1 failed из 52).
+Найден дефект stdin: 64 KiB превращаются в 87384 Base64 symbols, но helper применял
+32 KiB argv/env text guard. Теперь binary path отдельно ограничивает encoded length,
+сохраняя decoded 64 KiB и queue 4 MiB. Добавлен native binary round-trip/EOF test
+на 24573/24574/65536 bytes и portable error stage test. Ошибки теперь показывают
+adapterCode и валидные nativeStage/nativeCode прямо в message, сохраняя cause.
+Текущий Mac повтор — runtime 54 + API 2; native acceptance остаётся открытой.
+Пользователь отдельно подтвердил оба native API bridge tests: 2 passed на повторе
+socket/context revision. Journal/stop и separate-process crash recovery этого
+целевого набора приняты; runtime suite и последующий stdin fix ещё не приняты.
+Финальный Windows gate stdin/error-diagnostic fix: `ai:validate` exit 0,
+3495 passed / 10 skipped (9 native Mac-only + 1 прежний), coverage всех пакетов
+≥70% (runtime минимум 74.82%), build 7/7, Chromium 8/8, k6 3/3,
+protocol CLI 0.145.0. Лог .codex/m2/logs/macos-stdin-limit-final-validate.log.
+Следующий шаг — native Mac runtime/API **54 + 2** с --bail=1.
 Windows gate исходного probe принят: `ai:validate` exit 0, 3432 passed / 1 existing
 skip, coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3.
 После исправления baseline Windows `ai:validate` также exit 0: 3438 passed /
