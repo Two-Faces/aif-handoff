@@ -88,13 +88,20 @@ kernel stale-token rejection и cleanup. Это не production backend и не 
 Первый JSON report Mac (arm64, kernel 27.0.0) подтвердил C compilation, оба symbols,
 отдельную coalition и cleanup. Probe остановился до forks: начальные накопительные
 счётчики 2/1/1 вместо ошибочно ожидавшихся 1/0/1. Диагностика исправлена на стабильный
-root-only baseline и точные последующие deltas; нужен повторный полный JSON report.
-Mac execution остаётся unsupported; stop/orphan/stale-token gate ещё не принят.
+root-only baseline и точные последующие deltas.
+Повторный полный JSON report пользователя принят 03.10.2026: probe_passed,
+blockers=[], cleanupVerified=true, grantsExecution=false. Baseline 2/1/1 совпал
+с initialConfirmed; running 4/2/2, orphan 4/3/1. Child после setsid/double-fork
+остался в той же coalition с ppid=1; stale audit token отвергнут ядром (ESRCH=3),
+после остановки и снятия service coalition отсутствует (ESRCH=3).
+Это native diagnostic fixture, не готовый production supervisor или stop receipt.
+Следующий блок — Mac launch/recovery supervisor с durable receipts, затем
+интеграция adapter transports. Mac execution пока остаётся unsupported.
 Windows gate исходного probe принят: `ai:validate` exit 0, 3432 passed / 1 existing
 skip, coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3.
 После исправления baseline Windows `ai:validate` также exit 0: 3438 passed /
 1 existing skip, включая 28 probe tests, coverage ≥70%, build 7/7, Chromium 8/8,
-k6 3/3. Повтор native probe на Mac ещё нужен.
+k6 3/3. Успешный native probe получен от пользователя, удалённого запуска не было.
 Детали и текущие проверки — в плане и docs/local-device-sync.md.
 P15: onboarding, local session existence и continuation UI.
 M3/M4 не отмечай готовыми после M2.

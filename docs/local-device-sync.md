@@ -648,7 +648,7 @@ These checks exercise portable contracts, migration and fencing; they do not
 certify full Mac `ai:validate`, native Mac process stop or physical handoff.
 The Windows-specific supervisor/bridge fixtures run only on Windows.
 
-## macOS supervision capability probe (native stop result pending)
+## macOS supervision capability probe (native fixture accepted, backend pending)
 
 Before implementing the Mac backend, test the actual installed kernel interfaces
 and launchd behavior with the fixed diagnostic fixture:
@@ -690,8 +690,8 @@ nonce service identity and the compiled binary hash before using that helper.
 An explicit cleanup refuses to race a still-running probe driver. A changed
 process incarnation, image or coalition is treated as unverified, not as exit.
 
-The probe has portable protocol/negative tests, but actual Mac stop behavior still
-requires the user's native run. A passed report only establishes
+The probe has portable protocol/negative tests and a passing user-supplied native
+fixture report recorded below. A passed report only establishes
 a candidate mechanism for the next implementation: Mac launch/recovery integration,
 durable stop receipts, all adapter transports and P14/M2 acceptance remain open.
 `launchSupervisedProcess` still rejects macOS; personal AI stays disabled.
@@ -712,12 +712,33 @@ the control, and verified cleanup. It stopped before forks with
 the reported started/exited/active values were `2/1/1`. The exact source of the
 completed startup task was not observed. The baseline fix above handles cumulative
 accounting; it does not accept this partial report as orphan, stale-token or stop
-proof. A repeat native report is pending.
+proof. The subsequent successful repeat is recorded below.
 
 The baseline correction passed Windows `ai:validate`: 3438 tests passed with one
 existing skip (28 probe tests), all package coverage minima above 70%, build 7/7,
 Chromium 8/8 and k6 3/3. The four changed runtime files were unchanged throughout
 validation. Log: `.codex/m2/logs/macos-probe-baseline-validate.log`.
+
+The user's repeat native report on 2026-10-03 (arm64, Darwin 27.0.0), following
+the baseline fix, returned `probe_passed`, no blockers, `cleanupVerified: true`
+and `grantsExecution: false`. It reported:
+
+- Separate root/control coalitions; unchanged initial and confirmation counters
+  of `2/1/1` (started/exited/active).
+- `4/2/2` after the two forks; the detached child had `ppid=1`, a different process
+  group and the same resource coalition as the root.
+- Kernel rejection of the stale audit token (`audit_signal`, `errno=3`) and
+  successful signaling of the actual root.
+- `4/3/1` with the orphan still accounted for after the root stopped.
+- The known coalition absent (`errno=3`) after child stop and service removal,
+  followed by verified cleanup.
+
+This accepts the native diagnostic fixture on that reported environment. The
+report was supplied by the user; Codex did not run it remotely. It is not a full
+Mac `ai:validate`, a production durable stop receipt or physical Win/Mac task
+handoff acceptance. The next implementation is Mac launch/recovery supervision
+with persisted identities and stop receipts, followed by adapter transport
+integration. P14/M2 remain open and personal AI remains disabled.
 
 ## Implementation references
 

@@ -169,14 +169,16 @@ Claude/Codex/OpenRouter/OpenCode transport integration and macOS supervision rem
 open. Unsupported platforms must reject; never substitute PID/group signals or
 elapsed time for native stop proof. Existing personal AI guards remain enabled.
 
-The next macOS step is the standalone runtime `probe:macos-supervision` command
+The standalone runtime `probe:macos-supervision` command
 (`scripts/macos-supervision-probe.mjs` plus its fixed native C fixture). It checks
 an isolated launchd resource coalition, double-fork/setsid orphan accounting and
 audit-token signaling. It never reads the task DB or enables Mac execution.
-The first native Mac report compiled the fixture and found both APIs, but stopped
-at cumulative startup counters (2 started / 1 exited / 1 active). The probe now
-confirms a stable root-only baseline and requires exact subsequent deltas.
-Native stop results are pending; Windows protocol tests cannot accept this gate.
+The user's native arm64/Darwin 27.0.0 report passed on 2026-10-03: stable root-only
+baseline 2/1/1, running 4/2/2, orphan 4/3/1, stale-token ESRCH, coalition reaped
+after service removal and verified cleanup. Keep baseline-relative exact deltas.
+This accepts the diagnostic fixture only. The next macOS work is production
+launch/recovery supervision and durable stop receipts; adapter integration and
+P14/M2 acceptance remain open. Personal AI stays disabled.
 
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |
