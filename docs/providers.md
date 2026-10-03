@@ -122,8 +122,35 @@ custom argv/config. Targeted Mac acceptance for CLI/API was recorded on
 tests, with 60 seconds reported for the API suite. Detailed logs/counts were not
 supplied; the acceptance scope is recorded in `local-device-sync.md`.
 
-All four built-in adapters check this scope. Codex API,
-OpenRouter and OpenCode reject it before provider activity. Their cancellation
+The next internal increment adds **Codex API and OpenRouter** text-only Chat
+Completions clients through `runTaskDeviceHttp`. Existing provider request/auth
+builders are reused, while a fixed native Node worker owns the actual HTTP client.
+Prompt, headers and proxy credentials travel over bounded stdin, never worker
+argv. It makes one request without retries or redirects. JSON/SSE responses must
+have a consistent ID, successful finish, usage and worker completion before
+native stop and journal acknowledgement permit the result. Tool/refusal/error,
+truncated and malformed responses reject. Explicit `stream:false` is honored
+even when Codex has an event callback. Rate-limit headers retain structured
+status and metadata; raw upstream error bodies are not echoed.
+
+The worker bounds response bytes before parsing, including SSE comments, and
+uses the configured proxy/NO_PROXY selection. Streaming requests include usage:
+[OpenAI's accounting chunk](https://developers.openai.com/api/reference/resources/chat)
+has empty choices, while
+[OpenRouter's accounting chunk](https://openrouter.ai/docs/api_reference/streaming)
+may repeat the finish marker with no content. The parser accepts these distinct
+accounting forms and still rejects duplicated usage, late content and missing
+`[DONE]`. Local client stop does not guarantee that remote inference or billing
+has stopped, and grants no remote tool/server authority.
+
+**OpenCode remains denied** in native scopes: its separate API server owns the
+executor, so supervising only the HTTP client would prove the wrong thing.
+Run/resume and direct session creation fail with `native_external_executor_unowned`
+before contacting that server. A separately designed owned server launch and
+recovery path is still required. The new HTTP increment's Mac smoke is pending;
+see `local-device-sync.md` for the requested 188 runtime + 67 API tests.
+
+All four built-in adapters check this scope. OpenCode rejects it before provider activity. Its cancellation
 callbacks, SDK results and remote service responses are not native stop receipts.
 Configured external MCP/services, normal runner admission, bound resume/fork and
 runtime-backed handoff remain open. No public capability or profile flag grants
@@ -196,7 +223,8 @@ Capabilities are **transport-aware**: the same adapter may expose different capa
 
 The table describes regular runtime features. P14's internal native process path
 supports Codex App Server/default JSONL CLI, the Codex SDK worker and restricted
-Claude SDK/API/CLI worker paths, with new sessions; it does not advertise
+Claude SDK/API/CLI worker paths, plus text-only Codex API/OpenRouter HTTP clients,
+with new sessions; it does not advertise
 whole-adapter containment or change the regular transports' capabilities.
 
 ### Model-specific effort discovery

@@ -265,6 +265,20 @@ No detailed console log or individual counts were supplied. See
 OpenRouter and OpenCode remain closed, as do normal/personal runner admission,
 runtime-backed release and full P14/M2 acceptance.
 
+P14's HTTP increment adds `adapters/chatCompletion/` and internal
+`runTaskDeviceHttp` for text-only Codex API/OpenRouter. Existing request builders
+feed a fixed native HTTP worker with bounded input/response, proxy support and
+no retries/redirects. Strict JSON/SSE completion, usage and durable native stop
+are mandatory; callbacks remain fenced. OpenAI empty-choice usage and OpenRouter
+repeated-finish accounting frames have separate validation. Local HTTP client
+stop never proves remote inference/billing or another server stopped. OpenCode
+remains denied by `opencode/nativeAdmission.ts`, including direct session creation,
+until an owned server launch/recovery path is implemented. The user requires
+OpenCode in M2 for local LLM tasks on Mac; do not defer it beyond M2. Mac HTTP smoke is
+pending (188 runtime + 67 API). Windows ai:validate passed with 3730 tests,
+10 skips, coverage ≥70%, build 7/7, Chromium 8/8 and k6 3/3; normal/personal
+admission and full P14/M2 remain open. See `docs/local-device-sync.md` for current evidence and commands.
+
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |
 | `packages/api/src/index.ts`             | API server entry (Hono, port 3009)    |

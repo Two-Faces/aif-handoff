@@ -742,6 +742,86 @@ handoff acceptance. Mac launch/recovery supervision is implemented below but
 awaits its own native tests, followed by adapter transport integration.
 P14/M2 remain open and personal AI remains disabled.
 
+## Text-only HTTP native integration (targeted Mac smoke pending)
+
+Internal `runTaskDeviceHttp` admits Codex API and OpenRouter Chat Completions
+clients through the same task/run/root/personal gates and native process journal.
+Their existing URL/auth/header/message/schema builders are preserved. A fixed
+Node worker imports the host-resolved installed `undici` and owns the one HTTP
+request. No tool runner, repository API, remote session reuse or external module
+is admitted. Explicit `stream:false` remains non-streaming with callbacks in the
+Codex adapter. Ordinary adapter capabilities and usage declarations are unchanged.
+
+The host supplies request and selected proxy credentials through stdin, bounded
+at 1 MiB. Worker argv/receipts contain no prompt or auth data. HTTP and proxy I/O
+stay in the native unit; response bytes (including discarded SSE comments) are
+bounded at 16 MiB before parsing. The worker makes no retry and refuses redirects.
+Headers count as first activity for the shared start watchdog; the caller's run
+timeout covers a body that stalls afterwards. No implicit run timeout is added.
+
+JSON and SSE must yield one consistent response ID, a successful finish, valid
+usage, worker completion and native stop/journal acknowledgement. Streaming also
+requires `[DONE]`. OpenAI usage-only chunks have empty choices; OpenRouter's final
+accounting chunk may repeat `finish_reason: stop` with no content. Both documented
+forms are validated without accepting repeated usage or late content. Tool calls,
+refusals, partial/error output, malformed JSON/SSE and invalid usage fail closed.
+The collector handles split UTF-8, CRLF/LF, multi-line `data:` and EOF without a
+final newline. HTTP status and rate-limit metadata remain structured; worker
+exceptions never echo raw upstream bodies or parser input.
+
+These rules follow the [OpenAI Chat Completions contract](https://developers.openai.com/api/reference/resources/chat)
+and [OpenRouter streaming contract](https://openrouter.ai/docs/api_reference/streaming).
+Local connection/process cessation does **not** prove that remote inference or
+billing stopped. It does not authorize a remote tool executor. The independent
+fixture server deliberately remains listening after the client stops.
+
+OpenCode is a separate case: its existing HTTP adapter asks another server to
+execute tasks. `opencode/nativeAdmission.ts` therefore denies native run/resume
+and direct `createOpenCodeSession` before any request, with
+`native_external_executor_unowned`. A supervised HTTP client alone cannot provide
+the missing executor proof. An owned OpenCode server launch/recovery path is the
+next separate P14 increment. The user explicitly requires it for M2 to run local
+LLMs on Mac; it cannot be deferred beyond M2 acceptance. No server was stopped
+or silently replaced here.
+Normal/personal admission and runtime-backed checkpoint/release remain closed.
+
+Targeted Windows tests passed: **188 runtime + 26 new API cases**. The expanded
+API suite has 65 cases. Actual loopback HTTP and authenticated proxy tests cover
+JSON/SSE, provider-specific usage, abort/timeouts, callback failure, 429 without
+retry, redirects, malformed/truncated/overflow bodies and coordinator death.
+All native failures retain the fenced run; recovery records stop without release.
+The full Windows gate exposed duplicate proxy-name casing in the app-server
+environment on Windows. The builder now emits one name on Windows and both on
+Unix, with four regression cases (15 process-helper tests total). Six discovery
+helper tests verify the same platform contract. The WebSocket
+auth fixture uses Node HTTP for OS-assigned ports, avoiding fetch's browser
+bad-port restriction while keeping real transport/auth assertions. The new HTTP
+fixture binds directly in 49152–65535, skipping occupied or Windows-reserved ports before
+any request; it never relies on the host's dynamic port range. Its two cases
+join the Mac subset below. The final Windows `ai:validate` exited 0 on 2026-10-03: **3730 passed /
+10 skipped**, all coverage metrics ≥70% (runtime minimum 76.08%, API minimum
+70.39%), build 7/7, Chromium 8/8, k6 3/3 and protocol CLI 0.145.0. All 65
+native/journal API cases passed both ordinary and coverage runs. Source hashes
+for all 22 changed/new package TypeScript files matched before/after validation.
+Log: `.codex/m2/logs/native-http-final-validate.log`. Root/runtime/API checklists
+and all four adapters were reviewed. No package/dependency/migration, public
+REST/WS/MCP or UI changes require Docker/Pencil/route updates in this increment.
+
+After publishing the branch and pulling it on Mac, run separately:
+
+```bash
+cd /Users/aries/Projects/aif-handoff
+git pull --ff-only
+npm run build
+npm test --workspace @aif/runtime -- nativeHttp.test.ts nativeProcessScope.test.ts codexAgentApi.test.ts codexAdapter.test.ts openrouterApi.test.ts opencodeApi.test.ts opencodeAdapter.test.ts codexModelDiscoveryProcess.test.ts src/adapters/codex/appServer/__tests__/process.test.ts --bail=1
+npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts participantWebSocket.integration.test.ts --bail=1
+```
+
+Expected **188 runtime + 67 API = 255 passed**. Only local fixtures are used;
+no API key/login, provider payment or installed OpenCode server is needed.
+The existing clang/macOS SDK prerequisite remains. This subset does not accept
+full Mac `ai:validate`, live providers, owned OpenCode or full P14/M2 handoff.
+
 ## Claude CLI/API native integration (targeted Mac smoke accepted by user confirmation)
 
 Internal `runTaskDeviceClaudeCli` and `runTaskDeviceClaudeApi` use the same

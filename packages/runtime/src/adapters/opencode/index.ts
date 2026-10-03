@@ -1,4 +1,4 @@
-import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
+import { assertOpenCodeNativeAdmission } from "./nativeAdmission.js";
 import {
   RuntimeTransport,
   UsageReporting,
@@ -167,7 +167,7 @@ export function createOpenCodeRuntimeAdapter(
     },
 
     async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {
-      assertNativeProcessMode(input, false);
+      assertOpenCodeNativeAdmission(input);
       logger.info?.(
         {
           runtimeId,
@@ -196,7 +196,7 @@ export function createOpenCodeRuntimeAdapter(
     },
 
     async resume(input: RuntimeRunInput & { sessionId: string }): Promise<RuntimeRunResult> {
-      assertNativeProcessMode(input, false);
+      assertOpenCodeNativeAdmission(input);
       logger.info?.(
         {
           runtimeId,

@@ -1,4 +1,4 @@
-import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
+import { assertOpenCodeNativeAdmission } from "./nativeAdmission.js";
 import type {
   RuntimeConnectionValidationInput,
   RuntimeConnectionValidationResult,
@@ -353,6 +353,7 @@ export async function createOpenCodeSession(
   input: RuntimeRunInput,
   logger?: OpenCodeApiLogger,
 ): Promise<RuntimeSession> {
+  assertOpenCodeNativeAdmission(input);
   const payload = await requestJson<OpenCodeSessionResponse>(input, {
     method: "POST",
     path: "/session",
@@ -370,7 +371,7 @@ export async function runOpenCodeApi(
   input: RuntimeRunInput,
   logger?: OpenCodeApiLogger,
 ): Promise<RuntimeRunResult> {
-  assertNativeProcessMode(input, false);
+  assertOpenCodeNativeAdmission(input);
   const runtimeId = input.runtimeId;
   const providerId = input.providerId ?? "opencode";
 

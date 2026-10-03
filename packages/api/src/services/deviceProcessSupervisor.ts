@@ -54,6 +54,18 @@ export async function runTaskDeviceClaudeCli(taskId: string, input: RuntimeRunIn
   return runTaskDeviceRuntime(taskId, input, RuntimeTransport.CLI, "claude");
 }
 
+/** Text-only HTTP clients; this does not admit a remote OpenCode executor. */
+export async function runTaskDeviceHttp(taskId: string, input: RuntimeRunInput) {
+  if (input.runtimeId !== "codex" && input.runtimeId !== "openrouter")
+    throw new RuntimeExecutionError(
+      "Native HTTP runtime is not admissible",
+      undefined,
+      "permission",
+      { adapterCode: "native_task_input_invalid" },
+    );
+  return runTaskDeviceRuntime(taskId, input, RuntimeTransport.API, input.runtimeId);
+}
+
 async function runTaskDeviceRuntime(
   taskId: string,
   input: RuntimeRunInput,
@@ -62,7 +74,7 @@ async function runTaskDeviceRuntime(
     | typeof RuntimeTransport.CLI
     | typeof RuntimeTransport.SDK
     | typeof RuntimeTransport.API,
-  runtimeId: "codex" | "claude" = "codex",
+  runtimeId: "codex" | "claude" | "openrouter" = "codex",
 ) {
   const root = input.cwd ?? input.projectRoot;
   assertTaskDeviceExecution(taskId, root);

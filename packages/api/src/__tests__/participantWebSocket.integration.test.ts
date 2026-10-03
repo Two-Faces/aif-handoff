@@ -1,4 +1,5 @@
 import type { AddressInfo } from "node:net";
+import { get } from "node:http";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, type RawData } from "ws";
@@ -57,6 +58,26 @@ function createLogger() {
     error: vi.fn(),
     info: vi.fn(),
   };
+}
+
+// OS-assigned ports may be on fetch's browser-only bad-port list. Exercise the
+// actual server authentication over HTTP without imposing that client policy.
+function readHttp(url: string, options: { headers: Record<string, string> }) {
+  return new Promise<{ status: number | undefined; json(): Promise<unknown> }>(
+    (resolve, reject) => {
+      get(url, options, (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.once("error", reject);
+        response.once("end", () =>
+          resolve({
+            status: response.statusCode,
+            json: async () => JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown,
+          }),
+        );
+      }).once("error", reject);
+    },
+  );
 }
 
 beforeEach(() => {
@@ -125,7 +146,7 @@ describe("Participants Mode WebSocket authentication", () => {
       const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
 
       try {
-        const unauthenticated = await fetch(httpUrl, {
+        const unauthenticated = await readHttp(httpUrl, {
           headers: { origin: ORIGIN },
         });
         expect(unauthenticated.status).toBe(401);
@@ -133,7 +154,7 @@ describe("Participants Mode WebSocket authentication", () => {
           code: "authentication_required",
         });
 
-        const invalidOrigin = await fetch(httpUrl, {
+        const invalidOrigin = await readHttp(httpUrl, {
           headers: {
             cookie: `${COOKIE_NAME}=${session.token}`,
             origin: "http://attacker.invalid",
@@ -142,7 +163,7 @@ describe("Participants Mode WebSocket authentication", () => {
         expect(invalidOrigin.status).toBe(403);
         expect(await invalidOrigin.json()).toMatchObject({ code: "invalid_origin" });
 
-        const expired = await fetch(httpUrl, {
+        const expired = await readHttp(httpUrl, {
           headers: {
             cookie: `${COOKIE_NAME}=${expiredSession.token}`,
             origin: ORIGIN,

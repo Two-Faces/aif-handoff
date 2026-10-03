@@ -95,6 +95,11 @@
  * discovery, and contain executable version probes in the native worker.
  * A worker's direct CLI mode must not fall back to SDK. Generate literal argv,
  * bound raw stdout/stderr before filtering metadata, and stop on blocked stdin.
+ * Text-only HTTP clients can use a fixed native worker: preserve provider
+ * request builders/proxy settings, reject retries/redirects/tools, and validate
+ * complete JSON/SSE plus usage before success. Local client stop never proves
+ * that remote inference or a separately owned executor stopped. Keep such
+ * executors (including direct session creation) denied until they are owned.
  *
  * ```ts
  * async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {

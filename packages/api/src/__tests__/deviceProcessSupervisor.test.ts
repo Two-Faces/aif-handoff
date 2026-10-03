@@ -16,6 +16,7 @@ import { createTestDb } from "@aif/shared/server";
 import { resetEnvCache } from "@aif/shared";
 import { UsageSource, type RuntimeRunInput } from "@aif/runtime";
 import { claudeSdkFixture } from "./fixtures/claudeSdkFixture.js";
+import { httpCompletionFixture } from "./fixtures/httpCompletionFixture.js";
 const db = { current: createTestDb() };
 vi.mock("@aif/shared/server", async (original) => ({
   ...(await original<typeof import("@aif/shared/server")>()),
@@ -33,11 +34,13 @@ const {
   runTaskDeviceClaudeSdk,
   runTaskDeviceClaudeApi,
   runTaskDeviceClaudeCli,
+  runTaskDeviceHttp,
 } = await import("../services/deviceProcessSupervisor.js");
 let root: string, database: string;
 beforeEach(() => {
   vi.stubEnv("AIF_PERSONAL_MODE", "false");
   vi.stubEnv("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", undefined);
+  vi.stubEnv("NO_PROXY", "*");
   resetEnvCache();
   root = realpathSync.native(mkdtempSync(join(tmpdir(), "aif-native-process-journal-")));
   database = join(root, "fixture.sqlite");
@@ -428,6 +431,162 @@ describe.skipIf(!["win32", "darwin"].includes(process.platform))(
       },
       20000,
     );
+    it.each(
+      (["codex", "openrouter"] as const).flatMap((provider) =>
+        (
+          [
+            "json",
+            "sse",
+            "abort",
+            "timeout",
+            "callback",
+            "http_error",
+            "truncated",
+            "malformed",
+            "overflow",
+            "proxy",
+            "redirect",
+          ] as const
+        ).map((mode) => [provider, mode] as const),
+      ),
+    )(
+      "runs native HTTP %s through %s with one request and durable stop",
+      async (provider, mode) => {
+        const { task, workspace, input } = fixture(),
+          http = await httpCompletionFixture(mode, provider);
+        const abortController = new AbortController();
+        if (mode === "proxy") {
+          vi.stubEnv("NO_PROXY", "");
+          vi.stubEnv("HTTP_PROXY", http.proxyUrl);
+        }
+        vi.stubEnv("CODEX_API_RETRY_COUNT", "10");
+        let runId = "";
+        try {
+          const running = data.withTaskDeviceExecution(input, async () => {
+            runId = data.currentTaskDeviceRunId()!;
+            const result = await runTaskDeviceHttp(task.id, {
+              runtimeId: provider,
+              transport: "api",
+              model: "fixture-model",
+              stream: mode !== "json",
+              prompt: "HTTP задача 🧪",
+              cwd: workspace.worktreePath,
+              options: { baseUrl: http.url, apiKey: "fixture-secret" },
+              usageContext: {
+                source: UsageSource.TEST,
+                taskId: task.id,
+                projectId: task.projectId,
+              },
+              execution: {
+                abortController,
+                runTimeoutMs: mode === "timeout" ? 3000 : 10000,
+                onEvent: (event) => {
+                  if (event.type === "stream:text") {
+                    if (mode === "abort") abortController.abort();
+                    if (mode === "callback") throw new Error("fixture callback");
+                  }
+                },
+              },
+            });
+            expect(data.listTaskDeviceProcesses(runId)[0].state).toBe("stopped");
+            return result;
+          });
+          if (mode === "json" || mode === "sse" || mode === "proxy") {
+            expect(await running).toMatchObject({
+              outputText: "Готово 🧪",
+              sessionId: "request",
+              usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5, costUsd: 0.01 },
+            });
+            expect(data.getTaskDeviceGrant(task.id)?.activeRunId).toBeNull();
+          } else {
+            await expect(running).rejects.toBeInstanceOf(Error);
+            await expect(running).rejects.not.toThrow("PRIVATE_UPSTREAM_BODY");
+            if (mode === "http_error")
+              await expect(running).rejects.toMatchObject({
+                httpStatus: 429,
+                category: "rate_limit",
+              });
+            if (mode === "abort") expect(abortController.signal.aborted).toBe(true);
+            expect(data.getTaskDeviceGrant(task.id)?.activeRunId).toBe(runId);
+          }
+          await http.closed;
+          expect(http.listening).toBe(true); // proof stopped the client, not this independent server
+          expect(http.requests).toHaveLength(1);
+          expect(http.requests[0]).toMatchObject({
+            headers: { authorization: "Bearer fixture-secret" },
+            body: {
+              model: "fixture-model",
+              stream: mode !== "json",
+              messages: [{ role: "user", content: "HTTP задача 🧪" }],
+            },
+          });
+          if (mode !== "json")
+            expect(http.requests[0].body.stream_options).toEqual({ include_usage: true });
+          if (mode === "proxy") {
+            expect(http.proxyRequests).toBe(1);
+            expect(http.proxyAuth).toBe(true);
+          }
+          const journals = data.listTaskDeviceProcesses(runId);
+          expect(journals).toHaveLength(1);
+          expect(journals[0].state).toBe("stopped");
+          expect(JSON.parse(journals[0].evidenceJson!).activeProcesses).toBe(0);
+        } finally {
+          await http.close();
+        }
+      },
+      20000,
+    );
+    it.each(["codex", "openrouter"] as const)(
+      "recovers native HTTP %s after coordinator death without releasing its run",
+      async (provider) => {
+        const { task, workspace, input } = fixture(),
+          http = await httpCompletionFixture("crash", provider);
+        try {
+          const host = spawn(
+            process.execPath,
+            [
+              "--import",
+              "tsx",
+              fileURLToPath(new URL("./fixtures/deviceProcessCrash.ts", import.meta.url)),
+              database,
+              task.id,
+              input.projectRoot,
+              workspace.worktreePath,
+              http.url,
+              "http-" + provider,
+            ],
+            {
+              stdio: ["ignore", "ignore", "pipe"],
+              windowsHide: true,
+              env: { ...process.env, AIF_PERSONAL_MODE: "false" },
+            },
+          );
+          let stderr = "";
+          host.stderr.on("data", (bytes) => {
+            stderr += bytes.toString();
+          });
+          const code = await new Promise<number | null>((resolve, reject) => {
+            host.once("error", reject);
+            host.once("close", resolve);
+          });
+          expect(code, stderr).toBe(86);
+          const head = data.getTaskDeviceGrant(task.id)!,
+            journal = data.listTaskDeviceProcesses(head.activeRunId!)[0];
+          expect(journal.state).toBe("prepared");
+          expect((await recoverTaskDeviceProcess(journal.id)).state).toBe("stopped");
+          await http.closed;
+          expect(http.listening).toBe(true);
+          expect(http.requests).toHaveLength(1);
+          expect(data.getTaskDeviceGrant(task.id)).toEqual(head);
+          await expect(
+            data.withTaskDeviceExecution(input, async () => undefined),
+          ).rejects.toMatchObject({ code: "run_busy" });
+        } finally {
+          await http.close();
+        }
+      },
+      20000,
+    );
     it("runs the real app-server adapter and persists native stop before returning its result", async () => {
       const { task, workspace, input } = fixture();
       const marker = appServerFixture(workspace.worktreePath, "success");
@@ -496,6 +655,8 @@ describe.skipIf(!["win32", "darwin"].includes(process.platform))(
       ["claude", "sdk", runTaskDeviceClaudeSdk],
       ["claude", "api", runTaskDeviceClaudeApi],
       ["claude", "cli", runTaskDeviceClaudeCli],
+      ["codex", "api", runTaskDeviceHttp],
+      ["openrouter", "api", runTaskDeviceHttp],
     ] as const)(
       "rejects %s/%s scope substitutions before reserving or creating a process",
       async (runtimeId, transport, run) => {

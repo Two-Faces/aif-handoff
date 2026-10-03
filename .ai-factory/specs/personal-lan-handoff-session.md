@@ -228,7 +228,34 @@ Mac subset Claude CLI/API принят 03.10.2026 по сообщению пол
 Это целевой subset по подтверждению пользователя, не полный Mac ai:validate,
 live provider run или приёмка P14/M2. Исходники после Windows gate не менялись.
 
-Далее P14 — остальные transports (Codex API, OpenRouter/OpenCode),
+Новый HTTP increment: text-only Codex API/OpenRouter идут через runTaskDeviceHttp
+и фиксированный native worker; существующие request/auth builders сохранены.
+Payload ≤1 MiB по stdin, response ≤16 MiB до разбора, proxy/NO_PROXY, без retry и
+redirect. Strict JSON/SSE требует consistent ID, stop, usage, [DONE] для streaming,
+worker completion и durable native proof. OpenRouter accounting chunk с повтором
+finish учтён отдельно от OpenAI empty choices. Raw provider errors не выводятся;
+HTTP status/limits сохраняются. Codex stream:false теперь учитывается с onEvent.
+Windows итоговый ai:validate прошёл: 3730 passed / 10 skipped, coverage ≥70%
+(runtime min 76.08%, API min 70.39%), build 7/7, Chromium 8/8, k6 3/3,
+protocol CLI 0.145.0. Лог .codex/m2/logs/native-http-final-validate.log;
+22 package source/test hashes совпали до/после gate. Все 65 native/journal
+API cases прошли, включая новый HTTP и прежние CLI/SDK/app-server сценарии.
+App-server proxy env casing и discovery tests учитывают Windows; HTTP fixtures
+обходят browser bad ports и Windows reserved ranges без ослабления assertions.
+Mac subset 188 runtime + 67 API пока ожидает пользователя.
+OpenCode выполняет работу на отдельном сервере: остановка клиента его не
+останавливает. nativeAdmission.ts закрывает run/resume/createSession до HTTP
+с кодом native_external_executor_unowned; нужен owned server launch/recovery.
+Local HTTP stop не считать доказательством remote inference/billing/сервера.
+
+OpenCode обязателен для M2 по ответу пользователя 03.10.2026: на Mac нужны
+задачи с локальными LLM. Пользователь установил OpenCode 1.18.34 на Mac;
+command -v: /Users/aries/.local/state/fnm_multishells/1241_1791042421446/bin/opencode.
+Это путь текущей fnm-сессии, перед native launch нужно определить реальный binary.
+LM Studio сейчас установлен, но не нравится пользователю; другой inference backend
+пока не выбран. Не исключать OpenCode из M2 и не подменять stop сервера
+закрытием HTTP-клиента.
+Далее P14 — owned OpenCode server,
 normal runner admission/external-service coverage, runtime-backed checkpoint/release и
 физическая передача Win→Mac→Win. Native stop receipt сам по себе не освобождает
 grant/run и не подтверждает остановку внешних/делегированных services.

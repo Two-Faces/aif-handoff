@@ -153,7 +153,15 @@ export function createOpenRouterRuntimeAdapter(
     },
 
     async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {
-      assertNativeProcessMode(input, false);
+      assertNativeProcessMode(
+        input,
+        input.transport === undefined || input.transport === RuntimeTransport.API,
+      );
+      if (input.execution?.nativeProcessScope) {
+        return input.stream !== false && input.execution.onEvent
+          ? runOpenRouterApiStreaming(input, logger)
+          : runOpenRouterApi(input, logger);
+      }
       logger.info?.(
         {
           runtimeId,

@@ -9,10 +9,33 @@ import {
   runTaskDeviceClaudeSdk,
   runTaskDeviceClaudeCli,
   runTaskDeviceClaudeApi,
+  runTaskDeviceHttp,
 } from "../../services/deviceProcessSupervisor.js";
 const [database, taskId, projectRoot, cwd, marker, mode] = process.argv.slice(2);
 getDb(database);
 await withTaskDeviceExecution({ taskId, projectRoot }, async () => {
+  if (mode === "http-codex" || mode === "http-openrouter") {
+    await runTaskDeviceHttp(taskId, {
+      runtimeId: mode === "http-codex" ? "codex" : "openrouter",
+      transport: "api",
+      model: "fixture-model",
+      prompt: "fixture",
+      cwd,
+      options: { baseUrl: marker, apiKey: "fixture-secret" },
+      usageContext: {
+        source: UsageSource.TEST,
+        taskId,
+        projectId: findTaskById(taskId)!.projectId,
+      },
+      execution: {
+        runTimeoutMs: 10000,
+        onEvent: (event) => {
+          if (event.type === "stream:text") process.exit(86);
+        },
+      },
+    });
+    throw new Error("HTTP crash fixture unexpectedly completed");
+  }
   const claude = mode === "claude" || mode === "claude-cli" || mode === "claude-api";
   if (mode === "sdk" || claude) {
     const run =

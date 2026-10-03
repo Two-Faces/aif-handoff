@@ -401,9 +401,10 @@ export function createCodexRuntimeAdapter(
       input,
       transport === RuntimeTransport.APP_SERVER ||
         transport === RuntimeTransport.SDK ||
+        (transport === RuntimeTransport.API && !transportResolution.fellBackToDefault) ||
         (transport === RuntimeTransport.CLI && !transportResolution.fellBackToDefault),
     );
-    const wantsStreaming = input.execution?.onEvent != null;
+    const wantsStreaming = input.execution?.onEvent != null && input.stream !== false;
     if (
       transportResolution.requested === RuntimeTransport.APP_SERVER &&
       transportResolution.source !== "default"

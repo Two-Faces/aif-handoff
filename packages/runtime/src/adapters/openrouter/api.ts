@@ -1,4 +1,5 @@
 import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
+import { assertNativeHttpInput, runNativeChatCompletion } from "../chatCompletion/native.js";
 import { redactProviderText, redactProviderTextForLogs } from "@aif/shared";
 import type {
   RuntimeConnectionValidationInput,
@@ -189,6 +190,17 @@ function buildRequestBody(input: RuntimeRunInput, stream: boolean): Record<strin
 // Usage normalization
 // ---------------------------------------------------------------------------
 
+function runNativeOpenRouterApi(input: RuntimeRunInput, stream: boolean) {
+  assertNativeHttpInput(input);
+  return runNativeChatCompletion(input, {
+    provider: "openrouter",
+    url: resolveBaseUrl(input) + "/chat/completions",
+    headers: buildHeaders(input),
+    body: buildRequestBody(input, stream),
+    stream,
+  });
+}
+
 function normalizeUsage(usage: unknown): RuntimeUsage | null {
   if (!usage || typeof usage !== "object") return null;
   const parsed = usage as Record<string, unknown>;
@@ -369,7 +381,8 @@ export async function runOpenRouterApi(
   input: RuntimeRunInput,
   logger?: OpenRouterApiLogger,
 ): Promise<RuntimeRunResult> {
-  assertNativeProcessMode(input, false);
+  assertNativeProcessMode(input, input.transport === undefined || input.transport === "api");
+  if (input.execution?.nativeProcessScope) return runNativeOpenRouterApi(input, false);
   const baseUrl = resolveBaseUrl(input);
   const url = `${baseUrl}/chat/completions`;
   const signal = buildRunTimeoutSignal(input);
@@ -613,7 +626,8 @@ export async function runOpenRouterApiStreaming(
   input: RuntimeRunInput,
   logger?: OpenRouterApiLogger,
 ): Promise<RuntimeRunResult> {
-  assertNativeProcessMode(input, false);
+  assertNativeProcessMode(input, input.transport === undefined || input.transport === "api");
+  if (input.execution?.nativeProcessScope) return runNativeOpenRouterApi(input, true);
   logger?.info?.(
     {
       runtimeId: input.runtimeId,

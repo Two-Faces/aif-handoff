@@ -166,8 +166,8 @@ export function buildCodexAppServerEnvWithStats(
     env.CODEX_BASE_URL = baseUrl;
   }
 
-  // Windows env vars are case-insensitive; mirror proxy key casing to avoid
-  // losing one variant when a parent process forwarded only uppercase/lowercase.
+  // Unix clients may inspect either spelling. Windows must receive only one
+  // spelling: duplicate case-insensitive names are ambiguous to a native child.
   mirrorEnvPair(env, "HTTP_PROXY", "http_proxy");
   mirrorEnvPair(env, "HTTPS_PROXY", "https_proxy");
   mirrorEnvPair(env, "ALL_PROXY", "all_proxy");
@@ -361,11 +361,12 @@ function mirrorEnvPair(
   lowercaseKey: string,
 ): void {
   const value = env[uppercaseKey] ?? env[lowercaseKey];
-  if (!value) {
+  if (value === undefined) {
     return;
   }
   env[uppercaseKey] = value;
-  env[lowercaseKey] = value;
+  if (IS_WINDOWS) delete env[lowercaseKey];
+  else env[lowercaseKey] = value;
 }
 
 function isAllowedEnvironmentKey(key: string): boolean {
