@@ -1,4 +1,5 @@
 import { createServer, type Socket } from "node:net";
+import { AsyncResource } from "node:async_hooks";
 import {
   macProcessHostIdentitySchema,
   macPreparedProcessIdentitySchema,
@@ -299,6 +300,9 @@ export async function launchMacSupervisedProcess(
       };
     } else throw macFailure("supervisor_protocol_invalid");
   }
+  // Accepted sockets have their own async resource. Restore the launch caller's
+  // scope for persistence/output callbacks; the data layer still fences every write.
+  const scopedFrame = AsyncResource.bind(frame);
   server.on("connection", (peer) => {
     if (connected) {
       peer.destroy();
@@ -332,7 +336,7 @@ export async function launchMacSupervisedProcess(
             } catch {
               throw macFailure("supervisor_protocol_invalid");
             }
-            await frame(macFrame(value));
+            await scopedFrame(macFrame(value));
           })
           .catch(fail)
           .finally(() => {

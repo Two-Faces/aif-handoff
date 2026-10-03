@@ -816,7 +816,25 @@ Validation still rejects numeric 0/1; errors at this barrier now include the
 phase, identity/boot issue paths and UID/kind checks, without copying raw payloads.
 Three additional simulated regressions cover numeric stopped values and an
 invalid boot UUID, including cleanup before launchd registration. Native
-acceptance still requires a rerun with the boolean fix.
+acceptance still requires a rerun.
+
+The third native log (2026-10-03, 07:45) passes 41 simulated cases but times out
+in all 8 native cases before preparation; the two API bridge cases report
+`run_scope_required` inside `onIdentity`. A portable regression reproduced lost
+AsyncLocalStorage across accepted-socket callbacks. Binding the frame handler to
+the launch caller's async resource now preserves separate concurrent task scopes
+and output callbacks, while the data layer still validates every run/grant write.
+
+The user's standalone diagnostic reaches host persistence and then startup timeout;
+explicit recovery verifies zero active processes. A subsequent native stack sample
+shows the helper waiting in its poll loop. Node 22's child-process implementation
+pauses streams inherited as stdio, including this socket passed to the peer query.
+The controller now restores its previously flowing state only after query exit and
+credential validation. Deliberately paused sockets stay paused; failed credentials
+never resume reading. The OS-boundary mock now reproduces Node's pause side effect,
+and its new regression failed before this fix and reads the next frame afterward.
+The corrected native backend still needs the Mac rerun; the earlier timeout is not
+a passing native launch/stop scenario.
 The passing capability probe above does not certify this helper or its lifecycle.
 After updating the M2 branch and building, run these commands in the Mac checkout:
 
@@ -828,9 +846,9 @@ npm test --workspace @aif/runtime -- macosSupervisor.test.ts macosSupervisorProt
 npm test --workspace @aif/api -- deviceProcessSupervisor.test.ts
 ```
 
-Expected scope: 13 shared contract tests, 7 data journal tests, 23 simulated
-protocol tests, 18 simulated OS-boundary tests, **8 real Mac process tests** and
-**2 real native SQLite bridge tests** (71 total). The native cases exercise
+Expected scope: 13 shared contract tests, 7 data journal tests, 24 simulated
+protocol tests, 20 simulated OS-boundary tests, **8 real Mac process tests** and
+**2 real native SQLite bridge tests** (74 total). The native cases exercise
 suspended preparation, literal argv/output, forged output, full stdin, detached
 grandchildren, an unrelated live process, failed persistence, helper death and
 caller death before/after resume. The bridge records stop without clearing a
@@ -861,13 +879,27 @@ The boolean/diagnostic fix passed Windows `ai:validate` on 2026-10-03 (exit 0):
 74.76%), build 7/7, Chromium 8/8, k6 3/3 and protocol CLI 0.145.0. Evidence:
 `.codex/m2/logs/macos-boolean-fix-validate.log`. Root/runtime checklists reviewed;
 adapter/public contracts, dependencies, migrations and UI are unchanged. This
-Windows run does not accept native Mac execution; the current runtime/API rerun
-must pass 49 + 2 tests on Mac.
+Windows run does not accept native Mac execution. That revision's runtime/API
+scope was 49 + 2 tests; subsequent socket fixes expand it to 52 + 2 as listed above.
+
+Final Windows verification for both socket/context fixes on 2026-10-03:
+`ai:validate` exited 0 with **3494 passed / 9 skipped**, coverage metrics at least
+70% in every package (runtime minimum 74.77%), build 7/7, Chromium 8/8, k6 3/3,
+and protocol CLI 0.145.0. Log:
+`.codex/m2/logs/macos-socket-lifecycle-final-validate.log`. The four changed runtime
+source/test files were unchanged during this final gate. The earlier
+`macos-async-context-validate.log` predates the completed socket fix and is not
+acceptance of the final source. Root/runtime checklists were reviewed and extended;
+no adapter capability, dependency, migration, UI or public route changed. Native
+Mac runtime/API acceptance remains open; use `--bail=1` on the rerun to stop at the
+first failed case instead of repeating the same timeout across the suite.
 
 ## Implementation references
 
 - [ADR](decisions/personal-lan-sync.md)
 - [Clang: Objective-C boxed expressions and NSNumber boolean literals](https://clang.llvm.org/docs/ObjectiveCLiterals.html#boxed-expressions)
+- [Node 22: inherited stdio streams are paused during spawn](https://github.com/nodejs/node/blob/v22.22.2/lib/internal/child_process.js#L410-L420)
+- [Node: binding callbacks to their async context](https://nodejs.org/download/release/v22.18.0/docs/api/async_context.html#static-method-asyncresourcebindfn-type-thisarg)
 - [Node 22 TLS API](https://nodejs.org/docs/latest-v22.x/api/tls.html)
 - [Ed25519 X.509 identifiers, RFC 8410](https://www.rfc-editor.org/rfc/rfc8410.html)
 - [Windows job objects and child-process membership](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)

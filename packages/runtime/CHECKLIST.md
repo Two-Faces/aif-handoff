@@ -26,6 +26,8 @@ Every feature or fix in the runtime layer must cover **every** adapter, not just
 - [ ] Treat coalition counters as cumulative task accounting. Confirm a stable root-only baseline before allowing forks, then require exact started/exited deltas without rebasing; matching active counts alone must not hide extra completed tasks.
 - [ ] Mac supervision verifies suspended creation before resume, separates target I/O from the private control socket, and independently checks that the coalition including the host is empty. Recovery requires the original UID/boot/process incarnation; enumeration, a stopped frame, a timeout or a launchctl error is not empty-group evidence. Bound finalization even if a durable callback is still pending after channel loss.
 - [ ] Bind a Unix control connection to its kernel peer audit token before sending target arguments/environment. A hello claiming a real helper PID is not sufficient; reject a different peer without creating a target or persisting its launch identity.
+- [ ] Preserve the launch caller's async context across accepted-socket callbacks. Test two concurrent task scopes and input from an unrelated context; restoring context must not bypass the data layer's run/grant fencing checks.
+- [ ] Model Node's pause side effect when a control socket is inherited as child stdio for peer inspection. Restore prior flowing state only after the query exits successfully and credentials validate; keep deliberately paused streams paused and reject unverified peers.
 
 - [ ] CLI fallback tests explicitly stub and restore `CODEX_CLI_PATH`; do not assume the developer's shell has no override. Keep real override cases covered.
 - [ ] Add or update unit tests in `packages/runtime/src/__tests__/` for every adapter you touched.

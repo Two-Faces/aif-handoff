@@ -121,7 +121,10 @@ beforeEach(() => {
   vi.stubGlobal("process", { ...process, platform: "darwin", getuid: () => 501 });
   mock.files.clear();
   mock.run.mockReset().mockImplementation(execute);
-  mock.spawn.mockReset().mockImplementation((file: string) => {
+  mock.spawn.mockReset().mockImplementation((file: string, _args, options) => {
+    // Node pauses a Stream passed as child stdio, even when the child only
+    // queries socket metadata. Model that real side effect at this OS boundary.
+    options.stdio[3].pause();
     const child = Object.assign(new EventEmitter(), {
       stdout: new PassThrough(),
       stderr: new PassThrough(),
@@ -186,6 +189,34 @@ describe("macOS host preparation boundary (simulated OS)", () => {
     });
     expect(mock.run).not.toHaveBeenCalled();
     expect(mock.files.size).toBe(0);
+  });
+  it("restores a flowing control socket after peer verification so later frames can be read", async () => {
+    const system = await createMacNativeSystem();
+    const socket = new Socket();
+    socket.resume();
+    expect(socket.readableFlowing).toBe(true);
+    try {
+      await system.peer(socket);
+      expect(socket.readableFlowing).toBe(true);
+      const received = new Promise<Buffer>((resolve) => socket.once("data", resolve));
+      socket.push(Buffer.from('{"kind":"prepared"}\n'));
+      expect((await received).toString()).toBe('{"kind":"prepared"}\n');
+    } finally {
+      socket.destroy();
+      system.dispose();
+    }
+  });
+  it("keeps an intentionally paused socket paused after peer verification", async () => {
+    const system = await createMacNativeSystem();
+    const socket = new Socket();
+    socket.pause();
+    try {
+      await system.peer(socket);
+      expect(socket.readableFlowing).toBe(false);
+    } finally {
+      socket.destroy();
+      system.dispose();
+    }
   });
   it.each([0, 1])(
     "rejects numeric stopped=%i at the capability barrier and reports the invalid field",
@@ -364,9 +395,10 @@ describe("macOS host preparation boundary (simulated OS)", () => {
     "rejects unverified socket peer credentials: %s",
     async (condition) => {
       const system = await createMacNativeSystem();
-      mock.spawn.mockImplementation((file: string) => {
+      mock.spawn.mockImplementation((file: string, _args, options) => {
         if (condition === "spawn-error")
           throw Object.assign(new Error("descriptor closed"), { code: "EBADF" });
+        options.stdio[3].pause();
         const child = Object.assign(new EventEmitter(), {
           stdout: new PassThrough(),
           stderr: new PassThrough(),
@@ -382,10 +414,18 @@ describe("macOS host preparation boundary (simulated OS)", () => {
         });
         return child;
       });
-      await expect(system.peer(new Socket())).rejects.toMatchObject({
-        adapterCode: "supervisor_peer_unverified",
-      });
-      system.dispose();
+      const socket = new Socket();
+      socket.resume();
+      const resume = vi.spyOn(socket, "resume");
+      try {
+        await expect(system.peer(socket)).rejects.toMatchObject({
+          adapterCode: "supervisor_peer_unverified",
+        });
+        expect(resume).not.toHaveBeenCalled();
+      } finally {
+        socket.destroy();
+        system.dispose();
+      }
     },
   );
   it("restricts cleanup/service labels to UUID-derived paths", () => {

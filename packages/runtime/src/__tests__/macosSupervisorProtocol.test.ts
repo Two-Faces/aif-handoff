@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { connect, type Socket } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -179,6 +180,41 @@ function savedHost(f: ReturnType<typeof fixture>) {
   return macProcessHostIdentitySchema.parse(f.input.onIdentity.mock.calls[0][0]);
 }
 describe("macOS supervisor host protocol (portable simulated native peer)", () => {
+  it("keeps each launch's async task context across socket callbacks and foreign-context input", async () => {
+    const storage = new AsyncLocalStorage<{ task: string }>();
+    const first = fixture(),
+      second = fixture();
+    factory.mockResolvedValueOnce(first.system).mockResolvedValueOnce(second.system);
+    const received: string[] = [];
+    const launches = [first, second].map((f, index) => {
+      const scope = { task: "task-" + index };
+      const check = async () => {
+        expect(storage.getStore()).toBe(scope);
+        await Promise.resolve();
+        expect(storage.getStore()).toBe(scope);
+      };
+      f.input.onIdentity.mockImplementation(check);
+      f.input.onPrepared.mockImplementation(check);
+      return storage.run(scope, () =>
+        launchMacSupervisedProcess({
+          ...f.input,
+          onOutput: (_stream, bytes) => {
+            expect(storage.getStore()).toBe(scope);
+            received.push(scope.task + ":" + bytes.toString());
+          },
+        }),
+      );
+    });
+    const children = await Promise.all(launches);
+    storage.run({ task: "unrelated" }, () => {
+      children.forEach((child, index) => child.write(Buffer.from(String(index))));
+    });
+    await until(() => received.length === 2);
+    expect(received.sort()).toEqual(["task-0:0", "task-1:1"]);
+    await Promise.all(children.map((child) => child.stop()));
+    expect(storage.getStore()).toBeUndefined();
+    storage.disable();
+  });
   it("waits for both durable barriers and preserves literal argv, input and separate target output", async () => {
     const f = fixture(),
       output: string[] = [];

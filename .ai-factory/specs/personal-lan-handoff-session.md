@@ -101,8 +101,8 @@ macosSystem.ts / macosNativeSource.ts, но его native приёмка ещё 
 durable host/child callbacks и независимая проверка пустой coalition после exit.
 Mac receipts хранят UID/boot UUID/unique IDs в существующем JSON journal v40;
 старые migrations не менялись. Recovery сохраняет stop, не снимая run/grant.
-Нужны реальные Mac tests: shared 13 + data 7 + runtime (23 protocol + 18 OS-boundary
-+ 8 native) + API 2 native = 71. Команды и ограничения в docs/local-device-sync.md.
+Нужны реальные Mac tests: shared 13 + data 7 + runtime (24 protocol + 20 OS-boundary
++ 8 native) + API 2 native = 74. Команды и ограничения в docs/local-device-sync.md.
 До передачи launch controller проверяет kernel audit token самого Unix socket
 через унаследованный descriptor: hello обязан принадлежать этому процессу.
 До их принятия не считать Mac supervisor подтверждённым; далее интеграция
@@ -132,6 +132,23 @@ Native acceptance ещё открыта; не переходить к призн
 Windows gate boolean/diagnostic fix: `ai:validate` exit 0, 3491 passed / 9 skipped,
 coverage всех пакетов ≥70% (runtime минимум 74.76%), build 7/7, Chromium 8/8,
 k6 3/3, protocol CLI 0.145.0. Лог .codex/m2/logs/macos-boolean-fix-validate.log.
+Третий Mac лог (03.10.2026, 07:45): runtime 41 passed / 8 native failed по timeout,
+API 2 failed с run_scope_required в onIdentity. Потеря AsyncLocalStorage при
+accepted-socket callback воспроизведена на Windows и исправлена AsyncResource.bind
+для frame handler; новый тест проверяет два concurrent scope и foreign-context input.
+Отдельная диагностика пользователя доходит до host saved, затем start timeout;
+explicit recovery подтверждает activeProcesses=0. Полученный stack sample показывает
+helper в poll. Найдена причина: Node при передаче Socket как child stdio ставит его
+чтение на pause. После успешной проверки credentials теперь возвращается исходное
+flowing-состояние; deliberately paused сокет и неуспешный query не возобновляются.
+OS-boundary mock моделирует этот pause; regression сначала упал, затем прошёл.
+Текущий Mac повтор runtime/API — 52 + 2; native acceptance остаётся открытой.
+Финальный Windows gate обоих socket/context fixes: `ai:validate` exit 0,
+3494 passed / 9 skipped, coverage всех пакетов ≥70% (runtime минимум 74.77%),
+build 7/7, Chromium 8/8, k6 3/3, protocol CLI 0.145.0. Лог:
+.codex/m2/logs/macos-socket-lifecycle-final-validate.log. Более ранний
+macos-async-context-validate.log не подтверждает итоговый код, так как socket fix
+был завершён позднее. Следующий шаг — Mac runtime/API 52 + 2 с --bail=1.
 Windows gate исходного probe принят: `ai:validate` exit 0, 3432 passed / 1 existing
 skip, coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3.
 После исправления baseline Windows `ai:validate` также exit 0: 3438 passed /

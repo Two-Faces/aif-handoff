@@ -284,6 +284,7 @@ export async function createMacNativeSystem(): Promise<MacNativeSystem> {
       },
       async peer(socket) {
         verifyBinary();
+        const wasFlowing = socket.readableFlowing === true;
         return new Promise<NativeMacIdentity>((resolve, reject) => {
           let child: ChildProcess;
           try {
@@ -342,6 +343,10 @@ export async function createMacNativeSystem(): Promise<MacNativeSystem> {
                 throw macFailure("supervisor_peer_unverified", { nativeExit: code, diagnostics });
               settled = true;
               clearTimeout(timer);
+              // Node pauses a Stream inherited as child stdio. This helper only
+              // inspects peer credentials; return reading to the controller once
+              // that query has exited and its result has been verified.
+              if (wasFlowing) socket.resume();
               resolve(parsed.data);
             } catch (error) {
               fail(error);
