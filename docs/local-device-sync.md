@@ -570,6 +570,80 @@ The user reported macOS 27.0.1 as the current test environment. Record versions 
 diagnostics, but determine supervisor support by checking actual OS capabilities
 and behavior at startup. An OS update must not require editing a version allowlist;
 unavailable or unverified stop mechanisms must continue to block runtime release.
+On 2026-10-03 the user also confirmed `xcrun --find clang` resolves to
+`/Library/Developer/CommandLineTools/usr/bin/clang`. This establishes the compiler
+prerequisite for a future native Mac probe, not supervision support.
+
+## Windows native process supervision (P14, transport integration pending)
+
+The host-only `launchSupervisedProcess` primitive uses an in-memory C# helper
+under Windows PowerShell. It creates a dedicated non-inherited Job Object with
+kill-on-close and no breakaway, then passes `PROC_THREAD_ATTRIBUTE_JOB_LIST` to
+`CreateProcessW`. This avoids an uncontained child between creation and job
+assignment. The child remains suspended until the local prepared receipt commits.
+Native API availability is exercised at launch; no OS version allowlist is used.
+
+Migration v40 adds local `task_device_processes` receipts:
+`reserved → identified → prepared → stopped`. The data callbacks persist the
+helper's PID/birth/job identity before child creation and the suspended child's
+identity before resume. A run with unresolved receipts cannot settle on a mere
+successful JS return. Upgrade preserves existing runs/grants; older runs do not
+gain stop evidence. Receipts are never replicated or accepted from peers.
+The internal bridge validates the registered task checkout before reservation,
+creation and resume. The source project root cannot be substituted as the cwd.
+
+The helper's control pipe is separate from target stdout/stderr/stdin. A target
+printing a fake `stopped` message cannot certify itself; a full stdin pipe cannot
+block cancellation. On root exit or cancellation the helper terminates remaining
+job members and queries native accounting until membership is zero. Only then
+does it emit evidence. Helper loss rejects the current call without fabricating
+proof, even though kill-on-close starts terminating descendants.
+
+Explicit internal recovery loads identity from the local journal, checks the
+original host's birth time through an open process handle, stops that host, then
+terminates/queries the original job. A reused/mismatched PID is never killed.
+The saved Windows session ID must also match: `Local` job names in another
+session's namespace cannot establish that the original job is absent.
+Recovery may repeat after lost acknowledgement. Stop receipts survive board-task
+deletion, but do not clear the active run, claim, grant or handoff phase.
+
+Native fixtures cover detached descendants, continued writes, a root exiting
+before its child, helper death, caller death before resume/during execution,
+separate-process SQLite recovery, forged output and an unrelated live process.
+The runtime primitive proves only its Job Object is empty. It does not establish
+that work delegated to external services, remote MCP servers or broker-created
+processes stopped. Transport-specific coverage must be established before a
+runtime-backed handoff can consume this evidence.
+
+**Still open:** Claude/Codex/OpenRouter/OpenCode adapter integration, macOS
+supervision, autonomous checkpoint/release and physical Windows↔Mac acceptance.
+The adapters still use their existing cancellation paths. macOS/Linux calls to
+the new native primitive reject as unsupported; they never fall back to a PID
+or process-group signal. Personal AI and public launch/recovery actions stay
+disabled. This sub-block does not complete P14.
+
+Windows `ai:validate` completed with exit 0 on the final sources: **3410 passed /
+1 existing skip**, lint and tests/coverage 10/10, build 7/7, Chromium 8/8, k6 3/3,
+protocol CLI 0.145.0 and checklist. Minimum coverage metrics: shared 75.56%,
+data 78.57%, runtime 73.54%, API 70.57%, agent 76.17%, web 74.49%, MCP 86.27%.
+Evidence is in `.codex/m2/logs/supervision-final-validate.log`; hashes of the 20
+changed/new TS files matched before and after validation. The driver used its
+private fixture database and ports 3309/5480. Root/shared/data/runtime/API
+checklists were reviewed. No packages/dependencies, adapter capabilities,
+REST/WS contracts or UI components changed, so Docker/adapter registration and
+Pencil synchronization do not apply.
+
+Common Mac regression for migration v40 and run journals remains pending:
+
+```sh
+npm run build
+npm test --workspace @aif/shared -- processSupervision.test.ts db.test.ts
+npm test --workspace @aif/data -- deviceProcesses.test.ts deviceExecution.test.ts
+```
+
+Expected counts: shared 25, data 36 (**61 total**). These checks exercise portable
+contracts, migration and fencing; they do not certify native Mac process stop.
+The Windows-specific supervisor/bridge fixtures run only on Windows.
 
 ## Implementation references
 
@@ -577,5 +651,7 @@ unavailable or unverified stop mechanisms must continue to block runtime release
 - [Node 22 TLS API](https://nodejs.org/docs/latest-v22.x/api/tls.html)
 - [Ed25519 X.509 identifiers, RFC 8410](https://www.rfc-editor.org/rfc/rfc8410.html)
 - [Windows job objects and child-process membership](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+- [Atomic process creation inside a Windows job](https://devblogs.microsoft.com/oldnewthing/20230209-00/?p=107812)
+- [Windows session namespaces for named job objects](https://learn.microsoft.com/en-us/windows/win32/termserv/kernel-object-namespaces)
 - [Apple setsid: new sessions/process groups](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/setsid.2.html)
 - [Apple XNU: deprecated NOTE_TRACK/NOTE_CHILD support](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/event.h)

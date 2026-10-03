@@ -160,6 +160,15 @@ history for the current grant. It cannot substitute for runtime process-tree sto
 Native supervisor/recovery remains open in P14; there are no browser/MCP handoff
 actions or automatic delivery/acceptance/runtime launches in this increment.
 
+P14 native supervision adds runtime `supervision/` with a Windows Job Object
+host and data `deviceProcesses.ts` / migration v40 for local launch/stop receipts.
+Persist host identity before creating the child, and its suspended identity before
+resuming. API `deviceProcessSupervisor.ts` is an internal bridge, with no routes.
+Empty-job evidence does not release a run/grant or establish adapter-wide coverage.
+Claude/Codex/OpenRouter/OpenCode transport integration and macOS supervision remain
+open. Unsupported platforms must reject; never substitute PID/group signals or
+elapsed time for native stop proof. Existing personal AI guards remain enabled.
+
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |
 | `packages/api/src/index.ts`             | API server entry (Hono, port 3009)    |

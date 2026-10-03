@@ -13,6 +13,21 @@ This guide describes the runtime/provider model introduced by `@aif/runtime`.
 - runtime-profile resolution (`resolveRuntimeProfile`) with capability checks and redaction helpers
 - adapter surfaces for run/resume/session/model-discovery operations
 
+## Native process supervision (P14 in progress)
+
+The internal Windows supervisor in `@aif/runtime` launches a process directly
+inside a Job Object and confirms that the job is empty before producing a stop
+receipt. It requires durable callbacks before child creation and before resuming
+the suspended child. It does not select support by Windows version: unavailable
+native APIs or policy restrictions fail before the target runs.
+
+This primitive is not yet wired into the Claude, Codex, OpenRouter or OpenCode
+adapter transports. Their cancellation callbacks, SDK results and remote service
+responses are not native stop receipts. No adapter capability has changed and
+personal AI remains disabled. macOS/Linux supervision is currently unsupported;
+the API rejects those platforms instead of claiming process-group termination
+is sufficient. See [device sync](local-device-sync.md) for scope and recovery.
+
 ## Runtime Profile Model
 
 Runtime profiles are persisted in `runtime_profiles` and reference only non-secret configuration.

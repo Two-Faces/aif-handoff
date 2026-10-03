@@ -59,7 +59,7 @@ describe("personal identity migration", () => {
       closeDb();
       const migrated = new Database(path, { readonly: true });
       connections.push(migrated);
-      expect(migrated.pragma("user_version", { simple: true })).toBe(39);
+      expect(migrated.pragma("user_version", { simple: true })).toBe(40);
       expect(
         migrated
           .prepare(

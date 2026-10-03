@@ -67,8 +67,18 @@ coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3.
 целевой smoke журнала для 7ec806c принят (61 shared + 50 data + 9 API = 120).
 Evidence получено от пользователя; полный Mac ai:validate и физический handoff
 этим не подтверждены.
-Полный P14 ещё открыт: нужен настоящий process-tree supervisor, stop proof,
-orphan recovery и native Win/Mac acceptance. Manual confirmation не заменяет их.
+Второй подблок P14 реализует Windows Job Object supervisor и v40 journal
+task_device_processes: host identity до CreateProcess, suspended child receipt
+до ResumeThread, native empty-job proof и recovery по PID+birth/job identity.
+Внутренний API bridge связывает их с durable run, но не снимает grant/claim.
+Успешный JS return при незавершённом process journal оставляет run uncertain.
+Windows ai:validate второго блока прошёл на финальном коде: 3410 passed / 1 existing
+skip, coverage всех пакетов ≥70%, build 7/7, Chromium 8/8, k6 3/3; лог
+.codex/m2/logs/supervision-final-validate.log. Общий Mac smoke v40 ещё открыт:
+25 shared + 36 data = 61; команды в docs/local-device-sync.md.
+Полный P14 ещё открыт: transport integration всех четырёх adapters, macOS
+supervision, autonomous checkpoint/release и native Win/Mac acceptance.
+Personal AI не включать; manual confirmation не заменяет native proof.
 Детали и текущие проверки — в плане и docs/local-device-sync.md.
 P15: onboarding, local session existence и continuation UI.
 M3/M4 не отмечай готовыми после M2.
@@ -96,6 +106,9 @@ Mac пользователь запускает сам, SSH не требует�
 /Users/aries/Projects/aif-handoff; fixture: /Users/aries/Projects/handoff-lan-test.
 Текущая macOS по сообщению пользователя — 27.0.1. Версия нужна для диагностики;
 supervisor проверяет реальные возможности ОС, без привязки разрешения к номеру версии.
+03.10.2026 пользователь подтвердил `xcrun --find clang`:
+/Library/Developer/CommandLineTools/usr/bin/clang. Компилятор для следующего
+native Mac probe уже доступен; это ещё не проверка механизма остановки.
 M1 native acceptance не означает приёмку новых M2 Git/stop/fencing сценариев.
 Остальные Mac project paths и toolchains пока неизвестны: не выдумывай их.
 Для quality gate используй отдельную БД и свободные порты. Учитывай не только

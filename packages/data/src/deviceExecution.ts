@@ -18,6 +18,7 @@ import {
   type TaskDeviceGrant,
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
+import { assertTaskDeviceProcessesStopped } from "./deviceProcesses.js";
 import { getLocalDevice } from "./devices.js";
 import { getPersonalExecutionBlock } from "./personalMode.js";
 import { requirePeerProject } from "./peers.js";
@@ -559,6 +560,7 @@ export async function withTaskDeviceExecution<T>(
       getDb().transaction(() => {
         if (scope.pending || scope.failed) return fail("run_fenced");
         assertRun(run, task.id, undefined, true);
+        assertTaskDeviceProcessesStopped(run.id);
         getDb()
           .update(taskDeviceRuns)
           .set({ state: "settled", settledAt: new Date().toISOString() })

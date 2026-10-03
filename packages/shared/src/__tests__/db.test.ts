@@ -7,7 +7,55 @@ import { eq } from "drizzle-orm";
 import { chatSessions } from "../schema.js";
 import { closeDb, createTestDb, getDb } from "../db.js";
 
-const CURRENT_SCHEMA_VERSION = 39;
+const CURRENT_SCHEMA_VERSION = 40;
+
+it("upgrades v39 without certifying old runs or changing accepted handoff authority", () => {
+  closeDb();
+  const path = join(tmpdir(), `aif-process-upgrade-${crypto.randomUUID()}.sqlite`);
+  const connections: Database.Database[] = [];
+  try {
+    getDb(path);
+    closeDb();
+    const old = new Database(path);
+    connections.push(old);
+    old.exec("DROP TABLE task_device_processes");
+    old
+      .prepare(
+        "INSERT INTO task_device_grants (id,task_id,project_id,execution_epoch,grant_json) VALUES ('grant','task','project',1,'{}')",
+      )
+      .run();
+    old
+      .prepare(
+        "INSERT INTO task_device_grant_heads (task_id,project_id,grant_id,owner_device_id,execution_epoch,state,active_run_id) VALUES ('task','project','grant','device',1,'accepted','old-run')",
+      )
+      .run();
+    old
+      .prepare(
+        "INSERT INTO task_device_runs (id,task_id,grant_id,owner_device_id,execution_epoch,worktree_path,snapshot_commit,ownership_revision,input_digest,state,started_at) VALUES ('old-run','task','grant','device',1,'root','commit',0,'digest','uncertain','now')",
+      )
+      .run();
+    old.pragma("user_version = 39");
+    old.close();
+    getDb(path);
+    closeDb();
+    const migrated = new Database(path);
+    connections.push(migrated);
+    expect(migrated.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
+    expect(migrated.prepare("SELECT count(*) AS count FROM task_device_processes").get()).toEqual({
+      count: 0,
+    });
+    expect(
+      migrated.prepare("SELECT state,active_run_id FROM task_device_grant_heads").get(),
+    ).toEqual({ state: "accepted", active_run_id: "old-run" });
+    expect(migrated.prepare("SELECT state FROM task_device_runs").get()).toEqual({
+      state: "uncertain",
+    });
+  } finally {
+    closeDb();
+    for (const connection of connections) if (connection.open) connection.close();
+    removeSqliteArtifacts(path);
+  }
+});
 
 it("upgrades v38 without manufacturing handoffs or restoring relinquished device authority", () => {
   closeDb();
@@ -19,6 +67,7 @@ it("upgrades v38 without manufacturing handoffs or restoring relinquished device
     const old = new Database(path);
     connections.push(old);
     old.exec("DROP TABLE task_device_handoffs");
+    old.exec("DROP TABLE task_device_processes");
     old.exec("DROP TABLE task_device_grant_heads");
     old.exec(`CREATE TABLE task_device_grant_heads (
       task_id TEXT PRIMARY KEY, project_id TEXT NOT NULL,

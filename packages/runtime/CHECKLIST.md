@@ -6,7 +6,7 @@ Run through this list whenever you touch anything under `packages/runtime/`.
 
 Every feature or fix in the runtime layer must cover **every** adapter, not just the one that prompted the change.
 
-- [ ] If you changed a runtime adapter (`adapters/claude`, `adapters/codex`, `adapters/openrouter`), audit the other adapters and apply the equivalent change. A fix that only lands in one adapter is incomplete.
+- [ ] If you changed a runtime adapter (`adapters/claude`, `adapters/codex`, `adapters/openrouter`, `adapters/opencode`), audit the other adapters and apply the equivalent change. A fix that only lands in one adapter is incomplete.
 - [ ] If you added a new capability, field, hook, or option to `RuntimeAdapter` / `types.ts`, implement it in **all** adapters. Do not ship a capability that only one adapter honours unless it is explicitly gated behind `capabilities`.
 - [ ] If you changed the `run()` / `stream()` / `validate()` / `listModels()` contract, verify every adapter still conforms — including error classification in each adapter's `errors.ts`.
 - [ ] If you changed session/resume semantics, verify parity across adapters that expose session reuse.
@@ -19,6 +19,9 @@ Every feature or fix in the runtime layer must cover **every** adapter, not just
 - [ ] Update `.docker/Dockerfile` if an adapter needs a new system-level dependency (CLI binary, package, etc.).
 
 ## Tests
+
+- [ ] Native supervision persists host/child identities before creation/resume; target output cannot forge control receipts. Test detached descendants, a full stdin pipe, lost parent/helper processes, reused PID rejection and live-orphan recovery. Unsupported OS mechanisms fail closed without a version allowlist.
+- [ ] A native job-empty receipt proves only that containment unit. Do not claim adapter coverage or release device authority until all launch paths and external services for that transport are covered.
 
 - [ ] CLI fallback tests explicitly stub and restore `CODEX_CLI_PATH`; do not assume the developer's shell has no override. Keep real override cases covered.
 - [ ] Add or update unit tests in `packages/runtime/src/__tests__/` for every adapter you touched.

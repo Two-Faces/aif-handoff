@@ -860,6 +860,22 @@ export const taskDeviceSessions = sqliteTable("task_device_sessions", {
   runtimeKey: text("runtime_key"),
 });
 
+/** Local process receipts; never part of board sync or peer handoff payloads. */
+export const taskDeviceProcesses = sqliteTable("task_device_processes", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id").notNull(),
+  runId: text("run_id")
+    .notNull()
+    .references(() => taskDeviceRuns.id),
+  state: text("state", { enum: ["reserved", "identified", "prepared", "stopped"] }).notNull(),
+  supervisorId: text("supervisor_id"),
+  identityJson: text("identity_json"),
+  preparedJson: text("prepared_json"),
+  evidenceJson: text("evidence_json"),
+  createdAt: text("created_at").notNull(),
+  stoppedAt: text("stopped_at"),
+});
+
 /** Local durable handoff journal. Authority survives UI/task deletion. */
 export const taskDeviceHandoffs = sqliteTable("task_device_handoffs", {
   id: text("id").primaryKey(),

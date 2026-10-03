@@ -1329,6 +1329,21 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX task_device_handoff_task ON task_device_handoffs(task_id, direction, phase);
     `,
   },
+  {
+    version: 40,
+    description: "Local native process supervision receipts",
+    sql: `
+      CREATE TABLE task_device_processes (
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
+        run_id TEXT NOT NULL REFERENCES task_device_runs(id),
+        state TEXT NOT NULL CHECK(state IN ('reserved','identified','prepared','stopped')),
+        supervisor_id TEXT, identity_json TEXT, prepared_json TEXT, evidence_json TEXT,
+        created_at TEXT NOT NULL, stopped_at TEXT
+      );
+      CREATE UNIQUE INDEX task_device_process_supervisor ON task_device_processes(supervisor_id);
+      CREATE INDEX task_device_process_run ON task_device_processes(run_id, state);
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {

@@ -249,3 +249,9 @@ export type {
   CreateOpenRouterRuntimeAdapterOptions,
   OpenRouterAdapterLogger,
 } from "./adapters/openrouter/index.js";
+
+export {
+  launchSupervisedProcess,
+  recoverSupervisedProcess,
+} from "./supervision/processSupervisor.js";
+export type { SupervisedProcess, SupervisedProcessInput } from "./supervision/processSupervisor.js";

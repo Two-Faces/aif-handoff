@@ -1,6 +1,13 @@
 export * from "./taskWorkspaces.js";
 export * from "./deviceHandoff.js";
 export {
+  createTaskDeviceProcessJournal,
+  getTaskDeviceProcess,
+  listTaskDeviceProcesses,
+  getTaskDeviceProcessRecovery,
+  recordTaskDeviceProcessRecovery,
+} from "./deviceProcesses.js";
+export {
   assertTaskDeviceChatSession,
   assertTaskDeviceChatProject,
   getTaskDeviceChatRoot,

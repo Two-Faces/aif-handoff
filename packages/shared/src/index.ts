@@ -1,5 +1,6 @@
 export * from "./personalMode.js";
 export * from "./deviceExecution.js";
+export * from "./processSupervision.js";
 export * from "./handoff/deviceHandoff.js";
 export * from "./existingCheckout.js";
 export * from "./sync/contracts.js";
@@ -28,6 +29,7 @@ export {
   taskDeviceRuns,
   taskDeviceSessions,
   taskDeviceHandoffs,
+  taskDeviceProcesses,
   codeSnapshots,
   contextSnapshotBlobs,
   codeSnapshotLocations,
