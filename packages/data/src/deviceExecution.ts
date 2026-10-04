@@ -10,6 +10,7 @@ import {
   taskDeviceGrants,
   taskDeviceGrantHeads,
   taskDeviceRuns,
+  taskDeviceRunAdmissions,
   tasks,
   projects,
   localDevice,
@@ -19,6 +20,12 @@ import {
 } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
 import { assertTaskDeviceProcessesStopped } from "./deviceProcesses.js";
+import { assertNativeTaskDeviceRunStopped } from "./deviceHandoffStop.js";
+import {
+  isTaskDeviceNativeAdmission,
+  nativeAdmissionPolicy,
+  type TaskDeviceNativeAdmission,
+} from "./deviceRunAdmission.js";
 import { getLocalDevice } from "./devices.js";
 import { getPersonalExecutionBlock } from "./personalMode.js";
 import { requirePeerProject } from "./peers.js";
@@ -31,6 +38,7 @@ interface ExecutionScope {
   run: Readonly<Run>;
   pending: number;
   failed: boolean;
+  nativeAdmission?: TaskDeviceNativeAdmission;
   completionOwnershipRevision?: number;
   cleanup: Array<() => void>;
 }
@@ -471,13 +479,40 @@ export function withCurrentTaskDeviceMutation<T>(mutate: () => T): T {
  * Failure/timeout retains the reservation as uncertain. P14 must prove exit to
  * recover it; neither elapsed time nor a fresh coordinator can steal the run.
  */
-export async function withTaskDeviceExecution<T>(
-  input: {
-    taskId: string;
-    projectRoot: string;
-    coordinatorId?: string;
-  },
+interface TaskDeviceExecutionInput {
+  taskId: string;
+  projectRoot: string;
+  coordinatorId?: string;
+}
+export function withTaskDeviceExecution<T>(
+  input: TaskDeviceExecutionInput,
   execute: (root: string) => Promise<T>,
+): Promise<T> {
+  return executeTaskDeviceRun(input, execute);
+}
+
+/** Internal host boundary for a whole isolated invocation, not a flag on an
+ * existing run. Caller must use the fixed native bridge without host callbacks. */
+export function withTaskDeviceNativeExecution<T>(
+  input: TaskDeviceExecutionInput & TaskDeviceNativeAdmission,
+  execute: (root: string) => Promise<T>,
+): Promise<T> {
+  if (
+    !isTaskDeviceNativeAdmission(input) ||
+    execution.getStore() ||
+    !getTaskDeviceGrant(input.taskId)
+  )
+    return Promise.reject(new DeviceExecutionError("run_scope_required"));
+  return executeTaskDeviceRun(input, execute, {
+    runtimeId: input.runtimeId,
+    transport: input.transport,
+  });
+}
+
+async function executeTaskDeviceRun<T>(
+  input: TaskDeviceExecutionInput,
+  execute: (root: string) => Promise<T>,
+  nativeAdmission?: TaskDeviceNativeAdmission,
 ): Promise<T> {
   const task = requireTask(input.taskId);
   if (getPersonalExecutionBlock(task.projectId!, task.id))
@@ -485,6 +520,7 @@ export async function withTaskDeviceExecution<T>(
   const head = getTaskDeviceGrant(task.id);
   if (!head && !execution.getStore()) return execute(input.projectRoot);
   const inherited = execution.getStore();
+  if (inherited?.nativeAdmission) return fail("run_scope_required");
   if (inherited) assertRun(inherited.run, task.id);
   else if (head) {
     if (head.state === "accepted") return fail("run_continuation_required");
@@ -546,6 +582,15 @@ export async function withTaskDeviceExecution<T>(
       settledAt: null,
     };
     getDb().insert(taskDeviceRuns).values(record).run();
+    if (nativeAdmission)
+      getDb()
+        .insert(taskDeviceRunAdmissions)
+        .values({
+          runId: record.id,
+          policy: nativeAdmissionPolicy,
+          ...nativeAdmission,
+        })
+        .run();
     getDb()
       .update(taskDeviceGrantHeads)
       .set({ activeRunId: record.id })
@@ -553,7 +598,7 @@ export async function withTaskDeviceExecution<T>(
       .run();
     return Object.freeze(record);
   });
-  const scope: ExecutionScope = { run, pending: 0, failed: false, cleanup: [] };
+  const scope: ExecutionScope = { run, pending: 0, failed: false, cleanup: [], nativeAdmission };
   return execution.run(scope, async () => {
     try {
       const result = await execute(root);
@@ -561,6 +606,7 @@ export async function withTaskDeviceExecution<T>(
         if (scope.pending || scope.failed) return fail("run_fenced");
         assertRun(run, task.id, undefined, true);
         assertTaskDeviceProcessesStopped(run.id);
+        if (nativeAdmission) assertNativeTaskDeviceRunStopped(run);
         getDb()
           .update(taskDeviceRuns)
           .set({ state: "settled", settledAt: new Date().toISOString() })
@@ -820,6 +866,11 @@ export function currentTaskDeviceFilter(allowAvailable = false) {
 }
 export function currentTaskDeviceRunId(): string | null {
   return execution.getStore()?.run.id ?? null;
+}
+export function assertTaskDeviceNativeRuntime(runtimeId: string, transport: string): void {
+  const admission = execution.getStore()?.nativeAdmission;
+  if (admission && (admission.runtimeId !== runtimeId || admission.transport !== transport))
+    fail("run_fenced");
 }
 export function currentTaskDeviceBinding() {
   const scope = execution.getStore();

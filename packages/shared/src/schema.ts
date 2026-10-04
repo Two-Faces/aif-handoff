@@ -846,6 +846,16 @@ export const taskDeviceRuns = sqliteTable("task_device_runs", {
   settledAt: text("settled_at"),
 });
 
+/** Admission recorded with the run reservation, never inferred from receipts. */
+export const taskDeviceRunAdmissions = sqliteTable("task_device_run_admissions", {
+  runId: text("run_id")
+    .primaryKey()
+    .references(() => taskDeviceRuns.id),
+  policy: text("policy").notNull(),
+  runtimeId: text("runtime_id").notNull(),
+  transport: text("transport").notNull(),
+});
+
 // Local-only native session provenance. No cascade: retired sessions must not
 // become unscoped imports after a task/chat is deleted or handed to another root.
 export const taskDeviceSessions = sqliteTable("task_device_sessions", {

@@ -1344,6 +1344,16 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX task_device_process_run ON task_device_processes(run_id, state);
     `,
   },
+  {
+    version: 41,
+    description: "Explicit isolated runtime admission before native task execution",
+    sql: `
+      CREATE TABLE task_device_run_admissions (
+        run_id TEXT PRIMARY KEY REFERENCES task_device_runs(id),
+        policy TEXT NOT NULL, runtime_id TEXT NOT NULL, transport TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {

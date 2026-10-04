@@ -6,6 +6,54 @@ own SQLite database and works offline. This milestone **does not execute persona
 tasks or transfer code, context files or attachment bytes**. Grants, process fencing,
 code snapshots and native build/QA belong to M2/M3.
 
+## P14 source handoff after an isolated runtime invocation
+
+Migration v41 adds local `task_device_run_admissions` with no backfill. The
+internal API service `executeTaskDeviceIsolatedRuntime` records admission with
+the run reservation before any provider process starts. It owns one entire
+fresh invocation and accepts no caller host callbacks or session reuse. Allowed
+paths are Claude SDK/CLI/API, text-only Codex/OpenRouter API and owned OpenCode
+API. Codex CLI/SDK/app-server configuration and external-service isolation remain
+open; a supervisor receipt for those old paths is not whole-run admission.
+
+An explicit local request fences old callbacks and new launches immediately.
+`checkpointNativeTaskHandoff` then uses saved local identities for native
+recovery. Every run in the current grant must have admission and exactly one
+complete, matching prepared/stop receipt. Missing receipts, a reservation without
+prepared identity, historical unadmitted runs, unknown policy and corrupt records
+block checkpointing. Process recovery by itself still does not release authority.
+
+Stop acknowledgement freezes the prepared Git intent and portable context bytes
+in the same transaction. The proof digest binds all admitted runs and their
+receipts. Publication and release revalidate it; restart uses the frozen package.
+The active reservation and claim survive until the transaction that relinquishes
+the source grant and issues its unique successor. Old callbacks remain fenced.
+The destination still accepts into the non-executable `accepted` state; explicit
+P15 continuation remains required. No public routes or personal AI are enabled.
+
+The final Windows `ai:validate` passed on 2026-10-04: 3801 passed / 10 skipped,
+all seven package coverage thresholds met, build 7/7, Chromium 8/8, k6 3/3 and
+Codex protocol CLI 0.145.0. Installed OpenCode was included. This was one full
+gate after focused development checks; all 20 changed TS/test files matched
+their pre-gate hashes. Log: `.codex/m2/logs/native-handoff-final-validate.log`.
+The Mac subset below remains pending (expected 17 data + 8 API):
+
+```bash
+npm test --workspace @aif/data -- deviceHandoff.test.ts --bail=1
+npm test --workspace @aif/api -- deviceRuntimeHandoff.test.ts --bail=1
+```
+
+The API suite uses offline provider fixtures, including a real supervisor and
+coordinator crash with a live owned OpenCode writer. It does not require a paid
+provider, a live local LLM or `OPENCODE_NATIVE_TEST_PATH`. The previously accepted
+OpenCode subset need not be repeated. Physical Windows-to-Mac-to-Windows handoff,
+normal coordinator admission and full M2 acceptance remain open.
+
+Package checklist review: DB access stays in data; v41 is appended; provider
+capabilities and package dependencies do not change. There are no new REST/WS/UI
+or Docker surfaces. Applicable lint/tests/coverage/build are included in the
+required final `ai:validate` gate; native Mac acceptance is recorded separately.
+
 ## Start two independent installations
 
 Use Node 22 and separate checkouts/databases on Windows and macOS. Run `npm ci` and

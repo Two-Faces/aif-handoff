@@ -4,10 +4,29 @@ import {
   recordTaskHandoffReceipt,
   requireSyncPeer,
   requirePeerProject,
+  quiesceTaskDeviceHandoff,
+  listNativeTaskHandoffProcesses,
+  confirmNativeTaskHandoffStop,
+  checkpointTaskDeviceHandoff,
 } from "@aif/data";
 import { DeviceHandoffError, PeerError, taskDeviceHandoffReceiptSchema } from "@aif/shared";
 import type { PeerTlsIdentity } from "./peerIdentity.js";
 import type { peerRequest } from "./peerTransport.js";
+import { recoverTaskDeviceProcess } from "./deviceProcessSupervisor.js";
+
+/** Explicit internal source operation. Fence writes before native recovery;
+ * recheck current journal/input after awaits. Release remains a separate action. */
+export async function checkpointNativeTaskHandoff(id: string) {
+  if (getTaskDeviceHandoff(id).phase === "checkpointed") return checkpointTaskDeviceHandoff(id);
+  quiesceTaskDeviceHandoff(id);
+  const processes = listNativeTaskHandoffProcesses(id);
+  for (const process of processes) {
+    if (process.state !== "stopped") await recoverTaskDeviceProcess(process.id);
+  }
+  const current = getTaskDeviceHandoff(id);
+  confirmNativeTaskHandoffStop({ id, expectedRevision: current.revision });
+  return checkpointTaskDeviceHandoff(id);
+}
 
 /** Host service only. Delivery is retryable after lost ACK; neither a peer
  * request nor a receipt accepts the task or starts a runtime on either device. */

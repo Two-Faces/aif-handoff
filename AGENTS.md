@@ -311,6 +311,19 @@ normal/personal runner admission is still disabled.
 | `packages/shared/src/stateMachine.ts`   | Task state transitions                |
 | `turbo.json`                            | Turborepo task definitions            |
 
+P14 runtime-backed source handoff adds migration v41 `task_device_run_admissions`.
+`deviceIsolatedRuntime.ts` owns an entire fresh invocation without host callbacks,
+and records `isolated_runtime_v1` with its run reservation. Current admission is
+Claude SDK/CLI/API, text-only Codex/OpenRouter API, and owned OpenCode API.
+Codex CLI/SDK/app-server still need configuration/external-service isolation.
+`deviceHandoffStop.ts` verifies every run under the source grant and its exact
+native receipt before freezing code/context. Missing or legacy admissions,
+unprepared reservations and partial receipts cannot be upgraded into proof.
+`checkpointNativeTaskHandoff` fences first, recovers local native receipts, then
+checkpoints; it retains the active reservation until atomic grant release.
+No routes, normal coordinator admission, native session reuse or personal AI
+are enabled. The new native Mac subset and physical M2 handoff remain pending.
+
 ## Documentation
 
 | Document        | Path                    | Description                               |

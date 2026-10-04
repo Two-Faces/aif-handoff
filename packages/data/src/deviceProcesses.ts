@@ -17,6 +17,7 @@ import {
 import { getDb } from "@aif/shared/server";
 import { assertTaskDeviceExecution, currentTaskDeviceRunId } from "./deviceExecution.js";
 import { getLocalDevice } from "./devices.js";
+import { getTaskDeviceRunAdmission } from "./deviceRunAdmission.js";
 
 function fail(code: ProcessJournalError["code"]): never {
   throw new ProcessJournalError(code);
@@ -93,6 +94,8 @@ export function createTaskDeviceProcessJournal(taskId: string) {
   const runId = currentTaskDeviceRunId();
   if (!runId) throw new DeviceExecutionError("run_scope_required");
   assertTaskDeviceExecution(taskId);
+  if (getTaskDeviceRunAdmission(runId) && listTaskDeviceProcesses(runId).length)
+    fail("process_conflict");
   const id = randomUUID();
   getDb()
     .insert(taskDeviceProcesses)

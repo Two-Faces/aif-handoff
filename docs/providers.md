@@ -15,6 +15,16 @@ This guide describes the runtime/provider model introduced by `@aif/runtime`.
 
 ## Native process supervision (P14 in progress)
 
+The internal `executeTaskDeviceIsolatedRuntime` service now reserves an entire
+fresh invocation with durable `isolated_runtime_v1` admission. It accepts Claude
+SDK/CLI/API, text-only Codex/OpenRouter API and owned OpenCode API through their
+existing isolated native paths. Caller callbacks, hooks, session reuse and
+external execution services are excluded. Codex CLI/SDK/app-server still need
+configuration isolation before they can acquire this whole-run admission.
+Existing transport tests and native receipts alone do not retroactively admit
+old runs. Normal workflows, public actions and personal AI remain disabled.
+The new source checkpoint/release native Mac subset is pending.
+
 The internal Windows supervisor in `@aif/runtime` launches a process directly
 inside a Job Object and confirms that the job is empty before producing a stop
 receipt. It requires durable callbacks before child creation and before resuming

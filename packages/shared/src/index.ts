@@ -27,6 +27,7 @@ export {
   taskDeviceGrants,
   taskDeviceGrantHeads,
   taskDeviceRuns,
+  taskDeviceRunAdmissions,
   taskDeviceSessions,
   taskDeviceHandoffs,
   taskDeviceProcesses,

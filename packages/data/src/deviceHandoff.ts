@@ -49,6 +49,13 @@ import {
 import { getSnapshotTransfer } from "./snapshotTransfers.js";
 import { readSyncVersions } from "./syncJournal.js";
 import { handoffInputDigest, withHandoffCheckpoint } from "./deviceHandoffScope.js";
+import {
+  assertNativeHandoffStop,
+  readHandoffStop,
+  taskNativeHandoffStopDigest,
+} from "./deviceHandoffStop.js";
+import { requireTaskDeviceRunAdmission } from "./deviceRunAdmission.js";
+import { listTaskDeviceProcesses } from "./deviceProcesses.js";
 
 type Transfer = typeof taskDeviceHandoffs.$inferSelect;
 const activePhases = ["requested", "quiescing", "checkpointed"] as const;
@@ -262,49 +269,123 @@ export function confirmManualTaskHandoffStop(input: {
         confirmedAt: new Date().toISOString(),
       }),
     });
-    // Freeze the Git intent in the same transaction as the attestation. A crash
-    // before commit cannot leave an attestation that later adopts new edits.
-    const workspace = withHandoffCheckpoint(row.id, () =>
-      prepareTaskWorkspaceCheckpoint(row.taskId, "handoff: checkpoint task work"),
-    );
-    if (!workspace.intentJson) fail("handoff_snapshot_pending");
-    const request = taskDeviceHandoffRequestSchema.safeParse(parse(row.requestJson));
-    if (!request.success) return fail("handoff_invalid");
-    const checkout = {
-      projectId: row.projectId,
-      taskId: row.taskId,
-      projectRoot: workspace.projectRoot,
-      worktreePath: workspace.worktreePath,
-      snapshotCommit: workspace.snapshotCommit,
+    return freezeHandoffCheckpoint(row, {
+      kind: "manual",
+      participantId: input.participantId,
+      confirmationRevision: input.expectedRevision,
+    });
+  });
+}
+
+/** Host-only acknowledgement of persisted, fully admitted native runs. It
+ * accepts no caller-provided process evidence and never clears their authority. */
+export function confirmNativeTaskHandoffStop(input: {
+  id: string;
+  expectedRevision: number;
+}): Transfer {
+  assertHostAction();
+  return getDb().transaction(() => {
+    let row = getTaskDeviceHandoff(input.id);
+    requireSource(row);
+    if (row.phase !== "quiescing") fail("handoff_wrong_phase");
+    if (row.stopJson) {
+      const stop = readHandoffStop(row.stopJson);
+      assertNativeHandoffStop(row);
+      if (
+        row.revision !== input.expectedRevision &&
+        stop.confirmationRevision !== input.expectedRevision
+      )
+        fail("handoff_conflict");
+      return row;
+    }
+    if (row.revision !== input.expectedRevision) fail("handoff_conflict");
+    const stop = {
+      kind: "native",
+      proofDigest: taskNativeHandoffStopDigest(row),
+      confirmationRevision: input.expectedRevision,
     };
-    const inherited = workspace.sourceSnapshotId
-      ? loadCodeSnapshotPackage(workspace.sourceSnapshotId, row.projectId)
-          .context.files.filter((file) => file.source === "portable")
-          .map((file) => file.path)
-      : [];
-    // Freeze portable bytes before acknowledging the manual stop. No ref is
-    // published until this transaction has durably saved the prepared intent.
-    const pack = captureCodeSnapshotPackage({
-      checkout,
-      commitSha: preparedTaskCommitSha(restoreTaskCommitIntent(workspace.intentJson, checkout)),
-      sourceDeviceId: row.sourceDeviceId,
-      parentSnapshotId: workspace.sourceSnapshotId,
-      planText: taskFor(row).plan,
-      notes: request.data.notes,
-      portablePaths: request.data.portablePaths ?? inherited,
-    });
-    storeCodeSnapshotPackage(pack);
-    return revise(row, {
+    // The request already fences every old write and new launch. Preserve the
+    // active reservation/claim until release, including after coordinator death.
+    getDb()
+      .update(taskDeviceRuns)
+      .set({ state: "uncertain" })
+      .where(
+        and(
+          eq(taskDeviceRuns.taskId, row.taskId),
+          eq(taskDeviceRuns.grantId, row.expectedGrantId),
+          eq(taskDeviceRuns.state, "running"),
+        ),
+      )
+      .run();
+    row = revise(row, { stopJson: canonicalJson(stop) });
+    return freezeHandoffCheckpoint(row, stop);
+  });
+}
+
+/** Local host recovery inventory, never a peer-supplied process identity. */
+export function listNativeTaskHandoffProcesses(id: string) {
+  assertHostAction();
+  const row = getTaskDeviceHandoff(id);
+  requireSource(row);
+  if (row.phase !== "quiescing") fail("handoff_wrong_phase");
+  const runs = getDb()
+    .select()
+    .from(taskDeviceRuns)
+    .where(
+      and(eq(taskDeviceRuns.taskId, row.taskId), eq(taskDeviceRuns.grantId, row.expectedGrantId)),
+    )
+    .all();
+  if (!runs.length) fail("handoff_stop_unproven");
+  return runs.flatMap((run) => {
+    requireTaskDeviceRunAdmission(run.id);
+    const processes = listTaskDeviceProcesses(run.id);
+    if (processes.length !== 1 || processes[0].taskId !== row.taskId || !processes[0].preparedJson)
+      fail("handoff_stop_unproven");
+    return processes;
+  });
+}
+
+function freezeHandoffCheckpoint(row: Transfer, stop: Record<string, unknown>): Transfer {
+  // Freeze the Git intent in the same transaction as the attestation. A crash
+  // before commit cannot leave an attestation that later adopts new edits.
+  const workspace = withHandoffCheckpoint(row.id, () =>
+    prepareTaskWorkspaceCheckpoint(row.taskId, "handoff: checkpoint task work"),
+  );
+  if (!workspace.intentJson) fail("handoff_snapshot_pending");
+  const request = taskDeviceHandoffRequestSchema.safeParse(parse(row.requestJson));
+  if (!request.success) return fail("handoff_invalid");
+  const checkout = {
+    projectId: row.projectId,
+    taskId: row.taskId,
+    projectRoot: workspace.projectRoot,
+    worktreePath: workspace.worktreePath,
+    snapshotCommit: workspace.snapshotCommit,
+  };
+  const inherited = workspace.sourceSnapshotId
+    ? loadCodeSnapshotPackage(workspace.sourceSnapshotId, row.projectId)
+        .context.files.filter((file) => file.source === "portable")
+        .map((file) => file.path)
+    : [];
+  // Freeze portable bytes before acknowledging stop. No ref is
+  // published until this transaction has durably saved the prepared intent.
+  const pack = captureCodeSnapshotPackage({
+    checkout,
+    commitSha: preparedTaskCommitSha(restoreTaskCommitIntent(workspace.intentJson, checkout)),
+    sourceDeviceId: row.sourceDeviceId,
+    parentSnapshotId: workspace.sourceSnapshotId,
+    planText: taskFor(row).plan,
+    notes: request.data.notes,
+    portablePaths: request.data.portablePaths ?? inherited,
+  });
+  storeCodeSnapshotPackage(pack);
+  return revise(row, {
+    snapshotId: pack.id,
+    stopJson: canonicalJson({
+      ...stop,
       snapshotId: pack.id,
-      stopJson: canonicalJson({
-        kind: "manual",
-        participantId: input.participantId,
-        confirmationRevision: input.expectedRevision,
-        snapshotId: pack.id,
-        intentDigest: digest(workspace.intentJson),
-        confirmedAt: new Date().toISOString(),
-      }),
-    });
+      intentDigest: digest(workspace.intentJson),
+      confirmedAt: new Date().toISOString(),
+    }),
   });
 }
 function verifyFrozenIntent(row: Transfer): void {
@@ -313,15 +394,16 @@ function verifyFrozenIntent(row: Transfer): void {
   const workspace = getTaskExecutionWorkspace(row.taskId);
   if (
     !stop ||
-    stop.kind !== "manual" ||
-    typeof stop.participantId !== "string" ||
     !workspace?.intentJson ||
     stop.snapshotId !== row.snapshotId ||
     !row.snapshotId ||
     stop.intentDigest !== digest(workspace.intentJson)
   )
     fail("handoff_stop_unproven");
-  requireManualStop(row, stop.participantId);
+  if (stop.kind === "native") assertNativeHandoffStop(row);
+  else if (stop.kind === "manual" && typeof stop.participantId === "string")
+    requireManualStop(row, stop.participantId);
+  else fail("handoff_stop_unproven");
   withHandoffCheckpoint(row.id, () => publishTaskWorkspaceCheckpoint(row.taskId));
 }
 export function checkpointTaskDeviceHandoff(id: string): Transfer {
@@ -393,7 +475,12 @@ export function releaseTaskDeviceHandoff(id: string): TaskDeviceHandoffOffer {
       fail("handoff_input_changed");
     getDb()
       .update(taskDeviceGrantHeads)
-      .set({ state: "released", releasedTransferId: row.id, releasedSnapshotId: pack.id })
+      .set({
+        state: "released",
+        activeRunId: null,
+        releasedTransferId: row.id,
+        releasedSnapshotId: pack.id,
+      })
       .where(
         and(
           eq(taskDeviceGrantHeads.taskId, row.taskId),
@@ -401,6 +488,14 @@ export function releaseTaskDeviceHandoff(id: string): TaskDeviceHandoffOffer {
         ),
       )
       .run();
+    // The same transaction relinquishes authority and retires host-local
+    // scheduling/session state. Late callbacks remain fenced by the old grant.
+    if (readHandoffStop(row.stopJson).kind === "native")
+      getDb()
+        .update(tasks)
+        .set({ lockedBy: null, lockedUntil: null, sessionId: null })
+        .where(eq(tasks.id, row.taskId))
+        .run();
     const successor = issueTaskDeviceSuccessor({
       taskId: row.taskId,
       expectedGrantId: head.grantId,

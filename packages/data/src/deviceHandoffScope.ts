@@ -12,6 +12,7 @@ import {
 import { getDb } from "@aif/shared/server";
 import { getLocalDevice } from "./devices.js";
 import { taskExecutionInputDigest, withTaskDeviceMutation } from "./deviceExecution.js";
+import { assertNativeHandoffStop, readHandoffStop } from "./deviceHandoffStop.js";
 
 const checkpointScope = new AsyncLocalStorage<string>();
 export function handoffInputDigest(task: typeof tasks.$inferSelect): string {
@@ -48,8 +49,8 @@ export function withWorkspaceCheckpointMutation<T>(taskId: string, operation: ()
       .where(eq(taskDeviceGrantHeads.taskId, taskId))
       .get();
     const task = getDb().select().from(tasks).where(eq(tasks.id, taskId)).get();
-    // Until process supervision is implemented, only a run-free manual task
-    // can reach this capability. No boolean "force stop" bypass exists.
+    // Manual tasks must be run-free; native tasks require complete persisted
+    // admission/stop proof below. Neither path accepts a force-stop boolean.
     const run = getDb()
       .select({ id: taskDeviceRuns.id })
       .from(taskDeviceRuns)
@@ -67,9 +68,15 @@ export function withWorkspaceCheckpointMutation<T>(taskId: string, operation: ()
       !["owned", "accepted"].includes(head.state) ||
       head.grantId !== transfer.expectedGrantId ||
       head.ownerDeviceId !== getLocalDevice().deviceId ||
+      !task
+    )
+      throw new DeviceHandoffError("handoff_stop_unproven");
+    const stop = readHandoffStop(transfer.stopJson);
+    if (stop.kind === "native") assertNativeHandoffStop(transfer);
+    else if (
+      stop.kind !== "manual" ||
       head.activeRunId ||
       run ||
-      !task ||
       task.executionOwner !== "human" ||
       task.lockedBy ||
       task.sessionId

@@ -289,8 +289,23 @@ gate проверяются адресно. Не ослаблять assertions/c
 после незавершённого/упавшего gate или изменения поведения/границ исполнения.
 Не менять test pipeline автоматически: сейчас в нём test и coverage идут отдельно.
 
-Далее P14 — normal runner admission/external-service coverage, runtime-backed checkpoint/release и
-физическая передача Win→Mac→Win. Native stop receipt сам по себе не освобождает
+Новый подблок P14 (04.10.2026): v41 сохраняет допуск isolated_runtime_v1 вместе с
+резервированием run. Внутренний executeTaskDeviceIsolatedRuntime выполняет целый
+fresh вызов без host callbacks: Claude SDK/CLI/API, Codex/OpenRouter text-only API,
+owned OpenCode. Codex CLI/SDK/app-server остаются без этого допуска до изоляции
+config/external services. Старым run допуск задним числом не присваивается.
+checkpointNativeTaskHandoff сначала fences задачу, восстанавливает native stop из
+локального журнала и атомарно замораживает code/context. Проверяется вся история
+run текущего grant, а active reservation снимается только в release transaction.
+Новый Mac subset: data deviceHandoff.test.ts и API deviceRuntimeHandoff.test.ts;
+приёмка ещё открыта. Прежние 255 OpenCode тестов повторять не требуется.
+Windows: единственный полный ai:validate прошёл — 3801 passed / 10 skipped,
+coverage всех packages ≥70%, build 7/7, Chromium 8/8, k6 3/3, CLI protocol 0.145.0.
+Лог .codex/m2/logs/native-handoff-final-validate.log; все 20 TS/test source hashes
+совпали после gate. Mac-команды ожидают 17 data + 8 API = 25 tests.
+
+Далее P14 — Codex configuration isolation, normal runner admission/external-service
+coverage и физическая передача Win→Mac→Win. Native stop receipt сам по себе не освобождает
 grant/run и не подтверждает остановку внешних/делегированных services.
 Personal AI и публичные launch/recovery/handoff actions пока не включать.
 Детали и текущие проверки — в плане и docs/local-device-sync.md.

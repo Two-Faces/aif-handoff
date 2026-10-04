@@ -8,6 +8,7 @@ import {
   findTaskById,
   createDbUsageSink,
   createTaskDeviceRuntimeGuard,
+  assertTaskDeviceNativeRuntime,
 } from "@aif/data";
 import {
   launchSupervisedProcess,
@@ -83,6 +84,7 @@ async function runTaskDeviceRuntime(
 ) {
   const root = input.cwd ?? input.projectRoot;
   assertTaskDeviceExecution(taskId, root);
+  assertTaskDeviceNativeRuntime(runtimeId, transport);
   const task = findTaskById(taskId);
   const reusesSession = Boolean(
     input.sessionId || input.resume || (input as Partial<RuntimeSessionForkInput>).sourceSessionId,

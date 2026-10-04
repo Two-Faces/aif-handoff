@@ -1,5 +1,6 @@
 import {
   confirmManualTaskHandoffStop,
+  confirmNativeTaskHandoffStop,
   checkpointTaskDeviceHandoff,
   releaseTaskDeviceHandoff,
   getTaskDeviceHandoff,
@@ -10,7 +11,9 @@ import { publishTaskCommit, restoreTaskCommitIntent } from "@aif/shared";
 import { getDb, type createTestDb } from "@aif/shared/server";
 
 const [mode, id, participantId, revision] = process.argv.slice(2);
-if (mode === "confirm")
+if (mode === "confirm-native")
+  confirmNativeTaskHandoffStop({ id, expectedRevision: Number(revision) });
+else if (mode === "confirm")
   confirmManualTaskHandoffStop({ id, participantId, expectedRevision: Number(revision) });
 else if (mode === "publish-without-ack") {
   const transfer = getTaskDeviceHandoff(id),

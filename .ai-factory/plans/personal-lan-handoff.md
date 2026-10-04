@@ -152,6 +152,7 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
   - Проверка: два coordinator, partition, stale heartbeat/claim, duplicated/forked assignment, delayed completion, chat/runtime/helper bypass и неправильный project root; одной task никогда не разрешены два активных устройства.
 
 - [ ] **P14. Реализовать persisted handoff state machine и подтверждённую остановку.**
+  - **Runtime-backed source handoff, 04.10.2026:** v41 добавляет допуск `isolated_runtime_v1` до начала run, без backfill старых запусков. Внутренний `executeTaskDeviceIsolatedRuntime` допускает fresh Claude SDK/CLI/API, text-only Codex/OpenRouter API и owned OpenCode без host callbacks/session reuse. Codex CLI/SDK/app-server пока требуют отдельной изоляции конфигурации/внешних исполнителей. Handoff проверяет всю историю текущего grant, exact native receipts и immutable proof; quiesce fences старые writers до recovery, stop acknowledgement атомарно замораживает intent/context, release атомарно выдаёт successor и снимает active reservation. Проверки покрывают потерю ACK/рестарт, старые и неполные run, порчу receipt, поздние callbacks и смерть настоящего coordinator с живым OpenCode-потомком. Новый Mac subset — `deviceHandoff.test.ts` и `deviceRuntimeHandoff.test.ts`, пока ожидается. Public routes, normal coordinator, resume и personal AI не включены; P14/M2 остаются открытыми. Единственный финальный Windows `ai:validate` прошёл: **3801 passed / 10 skipped**, coverage всех семи packages ≥70% (shared 75.75%, data 78.62%, runtime 76.16%, API 70.46%, agent 76.17%, web 74.49%, MCP 86.27%), build 7/7, Chromium 8/8, k6 3/3 и Codex protocol CLI 0.145.0. Actual OpenCode CLI включён через OPENCODE_NATIVE_TEST_PATH. Log: `.codex/m2/logs/native-handoff-final-validate.log`; SHA-256 всех 20 TS/test source paths совпал с началом gate. Scope Mac — **17 data + 8 API = 25 tests**. Push/PR/merge не выполнялись.
   - **Целевая Mac-приёмка owned OpenCode принята 04.10.2026 по подтверждению пользователя:** «тесты на маке прошли все те, что ты скинул» в ответ на инструкции для `34b91cb` / `2465b4b`. Запрошенный набор — **241 runtime + 14 API = 255 tests**, включая установленный OpenCode через `OPENCODE_NATIVE_TEST_PATH`; подробный stdout и отдельные счётчики в этом сообщении не приложены, 255 обозначает scope запрошенного набора. Mac запускал пользователь; независимой проверки HEAD не было. Повтор без новых изменений не нужен. Windows gate остаётся 3784 passed / 10 skipped; сейчас меняется только документация. Приёмка покрывает внутренний transport/local-model fixture, а не полный Mac ai:validate, реальную локальную LLM, normal/external-service admission, runtime-backed checkpoint/release или физический M2 handoff. Далее — оставшаяся интеграция P14; personal AI выключен.
   - **Проверка переносимости OpenCode fixtures (04.10.2026):** после `34b91cb` изменён только runtime test — его временный root и проверяемый temp-prefix канонизируются через realpath, чтобы macOS `/var/...` и `/private/var/...` не считались разными каталогами. Рабочий код не менялся. Целевой runtime subset **241 passed**, повторный полный `ai:validate` exit 0: **3784 passed / 10 skipped**, те же coverage minima (runtime 76.16%, API 70.31%), build 7/7, Chromium 8/8, k6 3/3, protocol CLI 0.145.0. Лог `.codex/m2/logs/native-opencode-portable-final-validate.log`; финальные hashes 17 source/test/config файлов совпали до/после gate. Нативная Mac-приёмка этого subset **241 + 14 = 255** принята по подтверждению пользователя (запись выше).
   - **Windows gate owned OpenCode принят 04.10.2026:** итоговый `ai:validate` exit 0, **3784 passed / 10 skipped** (9 Mac-only + 1 прежний), lint/tests/coverage 10/10, build 7/7, Chromium 8/8, k6 3/3, protocol CLI 0.145.0. Все **14 OpenCode API tests** прошли обычный и coverage прогоны, включая установленный OpenCode 1.18.34 и запись файла через его tool при ответах loopback model. Coverage minima: shared 75.75%, data 78.57%, runtime 76.16%, API 70.31%, agent 76.17%, web 74.49%, MCP 86.27%. Регрессия отдельно проверяет запрет ancestor config выше Git root. Лог `.codex/m2/logs/native-opencode-final-validate.log`; SHA-256 всех **17 source/test/config файлов** совпали до и после gate. Root/runtime/API checklists и все четыре adapters проверены, template/providers docs обновлены; обычные capabilities/registration и usage NONE/null OpenCode сохранены. Dependencies/packages/migrations, public REST/WS/MCP и UI не менялись; Dockerfile поясняет host-only prerequisite, Docker/Pencil/route проверки неприменимы. Gate использовал private SQLite/ports 3309/5480 и `OPENCODE_NATIVE_TEST_PATH` к отдельному Windows binary в `.git/tools/opencode-1.18.34/`. Mac subset **241 runtime + 14 API = 255** принят по подтверждению пользователя; далее normal/external-service admission, runtime-backed checkpoint/release и общий M2 gate; personal AI выключен.
@@ -271,16 +272,16 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
 
 ## Матрица проверок
 
-| Критерии | Задачи | Основная проверка |
-| --- | --- | --- |
-| AC-01–03 | P02/P03/P08/P09/P20 | Два локальных процесса, registration fixtures, реальные device bindings; запрет всех runtime-запусков M1, unpause/auto-queue и restart |
-| AC-04–06 | P04–P08 | Fault injection, permutations, conflicts, tombstone/bootstrap |
-| AC-07–08 | P13/P14 | Два workers, partition, stale epoch, crash на каждой границе и process exit |
-| AC-09–11 | P10–P15 | Git fixtures, bundle transfer, index preservation, новая локальная сессия |
-| AC-12–13 | P16–P19 | Native Mac/Windows, exact-snapshot QA и CAS verified gate |
-| AC-14 | P07/P08/P12/P14 | Auth/protocol/transfer interruption, hashes и ACK consistency |
-| AC-15 | P02/P03/P05/P09/P13/P18/P21 | Старые MCP/ownership/workflows/Docker regressions; два participant UUID, явное mapping, авторство/назначения и сохранение локальных прав без credentials sync |
-| AC-16 | P20/P21 | CRM pilot и manifest подключённых checkout |
+| Критерии | Задачи                      | Основная проверка                                                                                                                                             |
+| -------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AC-01–03 | P02/P03/P08/P09/P20         | Два локальных процесса, registration fixtures, реальные device bindings; запрет всех runtime-запусков M1, unpause/auto-queue и restart                        |
+| AC-04–06 | P04–P08                     | Fault injection, permutations, conflicts, tombstone/bootstrap                                                                                                 |
+| AC-07–08 | P13/P14                     | Два workers, partition, stale epoch, crash на каждой границе и process exit                                                                                   |
+| AC-09–11 | P10–P15                     | Git fixtures, bundle transfer, index preservation, новая локальная сессия                                                                                     |
+| AC-12–13 | P16–P19                     | Native Mac/Windows, exact-snapshot QA и CAS verified gate                                                                                                     |
+| AC-14    | P07/P08/P12/P14             | Auth/protocol/transfer interruption, hashes и ACK consistency                                                                                                 |
+| AC-15    | P02/P03/P05/P09/P13/P18/P21 | Старые MCP/ownership/workflows/Docker regressions; два participant UUID, явное mapping, авторство/назначения и сохранение локальных прав без credentials sync |
+| AC-16    | P20/P21                     | CRM pilot и manifest подключённых checkout                                                                                                                    |
 
 В планировании проверки кода и native scenarios не выполнялись: функциональности пока нет. При реализации записывать точные команды, результаты и ограничения, а не только отметки checkbox. Ошибки baseline и недоступные среды отделять от регрессий; не ослаблять assertions ради зелёной проверки.
 
@@ -363,15 +364,15 @@ P01 → P02 → P03 → P04 → P05 → P06 → P07 → P08 → P09    [M1]
 - Полный прогон выявил редкий дефект DER INTEGER в случайном serial сертификата: после очистки sign bit мог остаться избыточный нулевой префикс. Исправлено создание положительного serial без такого префикса. Детерминированная регрессия до исправления: 3 failed / 2 passed, после — 5 passed; реальный TLS и peer crash/restart также проходят. Существующие identities/pins автоматически не заменяются.
 - Итоговый `npm run ai:validate` завершился с кодом 0: format, lint 10/10, tests 10/10, coverage 10/10, build 7/7, Chromium perf/e2e 7 passed, k6 3/3, protocol check (CLI 0.145.0), checklist. Всего unit/integration: **3213 passed / 1 existing skipped**. Лог: локальный `.git/m1-final-validation.log`.
 
-| Пакет | Тесты passed | Минимальная метрика coverage |
-| --- | ---: | ---: |
-| shared | 245 | 72.57% |
-| data | 298 | 75.00% |
-| runtime | 902 (+1 skipped) | 73.25% |
-| api | 531 | 70.86% |
-| agent | 399 | 76.26% |
-| mcp | 105 | 86.27% |
-| web | 733 | 74.49% |
+| Пакет   |     Тесты passed | Минимальная метрика coverage |
+| ------- | ---------------: | ---------------------------: |
+| shared  |              245 |                       72.57% |
+| data    |              298 |                       75.00% |
+| runtime | 902 (+1 skipped) |                       73.25% |
+| api     |              531 |                       70.86% |
+| agent   |              399 |                       76.26% |
+| mcp     |              105 |                       86.27% |
+| web     |              733 |                       74.49% |
 
 - Браузерные и k6 проверки выполнены на отдельной БД `.git/m1-validation/fixture.sqlite` со 100 synthetic paused/manual задачами. Пользовательский `CODEX_CLI_PATH` сохранён; `DATABASE_URL`, `PROJECTS_DIR` и адреса тестового сервера переданы только дочернему процессу. k6 v2.3.0 скачан из официального release, SHA-256 сверена; бинарник локален в `.git/tools/k6`, системная установка/PATH не менялись. Драйвер: `.git/m1-validation-run.mjs`; исходные logs/reports остаются локальными.
 - k6: chat-sessions — 26 537 запросов, p95 9.17 ms; runtime-profiles — 107 336, p95 6.95 ms; tasks — 10 026, p95 46.54 ms. HTTP error rate 0 для всех трёх, исходные thresholds пройдены. Это проверка локальных API endpoints, а не измерение скорости LAN replication. Отчёты: `packages/api/perf/reports/`.

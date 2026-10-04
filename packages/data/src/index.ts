@@ -35,6 +35,8 @@ export {
   assertTasklessDeviceExecution,
   getDeviceExecutionBlock,
   withTaskDeviceExecution,
+  withTaskDeviceNativeExecution,
+  assertTaskDeviceNativeRuntime,
   bindTaskDeviceExecution,
   withProjectDeviceExecution,
   createTaskDeviceRuntimeGuard,

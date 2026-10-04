@@ -23,3 +23,4 @@ Run through this list whenever you touch anything under `packages/api/`.
 - [ ] Loopback HTTP fixtures avoid fetch-restricted ports and Windows reserved ranges. Select and bind an available port before requests; do not add retries to runtime attempts or relax authorization/stop assertions to hide fixture setup failures.
 
 - [ ] Owned-server native tests cover detached writers and coordinator recovery without releasing the grant. Keep installed-CLI tests explicit, include their executable selection in test cache hashes, and do not treat a skipped real-binary case as native acceptance.
+- [ ] Whole-run admission uses the isolated host service, snapshots caller input, and rejects callbacks, session reuse and uncontained transports. Native handoff reads local journal identities, fences before recovery and rechecks inputs/authorization before freezing or releasing.

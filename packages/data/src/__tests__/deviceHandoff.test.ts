@@ -15,6 +15,8 @@ import {
   taskDeviceGrants,
   taskDeviceGrantHeads,
   taskDeviceRuns,
+  taskDeviceProcesses,
+  taskDeviceRunAdmissions,
   taskDeviceHandoffs,
   resetEnvCache,
   continuationNotesSchema,
@@ -24,6 +26,7 @@ import {
   taskCheckpointRef,
   type CodeSnapshotPackage,
   type TaskDeviceHandoffRequest,
+  type ProcessHostIdentity,
 } from "@aif/shared";
 
 const state = { db: createTestDb() };
@@ -32,6 +35,223 @@ vi.mock("@aif/shared/server", async (original) => ({
   getDb: () => state.db,
 }));
 const data = await import("../index.js");
+
+function nativeInput(f: ReturnType<typeof fixture>) {
+  state.db.update(tasks).set({ executionOwner: "ai" }).where(eq(tasks.id, f.taskId)).run();
+  return { taskId: f.taskId, projectRoot: f.projectRoot, runtimeId: "claude", transport: "cli" };
+}
+async function nativeReceipt(taskId: string, stopped = true) {
+  const id = randomUUID();
+  const host: ProcessHostIdentity = {
+    version: 1,
+    mechanism: "windows_job_v1",
+    id,
+    jobName: `Local\\AifHandoff-${id}`,
+    hostPid: 123,
+    hostSessionId: 1,
+    hostBirth: "134354612414239081",
+  };
+  const prepared = { ...host, pid: 124, birth: "134354612425510935" };
+  const journal = data.createTaskDeviceProcessJournal(taskId);
+  await journal.onIdentity(host);
+  await journal.onPrepared(prepared);
+  if (stopped)
+    await journal.onStopped({
+      identity: prepared,
+      activeProcesses: 0,
+      reason: "completed",
+      exitCode: 0,
+      terminatedProcesses: 0,
+    });
+  return journal;
+}
+function nativeConfirm(f: ReturnType<typeof fixture>) {
+  data.requestTaskDeviceHandoff(f.request);
+  const row = data.quiesceTaskDeviceHandoff(f.request.id);
+  return data.confirmNativeTaskHandoffStop({ id: row.id, expectedRevision: row.revision });
+}
+
+describe("native runtime handoff admission", () => {
+  it("freezes admitted code/context once and resumes confirmation, publication and release in new processes", async () => {
+    const f = fixture(),
+      input = nativeInput(f);
+    await data.withTaskDeviceNativeExecution(input, async () => {
+      expect(state.db.select().from(taskDeviceRunAdmissions).all()).toHaveLength(1);
+      await nativeReceipt(f.taskId);
+    });
+    data.requestTaskDeviceHandoff(f.request);
+    const row = data.quiesceTaskDeviceHandoff(f.request.id);
+    const database = join(directory, "native.sqlite");
+    await state.db.$client.backup(database);
+    expect(recoverProcess("confirm-native", row.id, "", row.revision, database).status).toBe(86);
+    state.db.$client.close();
+    state.db = actualServer.getDb(database) as ReturnType<typeof createTestDb>;
+    const frozen = data.getTaskDeviceHandoff(row.id);
+    expect(
+      data.confirmNativeTaskHandoffStop({ id: row.id, expectedRevision: row.revision }),
+    ).toEqual(frozen);
+    expect(() => data.confirmNativeTaskHandoffStop({ id: row.id, expectedRevision: 999 })).toThrow(
+      expect.objectContaining({ code: "handoff_conflict" }),
+    );
+    expect(recoverProcess("publish-without-ack", row.id, "", 0, database).status).toBe(86);
+    expect(recoverProcess("checkpoint", row.id, "", 0, database).status).toBe(86);
+    expect(recoverProcess("release", row.id, "", 0, database).status).toBe(86);
+    const offered = data.releaseTaskDeviceHandoff(row.id);
+    expect(offered.grant.snapshotId).toBe(frozen.snapshotId);
+    expect(offered.grant.predecessorId).toBe(f.parent.grantId);
+    expect(data.getTaskDeviceGrant(f.taskId)).toMatchObject({
+      state: "observed",
+      ownerDeviceId: f.peerId,
+      activeRunId: null,
+    });
+    expect(git(f.projectRoot, "rev-parse", "HEAD")).toBe(
+      data.getTaskExecutionWorkspace(f.taskId)!.snapshotCommit,
+    );
+    await expect(
+      data.withTaskDeviceNativeExecution(input, async () => undefined),
+    ).rejects.toMatchObject({ code: "grant_not_ready" });
+  }, 30000);
+
+  it("retains a live reservation through verified stop and fences the old callback even after release", async () => {
+    const f = fixture(),
+      input = nativeInput(f);
+    let journal!: Awaited<ReturnType<typeof nativeReceipt>>,
+      resume!: () => void,
+      prepared!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      prepared = resolve;
+    });
+    const hold = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const execution = data.withTaskDeviceNativeExecution(input, async () => {
+      journal = await nativeReceipt(f.taskId, false);
+      prepared();
+      await hold;
+      data.updateTask(f.taskId, { plan: "Late old writer" });
+    });
+    const rejected = expect(execution).rejects.toMatchObject({ code: "run_fenced" });
+    await ready;
+    const active = data.getTaskDeviceGrant(f.taskId)!.activeRunId!;
+    data.requestTaskDeviceHandoff(f.request);
+    const row = data.quiesceTaskDeviceHandoff(f.request.id);
+    expect(() =>
+      data.confirmNativeTaskHandoffStop({ id: row.id, expectedRevision: row.revision }),
+    ).toThrow(expect.objectContaining({ code: "handoff_stop_unproven" }));
+    data.recordTaskDeviceProcessRecovery(journal.id, {
+      identity: data.getTaskDeviceProcessRecovery(journal.id),
+      activeProcesses: 0,
+      reason: "recovered",
+      exitCode: null,
+      terminatedProcesses: null,
+    });
+    const frozen = data.confirmNativeTaskHandoffStop({
+      id: row.id,
+      expectedRevision: row.revision,
+    });
+    expect(data.getTaskDeviceGrant(f.taskId)!.activeRunId).toBe(active);
+    expect(data.getTaskDeviceRun(active)!.state).toBe("uncertain");
+    expect(frozen.snapshotId).toBeTruthy();
+    data.checkpointTaskDeviceHandoff(row.id);
+    data.releaseTaskDeviceHandoff(row.id);
+    resume();
+    await rejected;
+    expect(data.findTaskById(f.taskId)!.plan).toBeNull();
+    expect(data.getTaskDeviceGrant(f.taskId)!.activeRunId).toBeNull();
+  }, 30000);
+
+  it.each(["legacy", "empty", "reserved", "historical"] as const)(
+    "rejects %s execution even if its JS promise or latest native invocation returned",
+    async (mode) => {
+      const f = fixture(),
+        input = nativeInput(f);
+      if (mode === "legacy" || mode === "historical")
+        await data.withTaskDeviceExecution(input, async () => {
+          await nativeReceipt(f.taskId);
+        });
+      if (mode === "historical")
+        await data.withTaskDeviceNativeExecution(input, async () => {
+          await nativeReceipt(f.taskId);
+        });
+      if (mode === "empty" || mode === "reserved")
+        await expect(
+          data.withTaskDeviceNativeExecution(input, async () => {
+            if (mode === "reserved") data.createTaskDeviceProcessJournal(f.taskId);
+          }),
+        ).rejects.toBeDefined();
+      const before = data.getTaskDeviceGrant(f.taskId);
+      expect(() => nativeConfirm(f)).toThrow(
+        expect.objectContaining({ code: "handoff_stop_unproven" }),
+      );
+      expect(data.getTaskDeviceHandoff(f.request.id).stopJson).toBeNull();
+      expect(data.getTaskDeviceGrant(f.taskId)).toEqual(before);
+    },
+  );
+
+  it("revalidates persisted admission, identity, receipt and exact proof before publication", async () => {
+    const f = fixture(),
+      input = nativeInput(f);
+    let journal!: Awaited<ReturnType<typeof nativeReceipt>>;
+    await data.withTaskDeviceNativeExecution(input, async () => {
+      journal = await nativeReceipt(f.taskId);
+    });
+    nativeConfirm(f);
+    const saved = data.getTaskDeviceProcess(journal.id);
+    for (const patch of [
+      { state: "prepared" },
+      { taskId: randomUUID() },
+      { identityJson: "{" },
+      { preparedJson: "null" },
+      { evidenceJson: JSON.stringify({ ...JSON.parse(saved.evidenceJson!), activeProcesses: 1 }) },
+      { stoppedAt: "different" },
+    ]) {
+      state.db
+        .update(taskDeviceProcesses)
+        .set(patch as Partial<typeof taskDeviceProcesses.$inferSelect>)
+        .where(eq(taskDeviceProcesses.id, journal.id))
+        .run();
+      expect(() => data.checkpointTaskDeviceHandoff(f.request.id)).toThrow(
+        expect.objectContaining({ code: "handoff_stop_unproven" }),
+      );
+      state.db
+        .update(taskDeviceProcesses)
+        .set(saved)
+        .where(eq(taskDeviceProcesses.id, journal.id))
+        .run();
+    }
+    state.db.update(taskDeviceRunAdmissions).set({ policy: "future-policy" }).run();
+    expect(() => data.checkpointTaskDeviceHandoff(f.request.id)).toThrow(
+      expect.objectContaining({ code: "handoff_stop_unproven" }),
+    );
+    state.db.update(taskDeviceRunAdmissions).set({ policy: "isolated_runtime_v1" }).run();
+    data.checkpointTaskDeviceHandoff(f.request.id);
+    expect(data.releaseTaskDeviceHandoff(f.request.id).grant.snapshotId).toBeTruthy();
+  }, 30000);
+
+  it("does not enroll a nested workflow, second process or mismatched runtime as an isolated invocation", async () => {
+    const f = fixture(),
+      input = nativeInput(f);
+    await expect(
+      data.withTaskDeviceNativeExecution({ ...input, runtimeId: "codex" }, async () => undefined),
+    ).rejects.toMatchObject({ code: "run_scope_required" });
+    expect(state.db.select().from(taskDeviceRuns).all()).toHaveLength(0);
+    await data.withTaskDeviceNativeExecution(input, async () => {
+      await expect(
+        data.withTaskDeviceExecution(input, async () => undefined),
+      ).rejects.toMatchObject({ code: "run_scope_required" });
+      await expect(
+        data.withTaskDeviceNativeExecution(input, async () => undefined),
+      ).rejects.toMatchObject({ code: "run_scope_required" });
+      expect(() => data.assertTaskDeviceNativeRuntime("codex", "cli")).toThrow(
+        expect.objectContaining({ code: "run_fenced" }),
+      );
+      await nativeReceipt(f.taskId);
+      expect(() => data.createTaskDeviceProcessJournal(f.taskId)).toThrow(
+        expect.objectContaining({ code: "process_conflict" }),
+      );
+    });
+  });
+});
 const actualServer =
   await vi.importActual<typeof import("@aif/shared/server")>("@aif/shared/server");
 const databases: ReturnType<typeof createTestDb>[] = [];
