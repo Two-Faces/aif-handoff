@@ -1,8 +1,17 @@
+import { DeviceExecutionError, PersonalExecutionDisabledError } from "@aif/shared";
+import { withProjectDeviceExecution } from "@aif/data";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { getProjectConfig, logger } from "@aif/shared";
-import { findTaskById, updateTask } from "@aif/data";
+
+import { getDeviceExecutionBlock } from "@aif/data";
+import {
+  findTaskById,
+  updateTask,
+  getPersonalExecutionBlock,
+  assertTaskExecutionAllowed,
+} from "@aif/data";
 import { RuntimeExecutionError, UsageSource } from "@aif/runtime";
 import { runApiRuntimeOneShot } from "./runtime.js";
 import { toTaskBroadcastPayload } from "../repositories/tasks.js";
@@ -13,7 +22,7 @@ const log = logger("qa-runner");
 export interface RunQaQueryResult {
   ok: boolean;
   error?: string;
-  code?: "ai_handoff_required";
+  code?: "ai_handoff_required" | "personal_execution_disabled" | DeviceExecutionError["code"];
 }
 
 export interface RunQaQueryInput {
@@ -160,7 +169,28 @@ function persistQaError(taskId: string, error: string): RunQaQueryResult {
  * — so the atomic claim stays the single point that serializes concurrent runs.
  */
 export async function runQaQuery(input: RunQaQueryInput): Promise<RunQaQueryResult> {
-  const { projectId, taskId, executionRoot } = input;
+  try {
+    return await withProjectDeviceExecution(
+      { projectId: input.projectId, taskId: input.taskId, projectRoot: input.executionRoot },
+      async (root) => runQaQueryScoped({ ...input, executionRoot: root ?? input.executionRoot }),
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      ...(error instanceof DeviceExecutionError || error instanceof PersonalExecutionDisabledError
+        ? { code: error.code }
+        : {}),
+    };
+  }
+}
+
+async function runQaQueryScoped(input: RunQaQueryInput): Promise<RunQaQueryResult> {
+  const { projectId, taskId } = input;
+  let executionRoot = input.executionRoot;
+  const blocked =
+    getPersonalExecutionBlock(projectId, taskId) ?? getDeviceExecutionBlock(projectId, taskId);
+  if (blocked) return { ok: false, ...blocked };
 
   const task = findTaskById(taskId);
   if (!task) {
@@ -187,6 +217,7 @@ export async function runQaQuery(input: RunQaQueryInput): Promise<RunQaQueryResu
   // the throw would escape the route's fire-and-forget dispatch with no
   // task:qa_failed event and no persisted qaStatus:"error".
   try {
+    executionRoot = assertTaskExecutionAllowed(taskId, executionRoot) ?? executionRoot;
     // Resolve the QA branch the same way the aif-qa skill does (Step 0.2): the
     // task's persisted branch, or the current git branch as a fallback. This keeps
     // the runner's slug in lockstep with the skill so CLI/API transports agree on

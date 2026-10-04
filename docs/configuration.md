@@ -13,6 +13,30 @@ Node packages (`@aif/api`, `@aif/agent`, `@aif/data`, `@aif/shared`) auto-load e
 - `.env`
 - `.env.local` (loaded after `.env`, overrides duplicate keys)
 
+## Personal project onboarding
+
+`AIF_PERSONAL_MODE` is a boolean and defaults to `false`. When enabled, new local
+projects use read-only `attach_existing` registration and persist
+`personalMode=true` and `publicationPolicy=local_only`. GitHub cloning is rejected.
+New tasks are paused with automatic execution disabled. The persisted project
+policy remains in force after this environment switch is turned off.
+
+During M1, personal projects cannot launch any Handoff runtime, including manual
+QA, fixes, commits, roadmap generation, warmup or chat. Unpausing a task or
+enabling auto-queue does not bypass this server-side restriction. Standalone
+projects retain their existing behavior when the switch is off. Device grants
+and safe handoff must be implemented and verified before personal execution can
+be enabled. Peer synchronization itself is a later part of M1; this switch alone
+does not enable a listener or connect devices.
+
+Personal API nodes bind their browser API to `127.0.0.1` at startup. Local device
+identity and checkout bindings live in SQLite; the installation marker lives
+separately at `~/.aif-handoff/installation-id`. Copying the database to a different
+installation is rejected rather than silently reusing its writer identity.
+Do not copy that marker to a second device. A second API instance with the same
+identity is rejected while the recorded process is alive; no heartbeat timeout
+can take the lock. Mac paths are selected explicitly on the Mac.
+
 ## Environment Variables
 
 | Variable                                               | Type    | Default                        | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -760,3 +784,15 @@ The `getProjectConfig(projectRoot)` utility in `@aif/shared` reads and caches co
 
 - [Getting Started](getting-started.md) — installation and first run
 - [Architecture](architecture.md) — how the agent pipeline uses these settings
+
+## Personal peer settings
+
+| Variable                | Default          | Meaning                                            |
+| ----------------------- | ---------------- | -------------------------------------------------- |
+| `AIF_PERSONAL_MODE`     | `false`          | Block execution; use local board/attach workflow   |
+| `AIF_PEER_ENABLED`      | `false`          | Opt in to the separate authenticated peer listener |
+| `AIF_PEER_PORT`         | `3010`           | TLS peer listener port; browser API stays loopback |
+| `AIF_PEER_IDENTITY_DIR` | `~/.aif-handoff` | Local TLS identity directory; never synchronized   |
+
+Peer startup requires personal mode or an already attached personal project. Pairing,
+backups and native acceptance are documented in [Local device sync](local-device-sync.md).

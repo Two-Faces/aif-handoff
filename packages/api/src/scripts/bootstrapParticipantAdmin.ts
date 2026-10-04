@@ -1,4 +1,6 @@
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { readProtectedPasswordFile } from "./protectedPasswordFile.js";
+export { readProtectedPasswordFile } from "./protectedPasswordFile.js";
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
 import { pathToFileURL } from "node:url";
@@ -94,17 +96,6 @@ async function promptInteractiveBootstrap(): Promise<InteractiveBootstrapInput> 
   } finally {
     prompt.close();
   }
-}
-
-export function readProtectedPasswordFile(path: string): string {
-  const metadata = statSync(path);
-  if (!metadata.isFile()) {
-    throw new Error("Password path must be a regular file");
-  }
-  if ((metadata.mode & 0o077) !== 0) {
-    throw new Error("Password file must not be accessible by group or other users");
-  }
-  return readFileSync(path, "utf8");
 }
 
 function optionValue(args: readonly string[], name: string): string | null {

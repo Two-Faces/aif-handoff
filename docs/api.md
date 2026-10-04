@@ -279,6 +279,47 @@ project, or `null` when the project has no tasks.
 
 ### Create Project
 
+Personal project registration also exposes these local metadata endpoints:
+
+| Endpoint                             | Contract                                                                                                                         |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /projects/attach-preview`      | `{checkouts: [{localRoot, executionEnvironment}]}`; up to 50 read-only inspections, no registrations                             |
+| `GET /projects/:id/checkouts`        | Local device descriptor and checkout bindings; paths are device-local                                                            |
+| `POST /projects/:id/checkouts`       | `{localRoot, executionEnvironment, confirmProjectIdentity: true}`; explicitly attach to an existing personal board               |
+| `GET /projects/:id/identities`       | Logical participant identities with nullable local account bindings; no credentials                                              |
+| `POST /projects/:id/identities/bind` | `{logicalParticipantId, participantId, confirmIdentity: true}`; bind to an active local account; conflicting bindings return 409 |
+| `POST /projects/:id/manifest`        | `{checkoutId, confirmWrite: true}`; explicitly create `.ai-factory/handoff-project.json`, never overwrite it                     |
+
+Execution environments are `native_windows`, `native_macos`, `native_linux`,
+`wsl`, `container` or `unknown`. They label bindings; runtime/toolchain readiness
+is a separate check. Matching names or remotes do not automatically join boards
+or accounts. These mutations use the existing project-administrator permission
+boundary when participant authentication is enabled.
+
+For an existing local checkout, pass `registrationMode: "attach_existing"` with
+`rootPath`. This registers a personal project without initialization, package
+installation, branch changes or context writes. Git linked worktrees are
+supported. The response includes `personalMode: true` and
+`publicationPolicy: "local_only"`. An invalid checkout returns HTTP 400 with
+`code: "invalid_git_checkout"`. Omitting the mode keeps legacy initialization
+unless `AIF_PERSONAL_MODE=true`, which forces attach and rejects cloning with
+`code: "attach_existing_required"`.
+
+In M1, manual QA, QA Check, warmup, roadmap generation and chat for personal
+projects return HTTP 403 with `code: "personal_execution_disabled"` before
+runtime or checkout preparation. Direct GitHub PR publication returns HTTP 403
+with `code: "local_publication_only"`. Changing pause/auto-queue flags does not
+enable execution. These policies apply independently of legacy GitHub flags and
+`skip_push_after_commit`.
+
+During M2 development, internally registered task workspaces use a local durable
+checkpoint journal for API and auto-queue commits. They do not invoke an AI commit
+workflow or publish to GitHub. A prepared/checkpointed workspace blocks new writes
+until the continuation lifecycle prepares another workspace. Registration is not
+yet a public API and does not bypass personal execution denial. The legacy commit
+workflow now commits only changes already staged by the user; it does not stage
+all dirty/untracked files automatically.
+
 ```
 POST /projects
 ```
@@ -1507,11 +1548,28 @@ POST /chat
 
 **Errors:**
 
+- `403` — Execution preflight denied. Personal projects return `personal_execution_disabled`.
+  Taskless chat in a project with managed tasks returns `taskless_execution_denied`,
+  including `explore: true`; a missing enrolled grant returns `grant_missing`.
+  A managed task without a registered checkout returns `run_scope_required`.
+- `409` — A managed task already has an unresolved run (`run_busy`), its input or
+  task/project scope changed (`run_fenced`), or the chat/native session does not
+  belong to the same task, grant, checkout and runtime (`run_session_mismatch`).
+  A fresh chat or matching local resume for an internally enrolled standalone task
+  uses a host scope through result persistence. Native/virtual imports do not
+  establish session provenance. PUT of protected session runtime metadata also
+  returns `409`; title edits remain available. Abort requests cancellation and
+  retains the unresolved reservation until P14 verifies process stop. Personal AI
+  stays disabled until P14 and native M2 acceptance; no enrollment endpoint exists.
 - `404` — Project not found
 - `429` — Runtime usage limit reached (`code: "CHAT_USAGE_LIMIT"`, response may include `runtimeLimitSnapshot`)
 - `500` — Chat request failed (`code: "CHAT_REQUEST_FAILED"`)
 
-On error, a `chat:error` event is sent via WebSocket before the HTTP response. Both HTTP and WebSocket chat payloads normalize `runtimeLimitSnapshot` before emission, so client-visible snapshots follow the same sanitized contract as runtime-profile and task payloads.
+On runtime error, a `chat:error` event is sent via WebSocket before the HTTP response.
+Preflight denials return HTTP directly, before a chat run exists. Both HTTP and
+WebSocket chat payloads normalize `runtimeLimitSnapshot` before emission, so
+client-visible snapshots follow the same sanitized contract as runtime-profile
+and task payloads.
 
 **Timeout:** Requests may take up to 120 seconds due to agent processing.
 
@@ -1668,6 +1726,9 @@ The Handoff MCP server (`packages/mcp`) provides bidirectional sync between AIF 
 
 The web settings route `POST /settings/mcp/install` installs the MCP server into supported runtimes. When `MCP_PORT` is a valid integer port in the server environment, it writes a streamable HTTP entry pointing to `http://localhost:<MCP_PORT>/mcp`; otherwise it writes the local `stdio` launcher entry. The response includes per-runtime success/error entries, so partial install failures are surfaced without hiding runtimes that succeeded.
 
+The `stdio` entry preserves absolute `DATABASE_URL` and `PROJECTS_DIR` paths, including
+Windows drive paths. Relative paths are resolved against the Handoff monorepo root.
+
 See [MCP Sync Server](mcp-sync.md) for full documentation.
 
 ## See Also
@@ -1675,3 +1736,118 @@ See [MCP Sync Server](mcp-sync.md) for full documentation.
 - [Architecture](architecture.md) — system overview and data flow
 - [Configuration](configuration.md) — server port and environment settings
 - [MCP Sync Server](mcp-sync.md) — MCP tools and sync protocol
+
+## Personal LAN sync (M1)
+
+See [local device sync](local-device-sync.md) for setup and limitations. The browser
+API remains loopback; peers use a separate TLS 1.3 listener with mutually pinned
+certificates. Peer authentication never accepts browser/MCP tokens.
+
+| Local API                              | Purpose                                                               |
+| -------------------------------------- | --------------------------------------------------------------------- |
+| `GET /peers`                           | Local fingerprint, peer state, last contact and capped pending counts |
+| `POST /peers/invitations`              | `{expectedFingerprint, projectIds}` → five-minute invitation          |
+| `POST /peers/pair`                     | `{address, invitation, projectIds}` → explicit pinned pairing         |
+| `PUT /peers/:id/address`               | `{address}` → reconnect address (`https://host:port`)                 |
+| `POST /peers/:id/sync`                 | Bounded bidirectional checkpoint/delta exchange                       |
+| `POST /peers/:id/cancel`               | Cancel active exchange, retaining durable progress                    |
+| `POST /peers/:id/resync`               | Explicit fresh bootstrap after restore; retain local edits/tombstones |
+| `POST /peers/:id/revoke`               | Reject subsequent requests from that peer                             |
+| `GET /projects/:id/conflicts`          | Concurrent field versions and their causal dots                       |
+| `POST /projects/:id/conflicts/resolve` | `{entityType, entityId, field, value, parents}` → parent-set CAS      |
+
+Peer administration requires a local admin in participants mode. Foreign browser
+origins and non-loopback Host names are rejected. Project settings mutations retain
+their local admin authorization. Request schemas live in `packages/api/src/schemas.ts`.
+
+Personal task responses include `personalMode`, `syncRevisions` and
+`unresolvedAssignees`. Send `expectedSyncRevisions` in task PUT, events and handoff
+requests when changing plans/workflow. Missing/stale revisions produce HTTP 409 with
+`sync_revision_required` / `sync_revision_conflict`; unresolved variants produce
+`sync_conflict_requires_resolution`. Resolving stale parents returns `resolution_changed`.
+Personal task events are board-only; file deletion/import and fast-fix are blocked.
+
+`sync:board_updated` invalidates project/task/comment/history/personal queries. The
+web client also refetches on WebSocket reconnect. Peer transport exchanges contain
+only strict shared whitelists; attachment paths/bytes, roles, passwords, local roots,
+runtime sessions and usage never travel in board messages. See the ADR for
+protocol/schema 1 contracts. Explicit snapshot transfer uses the separate message
+kinds below and never adds file bytes to board checkpoint/delta records.
+
+## Explicit code/context transfer (P12)
+
+These local routes share peer administration's loopback, Origin and local-admin
+authorization. Mutations also use the existing participant session/CSRF middleware.
+There is no execution grant, runtime launch or automatic transfer on board sync.
+
+| Local API                                            | Input / result                                                                            |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `POST /peers/snapshots/publish`                      | `{projectId, snapshotId}` → immutable transfer manifest, HTTP 201                         |
+| `POST /peers/:id/snapshots/pull`                     | `{projectId, snapshotId, checkoutId, worktreePath}` → readiness/progress after completion |
+| `GET /peers/snapshots/projects/:projectId/transfers` | Local transfer IDs and project/peer/snapshot identities, including interrupted requests   |
+| `GET /peers/snapshots/transfers/:id`                 | Fresh readiness check for a completed checkout, plus durable progress                     |
+| `DELETE /peers/snapshots/transfers/:id`              | Remove inactive transfer records/chunks only; Git objects and checkout files remain       |
+| `POST /peers/snapshots/unpublish`                    | `{projectId, snapshotId}` → remove published transfer bytes; snapshot records/refs remain |
+
+Publish requires a previously captured and verified snapshot with a local Git
+location. Capture/onboarding for personal execution remains behind P13–P15; this
+endpoint does not turn a mutable user checkout into a snapshot. Pull uses an
+explicit checkout binding for the local native OS and a separate absolute path
+chosen by the local caller. Peers never supply destination paths. The project/task
+must already exist on the board. The operation creates an exact detached checkout
+and portable context, but does not change the task's execution root or session.
+
+Progress contains `id`, `snapshotId`, `projectId`, `peerId`, `status`
+(`downloading`, `blocked`, `ready`), `errorCode`, `receivedChunks`, `totalChunks`,
+`codeReady`, `contextReady`, `checkoutReady`, and `executionReady: false`.
+Code/context readiness is published only after verification and checkout preparation.
+Received chunks describe selected bundle plus context resources, not board sync.
+If a request fails, list transfers and inspect its ID; repeating the same pull
+arguments resumes durable chunks. A different path for the same reserved transfer
+is a conflict. A completed checkout is verified on retry, never repaired by replaying
+context over user edits or deleted files. Removal does not delete that checkout;
+a new transfer must choose a fresh destination.
+
+The existing cancel/revoke routes also abort active code transfers. Requests and
+each incoming chunk recheck peer/project permission. Snapshot errors use HTTP 409
+and structured codes such as `snapshot_incomplete`, `snapshot_invalid`,
+`snapshot_base_missing`, `snapshot_format_mismatch`, `snapshot_unsupported_code`,
+`snapshot_checkout_changed`, `snapshot_binding_missing`, `snapshot_conflict`, and
+`snapshot_quota`. Schema errors return 400. Remote peer errors retain a structured
+`remoteCode` internally; no error-message parsing is used.
+
+On the pinned TLS listener, `snapshotManifest` takes `{projectId, snapshotId}` and
+`snapshotChunk` additionally takes `{digest, ordinal}`. Both are read-only and
+require a paired, non-revoked peer with the project in its allowlist. Chunk bytes
+are inaccessible unless their digest is in that published manifest. Manifest
+version is 1; the envelope remains protocol/schema 1 and existing M1 hello/board
+messages are unchanged. Older peers reject these new request kinds explicitly.
+Bounds and native acceptance status are in [local device sync](local-device-sync.md).
+
+## Device handoff protocol (P14 foundation)
+
+The existing pinned TLS `/sync` listener additionally accepts `handoffOffer`
+with `{offer: {version: 1, id, grant}}` and `handoffStatus` with `{projectId, id}`.
+The offer is an exact P13 successor grant whose `transferId` equals `id`; it binds
+the predecessor, epoch, issuer, destination and immutable snapshot. Both requests
+require a paired, non-revoked peer and project permission. Only the direct issuer
+can deliver or read its receipt. Responses are `{id, grantId, state}`, where state
+is `received` or `accepted`. Duplicate deliveries are idempotent; a fork is durably
+quarantined. Envelope protocol/schema remain 1; older peers reject unknown kinds.
+
+These messages never carry checkout paths, local accounts, stop confirmations,
+runtime commands or an acceptance request. Receipt stages a pending grant. Explicit
+local acceptance verifies P12 code/context readiness and leaves a non-executable
+`accepted` grant head; it cannot start AI even when board state is runnable.
+Host runner preflight reports `run_handoff_pending` during outgoing preparation
+or `run_continuation_required` for an accepted task awaiting explicit continuation.
+
+There are no browser REST/MCP handoff actions in this increment. The internal
+`createDeviceHandoffService` delivers an already released offer or refreshes its
+receipt. It rechecks peer authorization after awaits. Offline/incompatible peers,
+missing code or a lost ACK do not restore source ownership. Manual stop confirmation
+is a separate local-admin data action, limited to human tasks with no managed run
+history. Runtime process-tree proof, supervisor recovery and P15 continuation/UI
+remain open. Structured failures include `handoff_stop_unproven`,
+`handoff_input_changed`, `handoff_snapshot_pending`, `handoff_conflict`,
+`handoff_wrong_phase` and `handoff_irreversible`.

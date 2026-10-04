@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 import { and, asc, eq } from "drizzle-orm";
 import { logger as createLogger, tasks } from "@aif/shared";
 import { getDb } from "@aif/shared/server";
+import { withSharedMutation } from "./syncMutations.js";
 
 const log = createLogger("normalize-backlog-positions");
 const NORMALIZED_POSITION_STEP = 100;
@@ -131,7 +132,9 @@ export function normalizeBacklogPositions(
   options: NormalizeBacklogPositionsOptions = {},
 ): BacklogNormalizationResult {
   const plan = planBacklogPositionNormalization(options);
-  const changedTasks = plan.projects.flatMap((project) => project.tasks.filter((task) => task.changed));
+  const changedTasks = plan.projects.flatMap((project) =>
+    project.tasks.filter((task) => task.changed),
+  );
 
   if (!options.apply || changedTasks.length === 0) {
     return {
@@ -153,17 +156,19 @@ export function normalizeBacklogPositions(
     let updatedTaskCount = 0;
 
     for (const task of changedTasks) {
-      const result = tx
-        .update(tasks)
-        .set({ position: task.normalizedPosition })
-        .where(
-          and(
-            eq(tasks.id, task.id),
-            eq(tasks.projectId, task.projectId),
-            eq(tasks.status, "backlog"),
-          ),
-        )
-        .run();
+      const result = withSharedMutation({ entityType: "task", entityId: task.id }, () =>
+        tx
+          .update(tasks)
+          .set({ position: task.normalizedPosition })
+          .where(
+            and(
+              eq(tasks.id, task.id),
+              eq(tasks.projectId, task.projectId),
+              eq(tasks.status, "backlog"),
+            ),
+          )
+          .run(),
+      );
       updatedTaskCount += result.changes;
     }
 
@@ -177,9 +182,7 @@ export function normalizeBacklogPositions(
   };
 }
 
-export function parseNormalizeBacklogPositionsArgs(
-  args: string[],
-): NormalizeBacklogCliOptions {
+export function parseNormalizeBacklogPositionsArgs(args: string[]): NormalizeBacklogCliOptions {
   const options: NormalizeBacklogCliOptions = {
     apply: false,
     help: false,
@@ -220,7 +223,8 @@ export function parseNormalizeBacklogPositionsArgs(
 }
 
 function printHelp(): void {
-  process.stdout.write(`Usage: node --import tsx packages/data/src/normalizeBacklogPositions.ts [options]
+  process.stdout
+    .write(`Usage: node --import tsx packages/data/src/normalizeBacklogPositions.ts [options]
 
 Options:
   --project <id>  Limit normalization to one project
@@ -258,7 +262,9 @@ function logNormalizationResult(result: BacklogNormalizationResult): void {
             createdAt: task.createdAt,
           })),
       },
-      result.applied ? "Project backlog positions normalized" : "Project backlog normalization preview",
+      result.applied
+        ? "Project backlog positions normalized"
+        : "Project backlog normalization preview",
     );
   }
 

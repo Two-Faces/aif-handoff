@@ -6,7 +6,7 @@ Run through this list whenever you touch anything under `packages/runtime/`.
 
 Every feature or fix in the runtime layer must cover **every** adapter, not just the one that prompted the change.
 
-- [ ] If you changed a runtime adapter (`adapters/claude`, `adapters/codex`, `adapters/openrouter`), audit the other adapters and apply the equivalent change. A fix that only lands in one adapter is incomplete.
+- [ ] If you changed a runtime adapter (`adapters/claude`, `adapters/codex`, `adapters/openrouter`, `adapters/opencode`), audit the other adapters and apply the equivalent change. A fix that only lands in one adapter is incomplete.
 - [ ] If you added a new capability, field, hook, or option to `RuntimeAdapter` / `types.ts`, implement it in **all** adapters. Do not ship a capability that only one adapter honours unless it is explicitly gated behind `capabilities`.
 - [ ] If you changed the `run()` / `stream()` / `validate()` / `listModels()` contract, verify every adapter still conforms — including error classification in each adapter's `errors.ts`.
 - [ ] If you changed session/resume semantics, verify parity across adapters that expose session reuse.
@@ -20,6 +20,24 @@ Every feature or fix in the runtime layer must cover **every** adapter, not just
 
 ## Tests
 
+- [ ] Native supervision persists host/child identities before creation/resume; target output cannot forge control receipts. Test detached descendants, a full stdin pipe, lost parent/helper processes, reused PID rejection and live-orphan recovery. Unsupported OS mechanisms fail closed without a version allowlist.
+- [ ] A native job-empty receipt proves only that containment unit. Do not claim adapter coverage or release device authority until all launch paths and external services for that transport are covered.
+- [ ] Every run/resume/fork/stream entry honors the host-only native process scope or rejects it before provider activity. Never silently fall back, retry a second native unit or spawn model discovery outside the scope. Await stop/journal acknowledgement on success, cancellation and failure; join even an unawaited pending launch.
+- [ ] Preserve curated provider environment when using native launch. On Windows restore required OS defaults that ordinary libuv spawn supplies, without restoring ambient credentials or runtime overrides. Use literal executable resolution, never implicit shell wrappers.
+- [ ] Batch native transports join both verified stop and drained output, including early completion. Preserve UTF-8 across chunks, bound total collected output and fail on incomplete/failed protocol, nonzero exit, callback error or cancellation. Do not treat zero exit alone as success or use custom argv/global session scans to bypass native admission.
+- [ ] A supervised SDK worker uses the real pinned SDK behind both native launch barriers. Resolve its module in the host, send bounded input over stdin, validate projected events, and retain callbacks in the fenced host. Test actual SDK spawning and coordinator death; opaque failures must not echo malformed payloads or secrets. Uncovered schema-file/config/hook/session paths must reject before launch.
+- [ ] Native adapter construction never starts PATH/model/version probes outside the native unit. Explicit CLI version probes run inside its worker; test their parent PID and reject unsupported versions before SDK query. Use script extensions supported by the pinned SDK, not a broader Node extension list.
+- [ ] A direct CLI inside a native worker stays direct: no SDK handshake/fallback, shell or custom argv. Bound raw output even when metadata is discarded; test final JSON without newline, blocked stdin cancellation, zero exit without result, overflow, literal options and provider environment forwarding.
+- [ ] Native HTTP clients use existing provider request builders but make one bounded request in their native worker, without retry/redirect/tool execution. Require final usage and terminal JSON/SSE state; account for OpenRouter's repeated finish marker in its usage chunk. Test actual loopback HTTP/proxy/cancellation/crash. HTTP connection closure never proves a separate server/executor stopped, including when a public helper creates a session directly.
+- [ ] A macOS capability probe must use only its nonce-scoped launchd service and temporary fixture binary, verify kernel rejection of a stale PID generation, observe an orphan and zero native membership, and confirm cleanup. Probe success never enables production execution or substitutes for a persisted stop receipt.
+- [ ] Treat coalition counters as cumulative task accounting. Confirm a stable root-only baseline before allowing forks, then require exact started/exited deltas without rebasing; matching active counts alone must not hide extra completed tasks.
+- [ ] Mac supervision verifies suspended creation before resume, separates target I/O from the private control socket, and independently checks that the coalition including the host is empty. Recovery requires the original UID/boot/process incarnation; enumeration, a stopped frame, a timeout or a launchctl error is not empty-group evidence. Bound finalization even if a durable callback is still pending after channel loss.
+- [ ] Bind a Unix control connection to its kernel peer audit token before sending target arguments/environment. A hello claiming a real helper PID is not sufficient; reject a different peer without creating a target or persisting its launch identity.
+- [ ] Preserve the launch caller's async context across accepted-socket callbacks. Test two concurrent task scopes and input from an unrelated context; restoring context must not bypass the data layer's run/grant fencing checks.
+- [ ] Model Node's pause side effect when a control socket is inherited as child stdio for peer inspection. Restore prior flowing state only after the query exits successfully and credentials validate; keep deliberately paused streams paused and reject unverified peers.
+- [ ] Bound binary stdin independently from argv/environment text. Account for Base64 expansion, retain decoded-chunk and queue limits, and verify an exact maximum-size round trip before EOF. Surface native stage/code in errors without branching on their message text.
+
+- [ ] CLI fallback tests explicitly stub and restore `CODEX_CLI_PATH`; do not assume the developer's shell has no override. Keep real override cases covered.
 - [ ] Add or update unit tests in `packages/runtime/src/__tests__/` for every adapter you touched.
 - [ ] If the change spans multiple adapters, add a parity test or table-driven test that exercises each adapter.
 - [ ] If Codex App Server protocol artifacts are touched or adapter protocol shapes change, run `npm run codex:app-server:protocol:check --workspace=@aif/runtime` and regenerate with `npm run codex:app-server:protocol:generate --workspace=@aif/runtime` if needed.
@@ -30,3 +48,5 @@ Every feature or fix in the runtime layer must cover **every** adapter, not just
 - [ ] `npm run lint`
 - [ ] `npm test`
 - [ ] Manually re-read the diff with the question: "did I leave one adapter behind?"
+
+- [ ] Owned-server adapters create fresh private auth/storage inside the native lifecycle; never attach a native scope to an external executor. Audit CLI version/config loading and test the installed binary with a local model/tool call. Cleanup waits for verified stop; uncertain stop/crash retains artifacts.

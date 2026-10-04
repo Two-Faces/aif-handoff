@@ -1,3 +1,5 @@
+import { isProjectPublicationAllowed } from "@aif/data";
+import { LOCAL_PUBLICATION_BLOCK } from "@aif/shared";
 import { Hono, type Context } from "hono";
 import { getEnv, logger } from "@aif/shared";
 import {
@@ -254,6 +256,7 @@ githubRouter.post(
   async (c) => {
     const projectId = c.req.param("id");
     const taskId = c.req.param("taskId");
+    if (!isProjectPublicationAllowed(projectId)) return c.json(LOCAL_PUBLICATION_BLOCK, 403);
     const connection = findGitHubRepository(projectId);
     const task = findTaskById(taskId);
     const issue = findGitHubIssueByTaskId(taskId);

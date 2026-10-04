@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, primaryKey } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, primaryKey, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import type {
   AuditActorKind,
@@ -14,6 +14,11 @@ export const projects = sqliteTable("projects", {
     .$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull(),
   rootPath: text("root_path").notNull(),
+  personalMode: integer("personal_mode", { mode: "boolean" }).notNull().default(false),
+  publicationPolicy: text("publication_policy")
+    .$type<"standard" | "local_only">()
+    .notNull()
+    .default("standard"),
   plannerMaxBudgetUsd: real("planner_max_budget_usd"),
   planCheckerMaxBudgetUsd: real("plan_checker_max_budget_usd"),
   implementerMaxBudgetUsd: real("implementer_max_budget_usd"),
@@ -200,6 +205,8 @@ export const taskComments = sqliteTable("task_comments", {
   participantId: text("participant_id").references(() => participants.id, {
     onDelete: "set null",
   }),
+  logicalAuthorId: text("logical_author_id"),
+  authorDisplayNameSnapshot: text("author_display_name_snapshot"),
   message: text("message").notNull(),
   attachments: text("attachments").notNull().default("[]"),
   createdAt: text("created_at")
@@ -592,3 +599,398 @@ export const codexIndexCursors = sqliteTable("codex_index_cursors", {
 
 export type CodexIndexCursorRow = typeof codexIndexCursors.$inferSelect;
 export type NewCodexIndexCursorRow = typeof codexIndexCursors.$inferInsert;
+
+/** Device identity and process ownership are local, never part of a checkpoint. */
+export const localDevice = sqliteTable("handoff_local_device", {
+  slot: integer("slot").primaryKey().notNull(),
+  deviceId: text("device_id").notNull().unique(),
+  incarnation: text("incarnation").notNull(),
+  name: text("name").notNull(),
+  installationId: text("installation_id"),
+  ownerPid: integer("owner_pid"),
+  ownerToken: text("owner_token"),
+});
+
+export const projectCheckouts = sqliteTable(
+  "handoff_project_checkouts",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    deviceId: text("device_id").notNull(),
+    localRoot: text("local_root").notNull(),
+    executionEnvironment: text("execution_environment").notNull(),
+    head: text("head"),
+    branch: text("branch"),
+  },
+  (table) => [
+    uniqueIndex("handoff_checkout_root").on(
+      table.projectId,
+      table.deviceId,
+      table.localRoot,
+      table.executionEnvironment,
+    ),
+  ],
+);
+
+export const logicalParticipants = sqliteTable(
+  "handoff_participants",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    displayName: text("display_name").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.projectId, table.id] })],
+);
+
+/** A logical identity may bind to only one local account; no name-based inference. */
+export const participantBindings = sqliteTable(
+  "handoff_participant_bindings",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    logicalParticipantId: text("logical_participant_id").notNull(),
+    participantId: text("participant_id")
+      .notNull()
+      .references(() => participants.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.projectId, table.logicalParticipantId] })],
+);
+
+export const logicalTaskAssignments = sqliteTable(
+  "handoff_task_assignments",
+  {
+    taskId: text("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    logicalParticipantId: text("logical_participant_id").notNull(),
+    displayNameSnapshot: text("display_name_snapshot").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.taskId, table.logicalParticipantId] })],
+);
+
+export const syncStreams = sqliteTable("handoff_sync_streams", {
+  streamKey: text("stream_key").primaryKey(),
+  projectId: text("project_id").notNull(),
+  originDeviceId: text("origin_device_id").notNull(),
+  incarnation: text("incarnation").notNull(),
+  nextSequence: integer("next_sequence").notNull().default(1),
+  appliedSequence: integer("applied_sequence").notNull().default(0),
+});
+export const syncOperations = sqliteTable(
+  "handoff_sync_operations",
+  {
+    operationId: text("operation_id").primaryKey(),
+    projectId: text("project_id").notNull(),
+    streamKey: text("stream_key").notNull(),
+    sequence: integer("sequence").notNull(),
+    json: text("json").notNull(),
+    digest: text("digest").notNull(),
+    outgoing: integer("outgoing", { mode: "boolean" }).notNull(),
+    applied: integer("applied", { mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [uniqueIndex("handoff_sync_sequence").on(table.streamKey, table.sequence)],
+);
+export const syncFields = sqliteTable(
+  "handoff_sync_fields",
+  {
+    projectId: text("project_id").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    field: text("field").notNull(),
+    versionsJson: text("versions_json").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projectId, table.entityType, table.entityId, table.field] }),
+  ],
+);
+export const syncPeerCursors = sqliteTable(
+  "handoff_sync_peer_cursors",
+  {
+    peerId: text("peer_id").notNull(),
+    streamKey: text("stream_key").notNull(),
+    sentSequence: integer("sent_sequence").notNull().default(0),
+    ackSequence: integer("ack_sequence").notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.peerId, table.streamKey] })],
+);
+
+export const syncCheckpoints = sqliteTable("handoff_sync_checkpoints", {
+  checkpointId: text("checkpoint_id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  producerDeviceId: text("producer_device_id").notNull(),
+  watermarksJson: text("watermarks_json").notNull(),
+  recordCount: integer("record_count").notNull(),
+  digest: text("digest"),
+  received: integer("received", { mode: "boolean" }).notNull(),
+  nextOrdinal: integer("next_ordinal").notNull().default(0),
+  receivedBytes: integer("received_bytes").notNull().default(0),
+  complete: integer("complete", { mode: "boolean" }).notNull().default(false),
+});
+
+export const syncPeers = sqliteTable("handoff_sync_peers", {
+  deviceId: text("device_id").primaryKey(),
+  name: text("name").notNull(),
+  fingerprint: text("fingerprint").notNull().unique(),
+  address: text("address"),
+  revoked: integer("revoked", { mode: "boolean" }).notNull().default(false),
+  lastContactAt: text("last_contact_at"),
+  lastErrorCode: text("last_error_code"),
+});
+export const syncPeerProjects = sqliteTable(
+  "handoff_sync_peer_projects",
+  {
+    peerId: text("peer_id")
+      .notNull()
+      .references(() => syncPeers.deviceId, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull(),
+    outgoingCheckpointId: text("outgoing_checkpoint_id"),
+    incomingCheckpointId: text("incoming_checkpoint_id"),
+    bootstrapped: integer("bootstrapped", { mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [primaryKey({ columns: [table.peerId, table.projectId] })],
+);
+export const syncInvitations = sqliteTable("handoff_sync_invitations", {
+  id: text("id").primaryKey(),
+  tokenDigest: text("token_digest").notNull(),
+  expectedFingerprint: text("expected_fingerprint").notNull(),
+  projectIdsJson: text("project_ids_json").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  acceptedDeviceId: text("accepted_device_id"),
+  acceptedRequestJson: text("accepted_request_json"),
+});
+export const syncCheckpointRecords = sqliteTable(
+  "handoff_sync_checkpoint_records",
+  {
+    checkpointId: text("checkpoint_id")
+      .notNull()
+      .references(() => syncCheckpoints.checkpointId, { onDelete: "cascade" }),
+    ordinal: integer("ordinal").notNull(),
+    json: text("json").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.checkpointId, table.ordinal] })],
+);
+
+// Local execution provenance only: never part of the peer board checkpoint.
+export const taskExecutionWorkspaces = sqliteTable("task_execution_workspaces", {
+  taskId: text("task_id")
+    .primaryKey()
+    .references(() => tasks.id, { onDelete: "cascade" }),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  projectRoot: text("project_root").notNull(),
+  worktreePath: text("worktree_path").notNull().unique(),
+  snapshotCommit: text("snapshot_commit").notNull(),
+  state: text("state", {
+    enum: ["preparing", "active", "checkpoint_prepared", "checkpointed"],
+  }).notNull(),
+  revision: integer("revision").notNull().default(0),
+  scopeJson: text("scope_json"),
+  intentJson: text("intent_json"),
+  resultJson: text("result_json"),
+  sourceSnapshotId: text("source_snapshot_id"),
+});
+
+// Device authority is host-owned protocol state, never a board-sync field.
+// Deliberately retain the journal after task deletion (no cascading foreign keys).
+export const taskDeviceGrants = sqliteTable(
+  "task_device_grants",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id").notNull(),
+    projectId: text("project_id").notNull(),
+    executionEpoch: integer("execution_epoch").notNull(),
+    predecessorId: text("predecessor_id"),
+    grantJson: text("grant_json").notNull(),
+  },
+  (table) => [
+    uniqueIndex("task_device_grant_epoch").on(table.taskId, table.executionEpoch),
+    uniqueIndex("task_device_grant_successor").on(table.predecessorId),
+  ],
+);
+export const taskDeviceGrantHeads = sqliteTable("task_device_grant_heads", {
+  taskId: text("task_id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  grantId: text("grant_id")
+    .notNull()
+    .references(() => taskDeviceGrants.id),
+  ownerDeviceId: text("owner_device_id").notNull(),
+  executionEpoch: integer("execution_epoch").notNull(),
+  state: text("state", {
+    enum: ["owned", "observed", "released", "pending", "accepted", "conflicted"],
+  }).notNull(),
+  activeRunId: text("active_run_id"),
+  // Only P14's verified stop/checkpoint transaction may populate these fields.
+  releasedTransferId: text("released_transfer_id"),
+  releasedSnapshotId: text("released_snapshot_id"),
+});
+export const taskDeviceRuns = sqliteTable("task_device_runs", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id").notNull(),
+  grantId: text("grant_id")
+    .notNull()
+    .references(() => taskDeviceGrants.id),
+  ownerDeviceId: text("owner_device_id").notNull(),
+  executionEpoch: integer("execution_epoch").notNull(),
+  worktreePath: text("worktree_path").notNull(),
+  snapshotCommit: text("snapshot_commit").notNull(),
+  ownershipRevision: integer("ownership_revision").notNull(),
+  inputDigest: text("input_digest").notNull(),
+  state: text("state", { enum: ["running", "settled", "uncertain"] }).notNull(),
+  startedAt: text("started_at").notNull(),
+  settledAt: text("settled_at"),
+});
+
+/** Admission recorded with the run reservation, never inferred from receipts. */
+export const taskDeviceRunAdmissions = sqliteTable("task_device_run_admissions", {
+  runId: text("run_id")
+    .primaryKey()
+    .references(() => taskDeviceRuns.id),
+  policy: text("policy").notNull(),
+  runtimeId: text("runtime_id").notNull(),
+  transport: text("transport").notNull(),
+});
+
+// Local-only native session provenance. No cascade: retired sessions must not
+// become unscoped imports after a task/chat is deleted or handed to another root.
+export const taskDeviceSessions = sqliteTable("task_device_sessions", {
+  key: text("key").primaryKey(),
+  kind: text("kind", { enum: ["chat", "native"] }).notNull(),
+  taskId: text("task_id").notNull(),
+  projectId: text("project_id").notNull(),
+  grantId: text("grant_id").notNull(),
+  worktreePath: text("worktree_path").notNull(),
+  snapshotCommit: text("snapshot_commit").notNull(),
+  nativeSessionId: text("native_session_id"),
+  runtimeKey: text("runtime_key"),
+});
+
+/** Local process receipts; never part of board sync or peer handoff payloads. */
+export const taskDeviceProcesses = sqliteTable("task_device_processes", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id").notNull(),
+  runId: text("run_id")
+    .notNull()
+    .references(() => taskDeviceRuns.id),
+  state: text("state", { enum: ["reserved", "identified", "prepared", "stopped"] }).notNull(),
+  supervisorId: text("supervisor_id"),
+  identityJson: text("identity_json"),
+  preparedJson: text("prepared_json"),
+  evidenceJson: text("evidence_json"),
+  createdAt: text("created_at").notNull(),
+  stoppedAt: text("stopped_at"),
+});
+
+/** Local durable handoff journal. Authority survives UI/task deletion. */
+export const taskDeviceHandoffs = sqliteTable("task_device_handoffs", {
+  id: text("id").primaryKey(),
+  direction: text("direction", { enum: ["outgoing", "incoming"] }).notNull(),
+  projectId: text("project_id").notNull(),
+  taskId: text("task_id").notNull(),
+  sourceDeviceId: text("source_device_id").notNull(),
+  targetDeviceId: text("target_device_id").notNull(),
+  expectedGrantId: text("expected_grant_id").notNull(),
+  phase: text("phase", {
+    enum: [
+      "requested",
+      "quiescing",
+      "checkpointed",
+      "released",
+      "received",
+      "accepted",
+      "cancelled",
+    ],
+  }).notNull(),
+  revision: integer("revision").notNull().default(0),
+  inputDigest: text("input_digest"),
+  requestJson: text("request_json"),
+  stopJson: text("stop_json"),
+  snapshotId: text("snapshot_id"),
+  successorJson: text("successor_json"),
+  successorGrantId: text("successor_grant_id"),
+  previousWorkspaceJson: text("previous_workspace_json"),
+  localTransferId: text("local_transfer_id"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const codeSnapshots = sqliteTable("handoff_code_snapshots", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  taskId: text("task_id").notNull(),
+  descriptorJson: text("descriptor_json").notNull(),
+  contextJson: text("context_json").notNull(),
+});
+export const contextSnapshotBlobs = sqliteTable("handoff_context_blobs", {
+  digest: text("digest").primaryKey(),
+  base64: text("base64").notNull(),
+});
+export const codeSnapshotLocations = sqliteTable("handoff_code_snapshot_locations", {
+  snapshotId: text("snapshot_id")
+    .primaryKey()
+    .references(() => codeSnapshots.id),
+  projectRoot: text("project_root").notNull(),
+});
+export const taskWorkspaceContinuations = sqliteTable(
+  "task_workspace_continuations",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    fromRevision: integer("from_revision").notNull(),
+    snapshotId: text("snapshot_id")
+      .notNull()
+      .references(() => codeSnapshots.id),
+    worktreePath: text("worktree_path").notNull().unique(),
+    previousWorkspaceJson: text("previous_workspace_json").notNull(),
+    activatedRevision: integer("activated_revision"),
+  },
+  (table) => [
+    uniqueIndex("task_workspace_continuation_revision").on(table.taskId, table.fromRevision),
+  ],
+);
+
+export const snapshotExports = sqliteTable("handoff_snapshot_exports", {
+  snapshotId: text("snapshot_id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  manifestJson: text("manifest_json").notNull(),
+  byteSize: integer("byte_size").notNull(),
+});
+export const snapshotTransfers = sqliteTable(
+  "handoff_snapshot_transfers",
+  {
+    id: text("id").primaryKey(),
+    peerId: text("peer_id").notNull(),
+    projectId: text("project_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    checkoutId: text("checkout_id").notNull(),
+    projectRoot: text("project_root").notNull(),
+    worktreePath: text("worktree_path").notNull().unique(),
+    manifestJson: text("manifest_json").notNull(),
+    status: text("status", { enum: ["downloading", "ready", "blocked"] }).notNull(),
+    errorCode: text("error_code"),
+    codeReady: integer("code_ready", { mode: "boolean" }).notNull().default(false),
+    contextReady: integer("context_ready", { mode: "boolean" }).notNull().default(false),
+    selectedBundleDigest: text("selected_bundle_digest"),
+    completed: integer("completed", { mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [
+    uniqueIndex("snapshot_transfer_target").on(table.peerId, table.snapshotId, table.checkoutId),
+  ],
+);
+export const snapshotChunks = sqliteTable(
+  "handoff_snapshot_chunks",
+  {
+    ownerId: text("owner_id").notNull(),
+    digest: text("digest").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    base64: text("base64").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.ownerId, table.digest, table.ordinal] })],
+);

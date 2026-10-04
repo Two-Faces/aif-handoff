@@ -17,7 +17,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
-function summarizeToolInput(
+export function summarizeToolInput(
   toolName: string,
   toolInput: Record<string, unknown> | undefined,
 ): string {

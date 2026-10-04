@@ -190,6 +190,15 @@ describe("Codex runtime adapter", () => {
     expect(runCodexAgentApiMock).not.toHaveBeenCalled();
   });
 
+  it("keeps explicit non-streaming API requests non-streaming when an event callback is present", async () => {
+    const adapter = createCodexRuntimeAdapter();
+    const result = await adapter.run(
+      createRunInput({ transport: "api", stream: false, execution: { onEvent: vi.fn() } }),
+    );
+    expect(result.outputText).toBe("agentapi-output");
+    expect(runCodexAgentApiMock).toHaveBeenCalledOnce();
+  });
+
   it("runs via API when transport is 'api' or legacy 'agentapi'", async () => {
     const adapter = createCodexRuntimeAdapter();
     const result = await adapter.run(

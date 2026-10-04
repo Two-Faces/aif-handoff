@@ -1,4 +1,11 @@
 import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, type PersonalConflict } from "@/lib/api";
+import { useParticipants } from "@/hooks/useParticipants";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { AlertBox } from "@/components/ui/alert-box";
+import { FormField } from "@/components/ui/form-field";
 import type { Project, RuntimeProfile } from "@aif/shared/browser";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,6 +42,38 @@ export function ProjectRuntimeSettings({
 }: Props) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isOpen = open ?? internalOpen;
+  const queryClient = useQueryClient();
+  const personalEnabled = Boolean(isOpen && project.personalMode);
+  const checkouts = useQuery({
+    queryKey: ["personal", project.id, "checkouts"],
+    queryFn: () => api.personalCheckouts(project.id),
+    enabled: personalEnabled,
+  });
+  const identities = useQuery({
+    queryKey: ["personal", project.id, "identities"],
+    queryFn: () => api.personalIdentities(project.id),
+    enabled: personalEnabled,
+  });
+  const conflicts = useQuery({
+    queryKey: ["personal", project.id, "conflicts"],
+    queryFn: () => api.personalConflicts(project.id),
+    enabled: personalEnabled,
+  });
+  const { data: localParticipants = [] } = useParticipants(personalEnabled);
+  const [checkoutRoot, setCheckoutRoot] = useState("");
+  const [checkoutEnvironment, setCheckoutEnvironment] = useState("native_windows");
+  const [identityChoices, setIdentityChoices] = useState<Record<string, string>>({});
+  const [mergedDraft, setMergedDraft] = useState<{
+    conflict: PersonalConflict;
+    value: string;
+  } | null>(null);
+  const personalAction = useMutation({
+    mutationFn: (action: () => Promise<unknown>) => action(),
+    onSuccess: () => {
+      for (const key of ["personal", "tasks", "task", "task-comments", "task-executor-history"])
+        queryClient.invalidateQueries({ queryKey: [key] });
+    },
+  });
   const setOpenState = (next: boolean) => {
     onOpenChange?.(next);
     if (open === undefined) {
@@ -268,6 +307,236 @@ export function ProjectRuntimeSettings({
           Close
         </Button>
       </div>
+
+      {project.personalMode && (
+        <section
+          aria-label="Personal project"
+          className="space-y-4 border border-border bg-background p-4 text-foreground"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold">Personal project</h3>
+            <Badge variant="outline">Board available</Badge>
+            <Badge variant="outline">Execution disabled</Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            A synced board does not include code or attachment files. Connect an existing local
+            checkout explicitly; this will not switch branches or initialize AI context.
+          </p>
+          <p className="break-all font-mono text-xs text-muted-foreground">Project: {project.id}</p>
+          {checkouts.data?.checkouts.map((checkout) => (
+            <div key={checkout.id} className="space-y-1 border-l-2 border-border pl-3 text-xs">
+              <p className="break-all font-mono">{checkout.localRoot}</p>
+              <p className="text-muted-foreground">
+                {checkout.executionEnvironment} · {checkout.branch ?? "No branch"} · code snapshot
+                not verified
+              </p>
+            </div>
+          ))}
+          {!checkouts.data?.checkouts.length && (
+            <AlertBox variant="info">No local checkout is attached on this device.</AlertBox>
+          )}
+          <FormField label="Existing checkout on this device" htmlFor="personal-checkout-root">
+            <Input
+              id="personal-checkout-root"
+              value={checkoutRoot}
+              onChange={(event) => setCheckoutRoot(event.target.value)}
+              placeholder="Absolute local path"
+            />
+          </FormField>
+          <FormField label="Checkout environment" htmlFor="personal-checkout-environment">
+            <Select
+              id="personal-checkout-environment"
+              value={checkoutEnvironment}
+              onChange={(event) => setCheckoutEnvironment(event.target.value)}
+              options={[
+                { value: "native_windows", label: "Windows native" },
+                { value: "native_macos", label: "macOS native" },
+                { value: "wsl", label: "WSL" },
+                { value: "container", label: "Container" },
+                { value: "native_linux", label: "Linux native" },
+              ]}
+            />
+          </FormField>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!checkoutRoot.trim() || personalAction.isPending}
+            onClick={() =>
+              personalAction.mutate(async () => {
+                await api.bindPersonalCheckout(project.id, checkoutRoot, checkoutEnvironment);
+                setCheckoutRoot("");
+              })
+            }
+          >
+            Attach to this project
+          </Button>
+          <div className="space-y-3 border-t border-border pt-3">
+            <h4 className="text-sm font-medium">Participant mapping</h4>
+            <p className="text-xs text-muted-foreground">
+              Map a shared identity to a local account to recognize assignments. Names alone never
+              grant local access.
+            </p>
+            {(identities.data ?? []).map((person) => (
+              <div key={person.id} className="space-y-2">
+                <p className="text-sm">
+                  {person.displayName || "Unnamed participant"}{" "}
+                  <span className="text-xs text-muted-foreground">
+                    {person.localParticipantId ? "· mapped locally" : "· not mapped"}
+                  </span>
+                </p>
+                <p className="break-all font-mono text-xs text-muted-foreground">{person.id}</p>
+                {!person.localParticipantId && (
+                  <div className="flex gap-2">
+                    <Select
+                      aria-label={`Local account for ${person.displayName}`}
+                      value={identityChoices[person.id] ?? ""}
+                      onChange={(event) =>
+                        setIdentityChoices((previous) => ({
+                          ...previous,
+                          [person.id]: event.target.value,
+                        }))
+                      }
+                      options={[
+                        { value: "", label: "Choose local account" },
+                        ...localParticipants
+                          .filter((participant) => participant.active)
+                          .map((participant) => ({
+                            value: participant.id,
+                            label: participant.displayName,
+                          })),
+                      ]}
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!identityChoices[person.id] || personalAction.isPending}
+                      onClick={() =>
+                        personalAction.mutate(() =>
+                          api.bindPersonalIdentity(
+                            project.id,
+                            person.id,
+                            identityChoices[person.id]!,
+                          ),
+                        )
+                      }
+                    >
+                      Confirm mapping
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))}
+            {identities.data?.length === 0 && (
+              <p className="text-xs text-muted-foreground">No shared participant identities yet.</p>
+            )}
+          </div>
+          <div className="space-y-3 border-t border-border pt-3">
+            <h4 className="text-sm font-medium">Conflicts · {conflicts.data?.length ?? 0}</h4>
+            <p className="text-xs text-muted-foreground">
+              Both versions are retained until you choose or merge them. Resolving an older pair
+              cannot overwrite a later change.
+            </p>
+            {(conflicts.data ?? []).map((conflict) => (
+              <div
+                key={`${conflict.entityId}:${conflict.field}`}
+                className="space-y-2 border border-border p-3"
+              >
+                <p className="text-sm font-medium">
+                  {conflict.entityType} · {conflict.field}
+                </p>
+                <p className="break-all font-mono text-xs text-muted-foreground">
+                  {conflict.entityId}
+                </p>
+                {conflict.versions.map((version, index) => (
+                  <div
+                    key={`${version.dot.streamKey}:${version.dot.sequence}`}
+                    className="space-y-2 border-t border-border pt-2"
+                  >
+                    <p className="text-xs text-muted-foreground">
+                      Version {index + 1} · device{" "}
+                      {version.dot.streamKey.split(":")[1]?.slice(0, 8)}
+                    </p>
+                    <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs">
+                      {typeof version.value === "string"
+                        ? version.value
+                        : JSON.stringify(version.value, null, 2)}
+                    </pre>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={personalAction.isPending}
+                      onClick={() =>
+                        personalAction.mutate(() =>
+                          api.resolvePersonalConflict(project.id, conflict, version.value),
+                        )
+                      }
+                    >
+                      Keep version {index + 1}
+                    </Button>
+                  </div>
+                ))}
+                {["title", "description", "plan", "message"].includes(conflict.field) && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      setMergedDraft({ conflict, value: String(conflict.versions[0]?.value ?? "") })
+                    }
+                  >
+                    Merge text
+                  </Button>
+                )}
+              </div>
+            ))}
+            {mergedDraft && (
+              <div className="space-y-2">
+                <FormField label={`Merged ${mergedDraft.conflict.field}`} htmlFor="merged-conflict">
+                  <Textarea
+                    id="merged-conflict"
+                    rows={8}
+                    value={mergedDraft.value}
+                    onChange={(event) =>
+                      setMergedDraft({ ...mergedDraft, value: event.target.value })
+                    }
+                  />
+                </FormField>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    disabled={personalAction.isPending}
+                    onClick={() =>
+                      personalAction.mutate(async () => {
+                        await api.resolvePersonalConflict(
+                          project.id,
+                          mergedDraft.conflict,
+                          mergedDraft.value,
+                        );
+                        setMergedDraft(null);
+                      })
+                    }
+                  >
+                    Save merged version
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setMergedDraft(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+            {conflicts.data?.length === 0 && (
+              <p className="text-xs text-muted-foreground">No unresolved conflicts.</p>
+            )}
+          </div>
+          {(personalAction.error || checkouts.error || identities.error || conflicts.error) && (
+            <AlertBox variant="error">
+              {
+                (personalAction.error ?? checkouts.error ?? identities.error ?? conflicts.error)
+                  ?.message
+              }
+            </AlertBox>
+          )}
+        </section>
+      )}
 
       <div className="grid gap-2 md:grid-cols-2">
         <div className="space-y-1">

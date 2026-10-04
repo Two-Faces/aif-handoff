@@ -1,6 +1,10 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "globalPassThroughEnv": [
+    "AIF_PERSONAL_MODE",
+    "AIF_PEER_ENABLED",
+    "AIF_PEER_PORT",
+    "AIF_PEER_IDENTITY_DIR",
     "AIF_NOTIFICATIONS_PROJECT_NAMES_ENABLED",
     "AIF_RUNTIME_SESSION_FORK_ENABLED",
     "AIF_RUNTIME_CODEX_NATIVE_SUBAGENTS_ENABLED",
@@ -70,10 +74,12 @@
       "persistent": true
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "env": ["OPENCODE_NATIVE_TEST_PATH"]
     },
     "coverage": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "env": ["OPENCODE_NATIVE_TEST_PATH"]
     },
     "lint": {
       "dependsOn": ["^build"]

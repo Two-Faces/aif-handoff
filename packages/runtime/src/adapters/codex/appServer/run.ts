@@ -14,7 +14,11 @@ import { CodexAppServerEventMapper, type CodexAppServerEventMapperLogger } from 
 import { classifyCodexAppServerError } from "./errors.js";
 import { JsonlRpcClient } from "./jsonlRpcClient.js";
 import type { CodexAppServerRequestMap } from "./protocol.js";
-import { spawnCodexAppServerProcess, terminateCodexAppServerProcess } from "./process.js";
+import { launchCodexAppServerProcess, terminateCodexAppServerProcess } from "./process.js";
+import {
+  assertNativeProcessMode,
+  type NativeProcessScope,
+} from "../../../supervision/nativeProcessScope.js";
 import type { JsonValue } from "./generated/serde_json/JsonValue.js";
 import type { ReasoningEffort } from "./generated/ReasoningEffort.js";
 import type { AskForApproval } from "./generated/v2/AskForApproval.js";
@@ -55,6 +59,7 @@ export async function runCodexAppServer(
   input: RuntimeRunInput,
   logger?: CodexAppServerRunLogger,
 ): Promise<RuntimeRunResult> {
+  assertNativeProcessMode(input, true);
   logger?.info?.(
     {
       runtimeId: input.runtimeId,
@@ -85,7 +90,7 @@ export async function runCodexAppServer(
     );
     return result;
   } catch (error) {
-    if (isRetriableTimeoutError(error)) {
+    if (!input.execution?.nativeProcessScope && isRetriableTimeoutError(error)) {
       const retryDelayMs = resolveRetryDelay(input.execution ?? {});
       logger?.warn?.(
         {
@@ -109,7 +114,7 @@ async function runCodexAppServerAttempt(
 ): Promise<RuntimeRunResult> {
   const completion = createDeferredCompletion<void>();
   completion.promise.catch(() => undefined);
-  const launch = spawnCodexAppServerProcess({
+  const launch = await launchCodexAppServerProcess({
     input: toLaunchInput(input),
     logger,
   });
@@ -808,6 +813,8 @@ function buildSandboxPolicy(sandboxMode: string, input: RuntimeRunInput): Sandbo
 }
 
 function toLaunchInput(input: RuntimeRunInput): {
+  nativeProcessScope?: NativeProcessScope;
+  signal?: AbortSignal;
   runtimeId: string;
   profileId: string | null;
   transport: RuntimeTransport;
@@ -820,6 +827,8 @@ function toLaunchInput(input: RuntimeRunInput): {
 } {
   const options = asRecord(input.options);
   return {
+    nativeProcessScope: input.execution?.nativeProcessScope,
+    signal: input.execution?.abortController?.signal,
     runtimeId: input.runtimeId,
     profileId: input.profileId ?? null,
     transport: RuntimeTransport.APP_SERVER,

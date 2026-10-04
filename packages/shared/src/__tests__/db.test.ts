@@ -7,7 +7,423 @@ import { eq } from "drizzle-orm";
 import { chatSessions } from "../schema.js";
 import { closeDb, createTestDb, getDb } from "../db.js";
 
-const CURRENT_SCHEMA_VERSION = 29;
+const CURRENT_SCHEMA_VERSION = 41;
+
+it.each([39, 40])(
+  "upgrades v%s without certifying old runs or changing accepted handoff authority",
+  (version) => {
+    closeDb();
+    const path = join(tmpdir(), `aif-process-upgrade-${crypto.randomUUID()}.sqlite`);
+    const connections: Database.Database[] = [];
+    try {
+      getDb(path);
+      closeDb();
+      const old = new Database(path);
+      connections.push(old);
+      if (version === 39) old.exec("DROP TABLE task_device_processes");
+      old.exec("DROP TABLE task_device_run_admissions");
+      old
+        .prepare(
+          "INSERT INTO task_device_grants (id,task_id,project_id,execution_epoch,grant_json) VALUES ('grant','task','project',1,'{}')",
+        )
+        .run();
+      old
+        .prepare(
+          "INSERT INTO task_device_grant_heads (task_id,project_id,grant_id,owner_device_id,execution_epoch,state,active_run_id) VALUES ('task','project','grant','device',1,'accepted','old-run')",
+        )
+        .run();
+      old
+        .prepare(
+          "INSERT INTO task_device_runs (id,task_id,grant_id,owner_device_id,execution_epoch,worktree_path,snapshot_commit,ownership_revision,input_digest,state,started_at) VALUES ('old-run','task','grant','device',1,'root','commit',0,'digest','uncertain','now')",
+        )
+        .run();
+      if (version === 40)
+        old.exec(
+          "INSERT INTO task_device_processes (id,task_id,run_id,state,created_at,evidence_json) VALUES ('old-process','task','old-run','stopped','now','{}')",
+        );
+      old.pragma(`user_version = ${version}`);
+      old.close();
+      getDb(path);
+      closeDb();
+      const migrated = new Database(path);
+      connections.push(migrated);
+      expect(migrated.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
+      expect(migrated.prepare("SELECT count(*) AS count FROM task_device_processes").get()).toEqual(
+        {
+          count: version === 39 ? 0 : 1,
+        },
+      );
+      expect(
+        migrated.prepare("SELECT state,active_run_id FROM task_device_grant_heads").get(),
+      ).toEqual({ state: "accepted", active_run_id: "old-run" });
+      expect(migrated.prepare("SELECT state FROM task_device_runs").get()).toEqual({
+        state: "uncertain",
+      });
+      expect(migrated.prepare("SELECT * FROM task_device_run_admissions").all()).toEqual([]);
+    } finally {
+      closeDb();
+      for (const connection of connections) if (connection.open) connection.close();
+      removeSqliteArtifacts(path);
+    }
+  },
+);
+
+it("upgrades v38 without manufacturing handoffs or restoring relinquished device authority", () => {
+  closeDb();
+  const path = join(tmpdir(), `aif-handoff-upgrade-${crypto.randomUUID()}.sqlite`);
+  const connections: Database.Database[] = [];
+  try {
+    getDb(path);
+    closeDb();
+    const old = new Database(path);
+    connections.push(old);
+    old.exec("DROP TABLE task_device_handoffs");
+    old.exec("DROP TABLE task_device_processes");
+    old.exec("DROP TABLE task_device_grant_heads");
+    old.exec(`CREATE TABLE task_device_grant_heads (
+      task_id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
+      grant_id TEXT NOT NULL REFERENCES task_device_grants(id), owner_device_id TEXT NOT NULL,
+      execution_epoch INTEGER NOT NULL,
+      state TEXT NOT NULL CHECK(state IN ('owned','observed','released','pending','conflicted')),
+      active_run_id TEXT, released_transfer_id TEXT, released_snapshot_id TEXT
+    )`);
+    old
+      .prepare(
+        "INSERT INTO task_device_grants (id,task_id,project_id,execution_epoch,grant_json) VALUES ('successor','task','project',1,'{}')",
+      )
+      .run();
+    old
+      .prepare(
+        "INSERT INTO task_device_grant_heads (task_id,project_id,grant_id,owner_device_id,execution_epoch,state) VALUES ('task','project','successor','other-device',1,'observed')",
+      )
+      .run();
+    old
+      .prepare(
+        "INSERT INTO task_device_sessions (key,kind,task_id,project_id,grant_id,worktree_path,snapshot_commit,native_session_id,runtime_key) VALUES ('native:key','native','task','project','old-grant','old-root','old-commit','old-session','runtime')",
+      )
+      .run();
+    old.pragma("user_version = 38");
+    old.close();
+    getDb(path);
+    closeDb();
+    const upgraded = new Database(path);
+    connections.push(upgraded);
+    expect(upgraded.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
+    expect(
+      upgraded
+        .prepare("SELECT owner_device_id,state,execution_epoch FROM task_device_grant_heads")
+        .get(),
+    ).toEqual({ owner_device_id: "other-device", state: "observed", execution_epoch: 1 });
+    expect(upgraded.prepare("SELECT native_session_id FROM task_device_sessions").get()).toEqual({
+      native_session_id: "old-session",
+    });
+    expect(upgraded.prepare("SELECT count(*) AS count FROM task_device_handoffs").get()).toEqual({
+      count: 0,
+    });
+    upgraded
+      .prepare("UPDATE task_device_grant_heads SET state='accepted' WHERE task_id='task'")
+      .run();
+    expect(upgraded.prepare("SELECT state FROM task_device_grant_heads").get()).toEqual({
+      state: "accepted",
+    });
+  } finally {
+    closeDb();
+    for (const connection of connections) if (connection.open) connection.close();
+    removeSqliteArtifacts(path);
+  }
+});
+
+it("upgrades v37 without adopting legacy sessions or altering an unresolved run", () => {
+  closeDb();
+  const path = join(tmpdir(), `aif-session-upgrade-${crypto.randomUUID()}.sqlite`);
+  const connections: Database.Database[] = [];
+  try {
+    getDb(path);
+    closeDb();
+    const old = new Database(path);
+    connections.push(old);
+    old.exec("DROP TABLE task_device_sessions");
+    old
+      .prepare("INSERT INTO projects (id,name,root_path) VALUES ('project','Existing','root')")
+      .run();
+    old
+      .prepare(
+        "INSERT INTO tasks (id,project_id,title,session_id) VALUES ('task','project','Existing','legacy')",
+      )
+      .run();
+    old
+      .prepare(
+        "INSERT INTO task_device_grants (id,task_id,project_id,execution_epoch,grant_json) VALUES ('grant','task','project',0,'{}')",
+      )
+      .run();
+    old
+      .prepare(
+        "INSERT INTO task_device_grant_heads (task_id,project_id,grant_id,owner_device_id,execution_epoch,state,active_run_id) VALUES ('task','project','grant','device',0,'owned','run')",
+      )
+      .run();
+    old.pragma("user_version = 37");
+    old.close();
+    getDb(path);
+    closeDb();
+    const upgraded = new Database(path);
+    connections.push(upgraded);
+    expect(upgraded.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
+    expect(upgraded.prepare("SELECT session_id FROM tasks").get()).toEqual({
+      session_id: "legacy",
+    });
+    expect(upgraded.prepare("SELECT active_run_id FROM task_device_grant_heads").get()).toEqual({
+      active_run_id: "run",
+    });
+    expect(upgraded.prepare("SELECT count(*) AS count FROM task_device_sessions").get()).toEqual({
+      count: 0,
+    });
+    upgraded
+      .prepare(
+        "INSERT INTO task_device_sessions (key,kind,task_id,project_id,grant_id,worktree_path,snapshot_commit,native_session_id,runtime_key) VALUES ('native:key','native','task','project','grant','root','commit','native','runtime')",
+      )
+      .run();
+    upgraded.close();
+    getDb(path);
+    closeDb();
+    const reopened = new Database(path, { readonly: true });
+    connections.push(reopened);
+    expect(
+      reopened.prepare("SELECT native_session_id,worktree_path FROM task_device_sessions").get(),
+    ).toEqual({ native_session_id: "native", worktree_path: "root" });
+  } finally {
+    closeDb();
+    for (const connection of connections) if (connection.open) connection.close();
+    removeSqliteArtifacts(path);
+  }
+});
+
+it("upgrades v36 without enrolling existing tasks or changing their locks and transfer readiness", () => {
+  closeDb();
+  const path = join(tmpdir(), `aif-grant-upgrade-${crypto.randomUUID()}.sqlite`);
+  const connections: Database.Database[] = [];
+  try {
+    getDb(path);
+    closeDb();
+    const old = new Database(path);
+    connections.push(old);
+    old.exec("DROP TABLE task_device_runs");
+    old.exec("DROP TABLE task_device_grant_heads");
+    old.exec("DROP TABLE task_device_grants");
+    old
+      .prepare("INSERT INTO projects (id, name, root_path) VALUES (?, ?, ?)")
+      .run("project", "Existing", "keep-root");
+    old
+      .prepare(
+        "INSERT INTO tasks (id, project_id, title, locked_by, locked_until, session_id) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run("task", "project", "Existing task", "coordinator", "2000-01-01", "saved-session");
+    old
+      .prepare(
+        "INSERT INTO handoff_snapshot_transfers (id, peer_id, project_id, snapshot_id, checkout_id, project_root, worktree_path, manifest_json, status, code_ready, context_ready, completed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        "transfer",
+        "peer",
+        "project",
+        "snapshot",
+        "checkout",
+        "keep-root",
+        "keep-worktree",
+        "{}",
+        "ready",
+        1,
+        1,
+        1,
+      );
+    old.pragma("user_version = 36");
+    old.close();
+    getDb(path);
+    closeDb();
+    const upgraded = new Database(path, { readonly: true });
+    connections.push(upgraded);
+    expect(upgraded.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
+    expect(
+      upgraded
+        .prepare("SELECT locked_by, locked_until, session_id FROM tasks WHERE id = 'task'")
+        .get(),
+    ).toEqual({
+      locked_by: "coordinator",
+      locked_until: "2000-01-01",
+      session_id: "saved-session",
+    });
+    expect(
+      upgraded
+        .prepare(
+          "SELECT code_ready, context_ready, completed, worktree_path FROM handoff_snapshot_transfers WHERE id = 'transfer'",
+        )
+        .get(),
+    ).toEqual({ code_ready: 1, context_ready: 1, completed: 1, worktree_path: "keep-worktree" });
+    for (const table of ["task_device_grants", "task_device_grant_heads", "task_device_runs"]) {
+      expect(upgraded.prepare(`SELECT count(*) AS count FROM ${table}`).get()).toEqual({
+        count: 0,
+      });
+    }
+  } finally {
+    closeDb();
+    for (const connection of connections) if (connection.open) connection.close();
+    removeSqliteArtifacts(path);
+  }
+});
+
+it("upgrades v35 without rewriting immutable code/context records", () => {
+  closeDb();
+  const path = join(tmpdir(), `aif-transfer-upgrade-${crypto.randomUUID()}.sqlite`);
+  const connections: Database.Database[] = [];
+  try {
+    getDb(path);
+    closeDb();
+    const old = new Database(path);
+    connections.push(old);
+    old.exec("DROP TABLE handoff_snapshot_chunks");
+    old.exec("DROP TABLE handoff_snapshot_transfers");
+    old.exec("DROP TABLE handoff_snapshot_exports");
+    old
+      .prepare(
+        "INSERT INTO handoff_code_snapshots (id, project_id, task_id, descriptor_json, context_json) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run("existing", "project", "task", '{"immutable":"descriptor"}', '{"immutable":"context"}');
+    old
+      .prepare("INSERT INTO handoff_context_blobs (digest, base64) VALUES (?, ?)")
+      .run("saved", "Y29udGV4dA==");
+    old.pragma("user_version = 35");
+    old.close();
+    getDb(path);
+    closeDb();
+    const upgraded = new Database(path, { readonly: true });
+    connections.push(upgraded);
+    expect(upgraded.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
+    expect(
+      upgraded
+        .prepare(
+          "SELECT descriptor_json, context_json FROM handoff_code_snapshots WHERE id = 'existing'",
+        )
+        .get(),
+    ).toEqual({
+      descriptor_json: '{"immutable":"descriptor"}',
+      context_json: '{"immutable":"context"}',
+    });
+    expect(
+      upgraded.prepare("SELECT base64 FROM handoff_context_blobs WHERE digest = 'saved'").get(),
+    ).toEqual({ base64: "Y29udGV4dA==" });
+    expect(
+      upgraded.prepare("SELECT count(*) AS count FROM handoff_snapshot_transfers").get(),
+    ).toEqual({ count: 0 });
+    expect(
+      upgraded
+        .prepare(
+          "SELECT name FROM pragma_table_info('handoff_snapshot_transfers') WHERE name = 'completed'",
+        )
+        .get(),
+    ).toEqual({ name: "completed" });
+  } finally {
+    closeDb();
+    for (const connection of connections) if (connection.open) connection.close();
+    removeSqliteArtifacts(path);
+  }
+});
+
+it("upgrades a v34 journal without changing its saved scope or revision", () => {
+  closeDb();
+  const path = join(tmpdir(), `aif-context-upgrade-${crypto.randomUUID()}.sqlite`);
+  const connections: Database.Database[] = [];
+  try {
+    getDb(path);
+    closeDb();
+    const old = new Database(path);
+    connections.push(old);
+    old.exec("DROP TABLE task_workspace_continuations");
+    old.exec("DROP TABLE handoff_code_snapshot_locations");
+    old.exec("DROP TABLE handoff_context_blobs");
+    old.exec("DROP TABLE handoff_code_snapshots");
+    old.exec("ALTER TABLE task_execution_workspaces DROP COLUMN source_snapshot_id");
+    old
+      .prepare("INSERT INTO projects (id, name, root_path) VALUES (?, ?, ?)")
+      .run("keep", "Existing", "source-root");
+    old
+      .prepare("INSERT INTO tasks (id, project_id, title) VALUES (?, ?, ?)")
+      .run("task", "keep", "Existing task");
+    old
+      .prepare(
+        "INSERT INTO task_execution_workspaces (task_id, project_id, project_root, worktree_path, snapshot_commit, state, revision, scope_json, intent_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        "task",
+        "keep",
+        "source-root",
+        "owned-root",
+        "a".repeat(40),
+        "checkpoint_prepared",
+        3,
+        '{"saved":"scope"}',
+        '{"saved":"intent"}',
+      );
+    old.pragma("user_version = 34");
+    old.close();
+    getDb(path);
+    closeDb();
+    const upgraded = new Database(path, { readonly: true });
+    connections.push(upgraded);
+    expect(upgraded.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
+    expect(
+      upgraded
+        .prepare(
+          "SELECT state, revision, scope_json, intent_json, source_snapshot_id FROM task_execution_workspaces WHERE task_id = 'task'",
+        )
+        .get(),
+    ).toEqual({
+      state: "checkpoint_prepared",
+      revision: 3,
+      scope_json: '{"saved":"scope"}',
+      intent_json: '{"saved":"intent"}',
+      source_snapshot_id: null,
+    });
+    expect(upgraded.prepare("SELECT count(*) AS count FROM handoff_code_snapshots").get()).toEqual({
+      count: 0,
+    });
+  } finally {
+    closeDb();
+    for (const connection of connections) if (connection.open) connection.close();
+    removeSqliteArtifacts(path);
+  }
+});
+
+it("upgrades a populated v33 database with the local checkpoint journal", () => {
+  closeDb();
+  const path = join(tmpdir(), `aif-workspace-upgrade-${crypto.randomUUID()}.sqlite`);
+  const connections: Database.Database[] = [];
+  try {
+    getDb(path);
+    closeDb();
+    const old = new Database(path);
+    connections.push(old);
+    old.exec("DROP TABLE task_execution_workspaces");
+    old
+      .prepare("INSERT INTO projects (id, name, root_path) VALUES (?, ?, ?)")
+      .run("keep", "Existing", "unchanged-root");
+    old.pragma("user_version = 33");
+    old.close();
+    getDb(path);
+    closeDb();
+    const upgraded = new Database(path, { readonly: true });
+    connections.push(upgraded);
+    expect(upgraded.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
+    expect(
+      upgraded.prepare("SELECT count(*) AS count FROM task_execution_workspaces").get(),
+    ).toEqual({ count: 0 });
+    expect(upgraded.prepare("SELECT root_path FROM projects WHERE id = 'keep'").get()).toEqual({
+      root_path: "unchanged-root",
+    });
+  } finally {
+    closeDb();
+    for (const connection of connections) if (connection.open) connection.close();
+    removeSqliteArtifacts(path);
+  }
+});
 
 function removeSqliteArtifacts(dbPath: string): void {
   for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {

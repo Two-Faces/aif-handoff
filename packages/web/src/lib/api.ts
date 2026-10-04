@@ -352,7 +352,29 @@ async function performRequest<T>(
         message = firstFieldError[0] ?? null;
       }
     }
-    throw new ApiError(message ?? `HTTP ${res.status}`, res.status, body);
+    const syncMessages: Record<string, string> = {
+      sync_revision_required: "Refresh the task before saving this change.",
+      sync_revision_conflict:
+        "This field changed while you were editing. Your draft was not saved.",
+      sync_conflict_requires_resolution:
+        "This field has conflicting versions. Resolve them in project settings.",
+      resolution_changed:
+        "Another version arrived. Review the updated conflict before resolving it.",
+      peer_unavailable: "The other device is not reachable.",
+      peer_identity_mismatch: "The device fingerprint does not match. Pairing was refused.",
+      peer_not_enabled: "Enable LAN sync on the local API first.",
+      peer_storage_full:
+        "The device has no free disk space. Free space and retry; committed changes are preserved.",
+      peer_storage_unavailable:
+        "The device storage is unavailable. Restore access before retrying synchronization.",
+    };
+    throw new ApiError(
+      (typeof body?.code === "string" ? syncMessages[body.code] : undefined) ??
+        message ??
+        `HTTP ${res.status}`,
+      res.status,
+      body,
+    );
   }
 
   if (res.status === 204) {
@@ -629,6 +651,79 @@ export const api = {
   },
 
   // Tasks
+  getPeers(): Promise<PersonalPeerOverview> {
+    return request("/peers");
+  },
+  createPeerInvitation(
+    expectedFingerprint: string,
+    projectIds: string[],
+  ): Promise<import("@aif/shared/browser").PeerInvitation> {
+    return request("/peers/invitations", {
+      method: "POST",
+      body: JSON.stringify({ expectedFingerprint, projectIds }),
+    });
+  },
+  pairPeer(
+    address: string,
+    invitation: import("@aif/shared/browser").PeerInvitation,
+    projectIds: string[],
+  ) {
+    return request("/peers/pair", {
+      method: "POST",
+      body: JSON.stringify({ address, invitation, projectIds }),
+    });
+  },
+  syncPeer(id: string) {
+    return request(`/peers/${encodeURIComponent(id)}/sync`, { method: "POST" }, 120_000);
+  },
+  resyncPeer(id: string) {
+    return request(`/peers/${encodeURIComponent(id)}/resync`, { method: "POST" }, 120_000);
+  },
+  cancelPeerSync(id: string) {
+    return request(`/peers/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+  },
+  revokePeer(id: string) {
+    return request(`/peers/${encodeURIComponent(id)}/revoke`, { method: "POST" });
+  },
+  updatePeerAddress(id: string, address: string) {
+    return request(`/peers/${encodeURIComponent(id)}/address`, {
+      method: "PUT",
+      body: JSON.stringify({ address }),
+    });
+  },
+  personalCheckouts(id: string): Promise<{ checkouts: PersonalCheckout[] }> {
+    return request(`/projects/${encodeURIComponent(id)}/checkouts`);
+  },
+  bindPersonalCheckout(id: string, localRoot: string, executionEnvironment: string) {
+    return request(`/projects/${encodeURIComponent(id)}/checkouts`, {
+      method: "POST",
+      body: JSON.stringify({ localRoot, executionEnvironment, confirmProjectIdentity: true }),
+    });
+  },
+  personalIdentities(id: string): Promise<PersonalLogicalParticipant[]> {
+    return request(`/projects/${encodeURIComponent(id)}/identities`);
+  },
+  bindPersonalIdentity(id: string, logicalParticipantId: string, participantId: string) {
+    return request(`/projects/${encodeURIComponent(id)}/identities/bind`, {
+      method: "POST",
+      body: JSON.stringify({ logicalParticipantId, participantId, confirmIdentity: true }),
+    });
+  },
+  personalConflicts(id: string): Promise<PersonalConflict[]> {
+    return request(`/projects/${encodeURIComponent(id)}/conflicts`);
+  },
+  resolvePersonalConflict(id: string, conflict: PersonalConflict, value: unknown) {
+    return request(`/projects/${encodeURIComponent(id)}/conflicts/resolve`, {
+      method: "POST",
+      body: JSON.stringify({
+        entityType: conflict.entityType,
+        entityId: conflict.entityId,
+        field: conflict.field,
+        value,
+        parents: conflict.versions.map((version) => version.dot),
+      }),
+    });
+  },
   listTasks,
 
   getTask(id: string): Promise<Task> {
@@ -670,7 +765,7 @@ export const api = {
   taskEvent(
     id: string,
     event: TaskEvent,
-    options?: Pick<TaskEventInput, "deletePlanFile" | "commitOnApprove">,
+    options?: Pick<TaskEventInput, "deletePlanFile" | "commitOnApprove" | "expectedSyncRevisions">,
   ): Promise<Task> {
     const timeoutMs = event === "fast_fix" ? PLAN_FAST_FIX_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
     return request<Task>(
@@ -681,6 +776,7 @@ export const api = {
           event,
           deletePlanFile: options?.deletePlanFile,
           commitOnApprove: options?.commitOnApprove,
+          expectedSyncRevisions: options?.expectedSyncRevisions,
         }),
       },
       timeoutMs,
@@ -1019,3 +1115,42 @@ export const api = {
     return request("/auth/codex/login/cancel", { method: "POST" });
   },
 };
+export interface PersonalPeerOverview {
+  enabled: boolean;
+  port: number;
+  executionReady: false;
+  device: { deviceId: string; name: string; fingerprint: string } | null;
+  peers: Array<{
+    deviceId: string;
+    name: string;
+    fingerprint: string;
+    address: string | null;
+    revoked: boolean;
+    lastContactAt: string | null;
+    lastErrorCode: string | null;
+    projects: Array<{
+      projectId: string;
+      bootstrapped: boolean;
+      pendingOperations: number;
+      pendingCountCapped: boolean;
+    }>;
+  }>;
+}
+export interface PersonalCheckout {
+  id: string;
+  localRoot: string;
+  executionEnvironment: string;
+  head: string | null;
+  branch: string | null;
+}
+export interface PersonalLogicalParticipant {
+  id: string;
+  displayName: string;
+  localParticipantId: string | null;
+}
+export interface PersonalConflict {
+  entityType: import("@aif/shared/browser").SyncEntityType;
+  entityId: string;
+  field: string;
+  versions: import("@aif/shared/browser").FieldVersion[];
+}

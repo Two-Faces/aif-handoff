@@ -1,3 +1,4 @@
+import { personalProjectExecutionGate } from "../middleware/personalExecution.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -55,6 +56,8 @@ import {
 const log = logger("projects-route");
 
 export const projectsRouter = new Hono();
+projectsRouter.use("/:id/roadmap/generate", personalProjectExecutionGate);
+projectsRouter.use("/:id/warmup", personalProjectExecutionGate);
 
 const WARMUP_PROMPT =
   "Study the current project context, including its structure, architecture layers, package boundaries, conventions, and relevant documentation, so this session can be forked for future tasks. Do not edit files. Do not summarize the context; if a final response is required, reply only that warmup is complete.";

@@ -47,6 +47,11 @@ export function TaskComments({ taskId }: TaskCommentsProps) {
                   {comment.participant.active ? "" : " (inactive)"}
                 </span>
               )}
+              {comment.author === "human" && !comment.participant && comment.logicalAuthorId && (
+                <span>
+                  {comment.authorDisplayNameSnapshot || "Shared participant"} (not mapped locally)
+                </span>
+              )}
             </div>
             <span>{formatWhen(comment.createdAt)}</span>
           </div>

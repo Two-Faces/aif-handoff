@@ -1,4 +1,6 @@
+import { withProjectDeviceExecution } from "@aif/data";
 import { existsSync, readFileSync } from "node:fs";
+import { assertTaskExecutionAllowed } from "@aif/data";
 import { resolve } from "node:path";
 import {
   findProjectById,
@@ -129,6 +131,13 @@ function buildFixCommandText(taskContext: string): string {
 }
 
 export async function runPlanner(taskId: string, projectRoot: string): Promise<void> {
+  return await withProjectDeviceExecution({ taskId, projectRoot }, async (root) =>
+    runPlannerScoped(taskId, root ?? projectRoot),
+  );
+}
+
+async function runPlannerScoped(taskId: string, projectRoot: string): Promise<void> {
+  projectRoot = assertTaskExecutionAllowed(taskId, projectRoot) ?? projectRoot;
   const task = findTaskById(taskId);
   const comments = listTaskComments(taskId).sort(
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),

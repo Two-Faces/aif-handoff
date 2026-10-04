@@ -2,6 +2,9 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    // Keep native Git fixture timing independent of unrelated fixture processes.
+    // Cross-process races are exercised explicitly inside their owning tests.
+    fileParallelism: process.platform !== "win32",
     exclude: ["dist/**", "**/node_modules/**", "**/.git/**", "**/*SFConflict*"],
     coverage: {
       provider: "v8",

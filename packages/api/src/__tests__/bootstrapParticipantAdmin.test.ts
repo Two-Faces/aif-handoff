@@ -1,7 +1,9 @@
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import * as childProcess from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { setPasswordFilePermissions } from "./fixtures/passwordFilePermissions.js";
 import type { Participant } from "@aif/shared";
 import {
   bootstrapFirstParticipantAdmin,
@@ -9,6 +11,10 @@ import {
   readProtectedPasswordFile,
   type BootstrapDependencies,
 } from "../scripts/bootstrapParticipantAdmin.js";
+
+vi.mock("node:child_process", async (original) => ({
+  ...(await original<typeof import("node:child_process")>()),
+}));
 
 const existingAdmin: Participant = {
   id: "admin-id",
@@ -20,6 +26,17 @@ const existingAdmin: Participant = {
   createdAt: "2026-07-24T00:00:00.000Z",
   updatedAt: "2026-07-24T00:00:00.000Z",
 };
+const directories: string[] = [];
+const fixture = () => {
+  const directory = mkdtempSync(join(tmpdir(), "aif-bootstrap-"));
+  directories.push(directory);
+  return { directory, passwordFile: join(directory, "пароль [safe] '$.txt") };
+};
+afterEach(() => {
+  vi.restoreAllMocks();
+  for (const directory of directories.splice(0))
+    rmSync(directory, { recursive: true, force: true });
+});
 
 function createDependencies(
   overrides: Partial<BootstrapDependencies> = {},
@@ -225,16 +242,64 @@ describe("first participant administrator bootstrap", () => {
   });
 
   it("reads only regular password files with owner-only permissions", () => {
-    const directory = mkdtempSync(join(tmpdir(), "aif-bootstrap-"));
-    const passwordFile = join(directory, "password");
+    const { directory, passwordFile } = fixture();
     writeFileSync(passwordFile, "protected bootstrap password\n", { mode: 0o600 });
-    chmodSync(passwordFile, 0o600);
+    setPasswordFilePermissions(passwordFile, null);
     expect(readProtectedPasswordFile(passwordFile)).toBe("protected bootstrap password\n");
 
-    chmodSync(passwordFile, 0o644);
+    setPasswordFilePermissions(passwordFile, "read");
     expect(() => readProtectedPasswordFile(passwordFile)).toThrow(
       "must not be accessible by group or other users",
     );
     expect(() => readProtectedPasswordFile(directory)).toThrow("must be a regular file");
   });
+
+  it("rejects write access for other users and oversized password files", () => {
+    const { passwordFile } = fixture();
+    writeFileSync(passwordFile, "private password");
+    setPasswordFilePermissions(passwordFile, "write");
+    expect(() => readProtectedPasswordFile(passwordFile)).toThrow(
+      expect.objectContaining({ code: "password_file_permissions" }),
+    );
+    setPasswordFilePermissions(passwordFile, null);
+    writeFileSync(passwordFile, "x".repeat(65_537));
+    expect(() => readProtectedPasswordFile(passwordFile)).toThrow(
+      expect.objectContaining({ code: "password_file_too_large" }),
+    );
+  });
+
+  it.runIf(process.platform === "win32")("rejects inherited broad ACL access", () => {
+    const { directory, passwordFile } = fixture();
+    setPasswordFilePermissions(directory, "read");
+    writeFileSync(passwordFile, "private password");
+    expect(() => readProtectedPasswordFile(passwordFile)).toThrow(
+      expect.objectContaining({ code: "password_file_permissions" }),
+    );
+    setPasswordFilePermissions(passwordFile, null);
+    expect(readProtectedPasswordFile(passwordFile)).toBe("private password");
+  });
+
+  it.runIf(process.platform === "win32")(
+    "fails closed if the ACL reader fails, without including its output",
+    () => {
+      const { passwordFile } = fixture();
+      writeFileSync(passwordFile, "private password");
+      vi.spyOn(childProcess, "spawnSync").mockReturnValue({
+        pid: 0,
+        output: [],
+        stdout: "PRIVATE OUTPUT",
+        stderr: "PRIVATE STDERR",
+        signal: null,
+        status: 1,
+      });
+      let error: unknown;
+      try {
+        readProtectedPasswordFile(passwordFile);
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toMatchObject({ code: "password_file_unreadable" });
+      expect(String(error)).not.toMatch(/PRIVATE/);
+    },
+  );
 });

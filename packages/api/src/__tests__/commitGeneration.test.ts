@@ -6,12 +6,43 @@ const mockFindTaskById = vi.fn();
 const mockGetProjectConfig = vi.fn();
 const mockRestorePersistedBranch = vi.fn();
 const mockAssertCurrentBranch = vi.fn();
+const mockGetWorkspace = vi.fn();
+const mockCheckpoint = vi.fn();
 
 vi.mock("../services/runtime.js", () => ({
   runApiRuntimeOneShot: (...args: unknown[]) => mockRunApiRuntimeOneShot(...args),
 }));
 
 vi.mock("@aif/data", () => ({
+  // These unit fixtures model unmanaged tasks; managed lifecycles use real-DB tests.
+  recordTaskDeviceNativeSession: () => {},
+  recordTaskDeviceRuntimeEvent: () => {},
+  canResumeTaskDeviceSession: () => true,
+  assertTaskDeviceChatSession: () => {},
+  assertTaskDeviceChatProject: () => {},
+  withProjectDeviceExecution: (
+    input: { projectRoot?: string },
+    execute: (root?: string) => unknown,
+  ) => execute(input.projectRoot),
+  createTaskDeviceRuntimeGuard: (
+    _taskId?: string | null,
+    abortController = new AbortController(),
+  ) => ({
+    managed: false,
+    abortController,
+    assertCurrent: () => {},
+    bind: <T>(callback: T) => callback,
+    run: (execute: () => unknown) => execute(),
+  }),
+  invalidateTaskDeviceExecution: () => false,
+  bindTaskDeviceExecution: <T>(callback: T) => callback,
+  currentTaskDeviceRunId: () => null,
+
+  getPersonalExecutionBlock: vi.fn(() => null),
+  getDeviceExecutionBlock: vi.fn(() => null),
+  isProjectPublicationAllowed: vi.fn(() => true),
+  getTaskExecutionWorkspace: (...args: unknown[]) => mockGetWorkspace(...args),
+  checkpointTaskExecutionWorkspace: (...args: unknown[]) => mockCheckpoint(...args),
   findProjectById: (id: string) => mockFindProjectById(id),
   findTaskById: (id: string) => mockFindTaskById(id),
 }));
@@ -41,16 +72,18 @@ function gitConfig(skipPush: boolean) {
 }
 
 describe("buildCommitPrompt", () => {
-  it("includes git add -A and push instruction when shouldPush=true", () => {
+  it("uses only the staged selection and includes push instruction when shouldPush=true", () => {
     const prompt = buildCommitPrompt(true);
-    expect(prompt).toContain("git add -A");
+    expect(prompt).toContain("already staged by the user");
+    expect(prompt).not.toContain("git add -A");
     expect(prompt).toContain("git push");
     expect(prompt).not.toMatch(/Do NOT push/i);
   });
 
-  it("includes git add -A and explicit no-push when shouldPush=false", () => {
+  it("uses only the staged selection and explicit no-push when shouldPush=false", () => {
     const prompt = buildCommitPrompt(false);
-    expect(prompt).toContain("git add -A");
+    expect(prompt).toContain("already staged by the user");
+    expect(prompt).not.toContain("git add -A");
     expect(prompt).toMatch(/Do NOT push/i);
     expect(prompt).toContain("skip_push_after_commit");
   });
@@ -71,6 +104,8 @@ describe("runCommitQuery", () => {
     mockGetProjectConfig.mockReset();
     mockRestorePersistedBranch.mockReset();
     mockAssertCurrentBranch.mockReset();
+    mockGetWorkspace.mockReset();
+    mockCheckpoint.mockReset();
     mockFindProjectById.mockReturnValue({ id: "p1", rootPath: "/tmp/p1" });
     mockFindTaskById.mockReturnValue(null);
   });
@@ -81,6 +116,30 @@ describe("runCommitQuery", () => {
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/Project not found/);
     expect(mockRunApiRuntimeOneShot).not.toHaveBeenCalled();
+  });
+
+  it("uses the durable checkpoint for registered tasks without runtime or publication", async () => {
+    mockFindTaskById.mockReturnValue({
+      id: "t1",
+      title: "Owned change",
+      executionOwner: "ai",
+      branchName: null,
+      worktreePath: "/tmp/task",
+    });
+    mockGetWorkspace.mockReturnValue({ taskId: "t1" });
+    mockCheckpoint.mockReturnValue({ status: "committed", commitSha: "a".repeat(40) });
+    expect(await runCommitQuery({ projectId: "p1", taskId: "t1" })).toEqual({ ok: true });
+    expect(mockCheckpoint).toHaveBeenCalledWith("t1", "chore: checkpoint Owned change");
+    expect(mockRunApiRuntimeOneShot).not.toHaveBeenCalled();
+    expect(mockRestorePersistedBranch).not.toHaveBeenCalled();
+    expect(mockGetProjectConfig).not.toHaveBeenCalled();
+    mockCheckpoint.mockImplementationOnce(() => {
+      throw new Error("Checkpoint requires recovery");
+    });
+    expect(await runCommitQuery({ projectId: "p1", taskId: "t1" })).toEqual({
+      ok: false,
+      error: "Checkpoint requires recovery",
+    });
   });
 
   it("rejects commit generation for a human-owned task", async () => {
@@ -104,7 +163,8 @@ describe("runCommitQuery", () => {
     const callArg = mockRunApiRuntimeOneShot.mock.calls[0][0];
     expect(callArg.workflowKind).toBe("commit");
     expect(callArg.fallbackSlashCommand).toBe("/aif-commit");
-    expect(callArg.prompt).toContain("git add -A");
+    expect(callArg.prompt).toContain("already staged by the user");
+    expect(callArg.prompt).not.toContain("git add -A");
     expect(callArg.prompt).toContain("git push");
     expect(callArg.prompt).not.toMatch(/Do NOT push/i);
   });

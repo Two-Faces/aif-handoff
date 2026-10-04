@@ -1,3 +1,5 @@
+import { withProjectDeviceExecution } from "@aif/data";
+import { assertTaskExecutionAllowed } from "@aif/data";
 import { findProjectById, findTaskById, setTaskFields } from "@aif/data";
 import { createRuntimeWorkflowSpec, type RuntimeWorkflowSpec } from "@aif/runtime";
 import { getEnv, logger, formatAttachmentsForPrompt } from "@aif/shared";
@@ -57,6 +59,13 @@ async function runSidecar(
 }
 
 export async function runReviewer(taskId: string, projectRoot: string): Promise<void> {
+  return await withProjectDeviceExecution({ taskId, projectRoot }, async (root) =>
+    runReviewerScoped(taskId, root ?? projectRoot),
+  );
+}
+
+async function runReviewerScoped(taskId: string, projectRoot: string): Promise<void> {
+  projectRoot = assertTaskExecutionAllowed(taskId, projectRoot) ?? projectRoot;
   const env = getEnv();
   const task = findTaskById(taskId);
 

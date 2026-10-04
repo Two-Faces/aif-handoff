@@ -1,5 +1,75 @@
 import { z } from "zod";
-import { TASK_EVENTS, TASK_STATUSES, getEnv } from "@aif/shared";
+import {
+  TASK_EVENTS,
+  TASK_STATUSES,
+  getEnv,
+  syncRevisionsSchema,
+  syncDotSchema,
+  peerAddressSchema,
+  peerFingerprintSchema,
+  peerInvitationSchema,
+  snapshotDigestSchema,
+} from "@aif/shared";
+
+export const peerInviteRequestSchema = z
+  .object({
+    expectedFingerprint: peerFingerprintSchema,
+    projectIds: z.array(z.uuid()).min(1).max(50),
+  })
+  .strict();
+export const peerPairRequestSchema = z
+  .object({
+    address: peerAddressSchema,
+    invitation: peerInvitationSchema,
+    projectIds: z.array(z.uuid()).min(1).max(50),
+  })
+  .strict();
+export const peerAddressRequestSchema = z.object({ address: peerAddressSchema }).strict();
+export const snapshotPublishRequestSchema = z
+  .object({ projectId: z.uuid(), snapshotId: snapshotDigestSchema })
+  .strict();
+export const snapshotPullRequestSchema = snapshotPublishRequestSchema
+  .extend({ checkoutId: z.uuid(), worktreePath: z.string().min(1).max(1000) })
+  .strict();
+export const personalConflictResolutionSchema = z
+  .object({
+    entityType: z.enum(["project", "task", "comment", "participant"]),
+    entityId: z.uuid(),
+    field: z.string().min(1).max(100),
+    value: z.json(),
+    parents: z.array(syncDotSchema).min(1).max(100),
+  })
+  .strict();
+
+export const personalCheckoutSchema = z
+  .object({
+    localRoot: z.string().min(1).max(4096),
+    executionEnvironment: z.enum([
+      "native_windows",
+      "native_macos",
+      "native_linux",
+      "wsl",
+      "container",
+      "unknown",
+    ]),
+  })
+  .strict();
+export const personalInventoryPreviewSchema = z
+  .object({ checkouts: z.array(personalCheckoutSchema).min(1).max(50) })
+  .strict();
+export const personalCheckoutBindingSchema = personalCheckoutSchema.extend({
+  confirmProjectIdentity: z.literal(true),
+});
+export const personalParticipantBindingSchema = z
+  .object({
+    logicalParticipantId: z.uuid(),
+    participantId: z.string().min(1),
+    confirmIdentity: z.literal(true),
+  })
+  .strict();
+export const personalManifestSchema = z
+  .object({ checkoutId: z.uuid(), confirmWrite: z.literal(true) })
+  .strict();
 
 export const participantLoginSchema = z.object({
   username: z.string().trim().min(1).max(200),
@@ -98,6 +168,7 @@ export const createProjectSchema = projectSettingsSchema.and(
     z.object({
       rootPath: z.string().min(1, "Root path is required"),
       githubRepository: z.never().optional(),
+      registrationMode: z.enum(["initialize", "attach_existing"]).optional(),
     }),
     z.object({
       rootPath: z.never().optional(),
@@ -184,6 +255,7 @@ export const createTaskSchema = z.object({
 });
 
 export const updateTaskSchema = z.object({
+  expectedSyncRevisions: syncRevisionsSchema.optional(),
   title: z.string().min(1).max(500).optional(),
   description: z.string().optional(),
   attachments: z.array(taskAttachmentSchema).max(100).optional(),
@@ -221,12 +293,14 @@ export const updateTaskSchema = z.object({
 });
 
 export const taskEventSchema = z.object({
+  expectedSyncRevisions: syncRevisionsSchema.optional(),
   event: z.enum(TASK_EVENTS),
   deletePlanFile: z.boolean().optional(),
   commitOnApprove: z.boolean().optional(),
 });
 
 export const handoffTaskSchema = z.object({
+  expectedSyncRevisions: syncRevisionsSchema.optional(),
   executionOwner: z.enum(["ai", "human"]),
   assigneeIds: z.array(z.string().min(1)).max(100).default([]),
   expectedOwnershipRevision: z.number().int().min(0),

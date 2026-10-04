@@ -1,3 +1,5 @@
+import { DeviceExecutionError, PersonalExecutionDisabledError } from "@aif/shared";
+import { withProjectDeviceExecution } from "@aif/data";
 import {
   assertCurrentBranch,
   buildCommitPrompt,
@@ -6,9 +8,16 @@ import {
   logger,
   restorePersistedBranch,
 } from "@aif/shared";
-import { findProjectById, findTaskById } from "@aif/data";
+import {
+  findProjectById,
+  findTaskById,
+  getTaskExecutionWorkspace,
+  checkpointTaskExecutionWorkspace,
+  getDeviceExecutionBlock,
+} from "@aif/data";
 import { UsageSource } from "@aif/runtime";
 import { runApiRuntimeOneShot } from "./runtime.js";
+import { getPersonalExecutionBlock, isProjectPublicationAllowed } from "@aif/data";
 
 const log = logger("commit-generation");
 
@@ -20,7 +29,7 @@ const PROJECT_SCOPE_APPEND =
 export interface RunCommitQueryResult {
   ok: boolean;
   error?: string;
-  code?: "ai_handoff_required";
+  code?: "ai_handoff_required" | "personal_execution_disabled" | DeviceExecutionError["code"];
 }
 
 export interface RunCommitQueryInput {
@@ -47,7 +56,27 @@ export { buildCommitPrompt } from "@aif/shared";
  * success/failure over WS. Never throws.
  */
 export async function runCommitQuery(input: RunCommitQueryInput): Promise<RunCommitQueryResult> {
+  try {
+    return await withProjectDeviceExecution(
+      { projectId: input.projectId, taskId: input.taskId },
+      async () => runCommitQueryScoped(input),
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      ...(error instanceof DeviceExecutionError || error instanceof PersonalExecutionDisabledError
+        ? { code: error.code }
+        : {}),
+    };
+  }
+}
+
+async function runCommitQueryScoped(input: RunCommitQueryInput): Promise<RunCommitQueryResult> {
   const { projectId, taskId = null } = input;
+  const blocked =
+    getPersonalExecutionBlock(projectId, taskId) ?? getDeviceExecutionBlock(projectId, taskId);
+  if (blocked) return { ok: false, ...blocked };
   const project = findProjectById(projectId);
   if (!project) {
     const msg = `Project not found: ${projectId}`;
@@ -68,6 +97,17 @@ export async function runCommitQuery(input: RunCommitQueryInput): Promise<RunCom
     };
   }
   const executionRoot = task?.worktreePath ?? project.rootPath;
+  if (task && getTaskExecutionWorkspace(task.id)) {
+    try {
+      checkpointTaskExecutionWorkspace(task.id, `chore: checkpoint ${task.title}`);
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : "Task checkpoint failed",
+      };
+    }
+  }
   if (task?.branchName && !task.isFix) {
     // task.branchName is a source-of-truth contract: commit MUST land on the
     // persisted branch or fail loud. `ensureFeatureBranch({switchOnly:true})`
@@ -98,7 +138,8 @@ export async function runCommitQuery(input: RunCommitQueryInput): Promise<RunCom
   }
 
   const { git } = getProjectConfig(executionRoot);
-  const shouldPush = git.enabled && !git.skip_push_after_commit;
+  const shouldPush =
+    isProjectPublicationAllowed(projectId) && git.enabled && !git.skip_push_after_commit;
   const prompt = buildCommitPrompt(shouldPush);
 
   log.info(

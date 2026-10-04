@@ -60,6 +60,12 @@ packages/
 │       ├── taskOwnership.ts # Atomic handoff, assignments, executor history
 │       ├── taskTransitions.ts # Actor-aware atomic task transitions
 │       ├── audit.ts         # Immutable audit persistence
+│       ├── personalMode.ts  # Persisted personal execution/publication restrictions
+│       ├── devices.ts       # Local device identity and API process ownership
+│       ├── projectBindings.ts # Explicit local checkout registration
+│       ├── participantBindings.ts # Logical attribution vs local account bindings
+│       ├── syncJournal.ts   # Transactional causal registers, inbox/outbox and ACK
+│       ├── syncCheckpoints.ts # Immutable checkpoint staging and atomic bootstrap
 │       └── index.ts         # Public repository API
 ├── api/                 # @aif/api — Hono REST + WebSocket server (port 3009)
 │   └── src/
@@ -106,6 +112,192 @@ data/                    # SQLite database files (gitignored)
 
 ## Key Entry Points
 
+Personal LAN M1 adds `packages/shared/src/sync/` (strict portable contracts/causality),
+data `syncJournal.ts`, `syncCheckpoints.ts`, `syncMutations.ts`, `syncDomain.ts`,
+`syncConflicts.ts`, `peers.ts` and `peerSync.ts`. The API owns pinned TLS transport in
+`services/peerIdentity.ts`, `peerTransport.ts`, `peerProtocol.ts`, `peerSync.ts` and local
+administration in `routes/peers.ts` / `routes/personal.ts`. Personal execution stays
+disabled: do not remove execution guards before the M2 grant/fencing gate. See
+`docs/local-device-sync.md` for recovery, mutation inventory and native acceptance.
+
+M2 work in progress adds shared `taskCheckout.ts` / `taskCommit.ts` and data
+`taskWorkspaces.ts`: exact detached checkouts, saved pre-execution scopes, and
+prepared checkpoint intents in local migration v34. Registered task roots are
+enforced at stage/API/chat boundaries; their commits use host-controlled snapshot
+plumbing. Restore the original scope after restart; never recapture dirty files.
+Shared `handoff/` and data `codeSnapshots.ts` add immutable code/context packages,
+explicit portable-file manifests and verified blobs. Local migration v35 journals
+checkpoint continuation into a new checkout before atomic root/scope activation.
+Existing context is never overwritten and registered roots skip implicit AIF init.
+P12 adds shared `handoff/gitSnapshot.ts` / `transferContracts.ts`, data
+`snapshotTransfers.ts` and API `gitSnapshotTransfer.ts`: explicit pinned-TLS pulls,
+durable chunks in migration v36, quarantined Git verification and separate readiness.
+Peer requests only read published manifests/chunks; destination bindings/paths are
+chosen locally. No transfer, checkout preparation or board sync grants execution.
+Workspace registration is internal pending M2 onboarding/grants. Keep M1 personal
+execution guards until the grant and stop/fencing gates are complete.
+
+P13 adds shared/data `deviceExecution.ts` and migration v37. Device
+grants are separate from board workflow and TTL claims; `withTaskDeviceExecution`
+reserves a durable run and fences result writes by grant/epoch/run/root/input.
+Coordinator/stage/API/chat lifecycles create the host scope for an internally
+enrolled, locally owned standalone task. Runtime promises, callbacks, timeouts,
+claims and finalization retain that run; failures remain uncertain until P14
+proves process-tree stop. Managed tasks stay excluded from legacy TTL recovery.
+Migration v38/data `deviceSessions.ts` binds native/chat sessions to the local
+task, grant, checkout and runtime identity; project warmups are not reused.
+Personal AI remains disabled. Do not expose enrollment/release/accept as REST/MCP
+actions or enable personal AI before P14 and native M2 acceptance are complete.
+
+P14 foundation adds `handoff/deviceHandoff.ts`, data `deviceHandoff.ts` /
+`deviceHandoffScope.ts` and local migration v39. Manual handoff freezes checkpoint
+intent/context before acknowledgement, atomically relinquishes authority, stages
+pinned-peer offers, and accepts a verified local snapshot in a fresh checkout.
+The new grant-head `accepted` state is deliberately non-executable (including to
+older runners); only a future explicit P15 continuation may promote it to `owned`.
+Manual confirmation requires a local admin, human ownership and no managed run
+history for the current grant. It cannot substitute for runtime process-tree stop.
+Runtime-backed checkpoint/release remains open in P14; there are no browser/MCP handoff
+actions or automatic delivery/acceptance/runtime launches in this increment.
+
+P14 native supervision adds runtime `supervision/` with a Windows Job Object
+host and data `deviceProcesses.ts` / migration v40 for local launch/stop receipts.
+Persist host identity before creating the child, and its suspended identity before
+resuming. API `deviceProcessSupervisor.ts` is an internal bridge, with no routes.
+Empty-job evidence does not release a run/grant or establish adapter-wide coverage.
+Complete Claude/Codex/OpenRouter/OpenCode transport coverage remains open. The targeted
+native Mac runtime/API suite passed on 2026-10-03 (54 + 2 tests, user-supplied logs).
+Unsupported platforms must reject; never substitute PID/group signals or
+elapsed time for native stop proof. Existing personal AI guards remain enabled.
+
+The standalone runtime `probe:macos-supervision` command
+(`scripts/macos-supervision-probe.mjs` plus its fixed native C fixture). It checks
+an isolated launchd resource coalition, double-fork/setsid orphan accounting and
+audit-token signaling. It never reads the task DB or enables Mac execution.
+The user's native arm64/Darwin 27.0.0 report passed on 2026-10-03: stable root-only
+baseline 2/1/1, running 4/2/2, orphan 4/3/1, stale-token ESRCH, coalition reaped
+after service removal and verified cleanup. Keep baseline-relative exact deltas.
+This accepts the diagnostic fixture only. The internal Mac backend now lives in
+`macosSupervisor.ts` / `macosSystem.ts` / `macosNativeSource.ts`: a one-shot launchd
+host with a private socket, suspended posix_spawn, durable host/child callbacks,
+audit-token stop and independently verified empty coalition. Mac receipts add
+UID/boot/unique-ID bindings to the existing v40 JSON journal; no migration is
+rewritten. Recovery compiles a fresh trusted helper and rejects a different boot
+or user. It records stop only, never releases task authority. All nine native Mac
+process cases and both API journal/recovery cases passed after the fixes in
+`2f62264`. Adapter integration, runtime-backed release and full M2 acceptance remain
+open; personal AI stays disabled.
+
+The first P14 adapter increment adds runtime `nativeProcessScope.ts`: an opaque
+host capability for one exact-root launch, bounded stdio and awaited native stop
+including journal acknowledgement. Codex app-server uses its async launcher;
+native start timeout never retries. Unintegrated built-in transports reject this
+scope before work, and the registry skips process-spawning model discovery.
+API `runTaskDeviceAppServer` is an internal new-session bridge for an already
+enrolled standalone task; it rejects resume/fork, other runtimes and scope
+substitution. No routes/coordinator/chat call it yet. Windows needs a literal
+`.exe`, not `.cmd`; native environment restores only libuv's OS essentials.
+External service/config coverage, remaining transports, normal admission and
+runtime-backed checkpoint/release remain open. Stop of this unit grants no
+handoff authority. The separate adapter Mac smoke passed on 2026-10-03 from user
+logs: 16 scope/parity + 21 app-server + 5 native API = 42 tests. The native API uses
+an offline protocol fixture; this is not a live provider run or complete P14/M2.
+See the current plan and device-sync instructions.
+
+P14's second adapter increment connects the default Codex JSONL CLI through
+`runTaskDeviceCli` and the same internal host/journal gates. It accepts only new
+sessions and generated argv (no custom argv, shell or unknown-transport fallback).
+Batch completion joins native proof and drained stdio, including already-finished
+children. It decodes split UTF-8, bounds total output, requires `turn.completed`
+and zero exit, and rejects abort/protocol/callback errors without retry. Global
+session-limit scans are skipped in this scope; stream usage remains PARTIAL.
+The Windows native fixture covers success, cancellation and timeout with a
+detached writer and large stdin. The targeted Mac CLI smoke passed on 2026-10-03
+from user logs: 85 runtime + 9 API = 94 tests, including native success/abort/timeout.
+This uses an offline provider fixture, not a live model or full P14/M2 acceptance.
+Claude, Codex SDK/API, OpenRouter and OpenCode still reject native scope.
+Personal AI, normal runner admission and runtime-backed release remain closed.
+
+P14's SDK increment uses `runTaskDeviceSdk` and a fixed Node worker under the
+native supervisor. Managed SDK execution occurs inside that worker; its private
+CLI spawn inherits the same native unit. `nativeBatch.ts`
+shares bounded collection/stop handling with CLI; `nativeSdkProtocol.ts` validates
+projected events before host callbacks. Secrets travel through bounded stdin,
+not argv, and worker failures are opaque. New text-only sessions are admitted;
+custom config/argv, hooks/env, output schema and resume/fork remain denied.
+No global session scans or native retries occur. Windows tests cover actual SDK
+topology, success/abort/timeout, malformed output and coordinator-death recovery.
+Targeted Mac SDK acceptance was recorded on 2026-10-03 from the user's passing
+confirmation for the requested 109 runtime + 15 API set; detailed logs were not
+supplied in that report. Claude, Codex API, OpenRouter and OpenCode
+still rejected native scope at that increment; normal/personal execution and full P14/M2 remain open.
+
+P14's Claude SDK increment adds `adapters/claude/native.ts`, `nativeWorker.ts` and
+`nativeProtocol.ts`, plus internal `runTaskDeviceClaudeSdk`. The fixed native
+worker runs the real Agent SDK and its CLI; callbacks stay in the fenced host.
+Success requires a matching result, worker completion, zero exit and durable stop.
+Legacy executable discovery is lazy; explicit version probes run inside the same
+native unit. Settings sources, external MCP config and session persistence are
+disabled. Resume/fork, custom hooks/environment/schema/agent definitions and
+permission bypass remain denied. No retries or host quota/session scans occur.
+Offline actual-SDK tests verify version/CLI parent PID, tool/subagent callbacks,
+stop on failure/cancellation and coordinator-death recovery without release.
+Claude CLI/API, Codex API, OpenRouter and OpenCode remain closed to native scope.
+The Claude increment's Mac smoke was accepted on 2026-10-03 from the user's
+confirmation for the requested 54 runtime + 23 API set; API duration was reported
+as 38 seconds. No detailed console log or individual counts were supplied.
+See `docs/local-device-sync.md`; this is not full Mac/P14/M2 acceptance.
+No normal/personal runner or handoff admission is enabled by this internal helper.
+
+P14's Claude CLI/API increment adds internal `runTaskDeviceClaudeCli` and
+`runTaskDeviceClaudeApi`. API retains the fork's Agent SDK implementation; direct
+CLI runs via `nativeCliWorker.ts` inside the same native worker, without an SDK
+handshake or fallback. CLI argv is generated, with literal executable selection,
+stdin prompt and an in-unit version probe. Raw CLI stdout/stderr (including
+discarded metadata) is bounded; full-stdin abort, final JSON without newline,
+missing result, nonzero exit and coordinator-death recovery are tested. Native
+SDK/API/CLI share host callback fencing and durable stop; ordinary capabilities
+and the new-session/config/external-service restrictions remain unchanged.
+Claude CLI/API Mac smoke was accepted on 2026-10-03 from the user's confirmation
+for the requested 114 runtime + 39 API set; API duration was reported as 60 seconds.
+No detailed console log or individual counts were supplied. See
+`docs/local-device-sync.md` for the acceptance scope. Codex API,
+OpenRouter and OpenCode remain closed, as do normal/personal runner admission,
+runtime-backed release and full P14/M2 acceptance.
+
+P14's HTTP increment adds `adapters/chatCompletion/` and internal
+`runTaskDeviceHttp` for text-only Codex API/OpenRouter. Existing request builders
+feed a fixed native HTTP worker with bounded input/response, proxy support and
+no retries/redirects. Strict JSON/SSE completion, usage and durable native stop
+are mandatory; callbacks remain fenced. OpenAI empty-choice usage and OpenRouter
+repeated-finish accounting frames have separate validation. Local HTTP client
+stop never proves remote inference/billing or another server stopped. OpenCode
+remains denied by `opencode/nativeAdmission.ts`, including direct session creation,
+until an owned server launch/recovery path is implemented. The user requires
+OpenCode in M2 for local LLM tasks on Mac; do not defer it beyond M2. Mac HTTP smoke was
+accepted from user evidence on 2026-10-03: 173 runtime + a separately confirmed
+15 app-server process tests, plus 67 API tests (255 total). Windows ai:validate passed with 3730 tests,
+10 skips, coverage ≥70%, build 7/7, Chromium 8/8 and k6 3/3; normal/personal
+admission and full P14/M2 remain open. See `docs/local-device-sync.md` for current evidence and commands.
+
+P14's owned OpenCode increment adds `opencode/native.ts`, `nativeWorker.ts` and
+`nativeProtocol.ts`, plus internal `runTaskDeviceOpenCode`. A fixed worker launches
+and versions a fresh 1.18.34 server inside the same native unit; it uses private
+HOME/XDG/temp/auth and a locally announced endpoint. Existing server URLs, resume,
+direct session creation, project/managed config and external MCP remain denied.
+The model endpoint is `modelBaseUrl`, separate from the server address. Its own
+inference process is not stopped by an OpenCode receipt. Strict new-session
+completion and native stop/journal acknowledgement precede success. The optional
+`nativeBatch.afterStopped` removes owned artifacts only after verified stop;
+crashes/uncertain stop retain them. `deviceOpenCode.test.ts` covers lifecycle,
+a detached writer and recovery, and uses `OPENCODE_NATIVE_TEST_PATH` for a real
+installed CLI plus a local model/tool fixture. That variable participates in
+Turbo test/coverage hashes. The final Windows ai:validate passed on 2026-10-04:
+3784 tests, 10 existing skips, coverage ≥70%, build 7/7, Chromium 8/8 and k6 3/3.
+The user confirmed the requested Mac subset (241 runtime + 14 API) passed on
+2026-10-04; detailed output was not supplied. Complete P14/M2 remains open;
+normal/personal runner admission is still disabled.
+
 | File                                    | Purpose                               |
 | --------------------------------------- | ------------------------------------- |
 | `packages/api/src/index.ts`             | API server entry (Hono, port 3009)    |
@@ -118,6 +310,19 @@ data/                    # SQLite database files (gitignored)
 | `packages/shared/src/schema.ts`         | Database schema (drizzle-orm)         |
 | `packages/shared/src/stateMachine.ts`   | Task state transitions                |
 | `turbo.json`                            | Turborepo task definitions            |
+
+P14 runtime-backed source handoff adds migration v41 `task_device_run_admissions`.
+`deviceIsolatedRuntime.ts` owns an entire fresh invocation without host callbacks,
+and records `isolated_runtime_v1` with its run reservation. Current admission is
+Claude SDK/CLI/API, text-only Codex/OpenRouter API, and owned OpenCode API.
+Codex CLI/SDK/app-server still need configuration/external-service isolation.
+`deviceHandoffStop.ts` verifies every run under the source grant and its exact
+native receipt before freezing code/context. Missing or legacy admissions,
+unprepared reservations and partial receipts cannot be upgraded into proof.
+`checkpointNativeTaskHandoff` fences first, recovers local native receipts, then
+checkpoints; it retains the active reservation until atomic grant release.
+No routes, normal coordinator admission, native session reuse or personal AI
+are enabled. The new native Mac subset and physical M2 handoff remain pending.
 
 ## Documentation
 

@@ -1,4 +1,12 @@
 import {
+  withProjectDeviceExecution,
+  createTaskDeviceRuntimeGuard,
+  recordTaskDeviceNativeSession,
+  recordTaskDeviceRuntimeEvent,
+  currentTaskDeviceRunId,
+} from "@aif/data";
+import { assertTaskExecutionAllowed } from "@aif/data";
+import {
   clearRuntimeProfileLimitSnapshot,
   createDbUsageSink,
   expireStaleRuntimeWarmupSessions,
@@ -47,7 +55,13 @@ import {
   type RuntimeTransport,
   type RuntimeWorkflowSpec,
 } from "@aif/runtime";
-import { getEnv, isWarmupWorkflowKind, logger, redactProviderTextForLogs } from "@aif/shared";
+import {
+  DeviceExecutionError,
+  getEnv,
+  isWarmupWorkflowKind,
+  logger,
+  redactProviderTextForLogs,
+} from "@aif/shared";
 import { logActivity } from "./hooks.js";
 import { PROJECT_SCOPE_SYSTEM_APPEND, REVIEW_DIFF_SCOPE_SYSTEM_APPEND } from "./constants.js";
 import { createStderrCollector } from "./stderrCollector.js";
@@ -409,6 +423,7 @@ function parseRuntimeOptions(raw: string | null | undefined): Record<string, unk
 }
 
 type WarmupSkipReason =
+  | "managed_snapshot"
   | "feature_disabled"
   | "workflow_not_enabled"
   | "existing_task_session"
@@ -837,10 +852,26 @@ function buildExecutionIntent(
 export async function executeSubagentQuery(
   options: SubagentQueryOptions,
 ): Promise<SubagentQueryResult> {
-  const { taskId, projectRoot, agentName } = options;
+  return await withProjectDeviceExecution(
+    { taskId: options.taskId, projectRoot: options.projectRoot },
+    async (root) =>
+      executeSubagentQueryScoped({ ...options, projectRoot: root ?? options.projectRoot }),
+  );
+}
+
+async function executeSubagentQueryScoped(
+  options: SubagentQueryOptions,
+): Promise<SubagentQueryResult> {
+  const { taskId, agentName } = options;
+  const projectRoot =
+    assertTaskExecutionAllowed(taskId, options.projectRoot) ?? options.projectRoot;
+  options = { ...options, projectRoot };
   assertAiExecutionOwner(taskId);
   const stderrCollector = createStderrCollector();
-  const heartbeatTimer = startHeartbeat(taskId);
+  const heartbeatTimer = startHeartbeat(
+    taskId,
+    options.abortController ?? getActiveStageAbortController(taskId) ?? undefined,
+  );
 
   let runtimeIdForError = getEnv().AIF_DEFAULT_RUNTIME_ID;
   let providerIdForError = getEnv().AIF_DEFAULT_PROVIDER_ID;
@@ -863,7 +894,7 @@ export async function executeSubagentQuery(
       "Agent",
       `${agentName} started (runtime=${context.runtimeId}, transport=${context.transport}, model=${context.model ?? "default"}${effortSuffix})`,
     );
-    const existingSessionId = context.canResume ? getTaskSessionId(taskId) : null;
+    const existingSessionId = context.canResume ? getTaskSessionId(taskId, context) : null;
     const shouldResume = Boolean(existingSessionId && context.canResume);
 
     writeQueryAudit({
@@ -906,7 +937,10 @@ export async function executeSubagentQuery(
       );
     };
 
-    if (!getEnv().AIF_WARMUP_ENABLED) {
+    if (currentTaskDeviceRunId()) {
+      // Project warmups were created outside this task/grant/snapshot scope.
+      logWarmupSkip("managed_snapshot");
+    } else if (!getEnv().AIF_WARMUP_ENABLED) {
       logWarmupSkip("feature_disabled");
     } else if (!isWarmupWorkflowKind(context.workflow.workflowKind)) {
       logWarmupSkip("workflow_not_enabled");
@@ -1013,6 +1047,7 @@ export async function executeSubagentQuery(
       );
       // Override the abort controller with our per-attempt one
       executionIntent.abortController = attemptAbort;
+      const deviceRun = createTaskDeviceRuntimeGuard(taskId, attemptAbort);
       // API transport is pure HTTP — no incremental stream — so the
       // start-timeout watchdog has nothing to observe and must stay off.
       // SDK streams in-process and CLI now streams JSONL events (system/init
@@ -1027,11 +1062,13 @@ export async function executeSubagentQuery(
         logActivity(
           taskId,
           "Agent",
-          `${agentName} stalled — no runtime activity within ${timeoutSec}s after start (attempt ${attempt + 1}/${FIRST_ACTIVITY_MAX_RETRIES + 1}), restarting`,
+          `${agentName} stalled — no runtime activity within ${timeoutSec}s after start; ${deviceRun.managed ? "stop confirmation required" : "restarting"}`,
         );
         log.warn(
           { taskId, agentName, firstActivityTimeoutMs, attempt: attempt + 1 },
-          "First-activity watchdog triggered: killing and restarting agent",
+          deviceRun.managed
+            ? "First-activity watchdog requested abort; run retained until stop confirmation"
+            : "First-activity watchdog triggered: killing and restarting agent",
         );
       });
 
@@ -1043,6 +1080,7 @@ export async function executeSubagentQuery(
       const originalOnToolUse = executionIntent.onToolUse;
       const originalOnSubagentStart = executionIntent.onSubagentStart;
       executionIntent.onEvent = (event) => {
+        recordTaskDeviceRuntimeEvent(event, context);
         wd.markActivity();
         if (runtimeUsageLimitsEnabled) {
           latestLimitSnapshot = observeRuntimeLimitEvent(event, latestLimitSnapshot, {
@@ -1077,6 +1115,11 @@ export async function executeSubagentQuery(
       // re-parented task still records against the correct project.
       const projectIdForUsage = findTaskById(taskId)?.projectId ?? null;
 
+      executionIntent.onEvent = deviceRun.bind(executionIntent.onEvent);
+      if (executionIntent.onToolUse)
+        executionIntent.onToolUse = deviceRun.bind(executionIntent.onToolUse);
+      if (executionIntent.onSubagentStart)
+        executionIntent.onSubagentStart = deviceRun.bind(executionIntent.onSubagentStart);
       const runInput = {
         runtimeId: context.runtimeId,
         providerId: context.providerId,
@@ -1101,25 +1144,30 @@ export async function executeSubagentQuery(
 
       try {
         assertAiExecutionOwner(taskId);
-        if (warmupSourceSessionId && adapter.forkSession) {
-          result = await adapter.forkSession({
-            ...runInput,
-            sourceSessionId: warmupSourceSessionId,
-          });
-          usedWarmupFork = true;
-        } else {
-          result =
-            shouldResume && adapter.resume
-              ? await adapter.resume({ ...runInput, sessionId: existingSessionId as string })
-              : await adapter.run(runInput);
-        }
+        const executingAdapter = adapter;
+        result = await deviceRun.run(async () => {
+          if (warmupSourceSessionId && executingAdapter.forkSession) {
+            usedWarmupFork = true;
+            return executingAdapter.forkSession({
+              ...runInput,
+              sourceSessionId: warmupSourceSessionId,
+            });
+          } else {
+            return shouldResume && executingAdapter.resume
+              ? await executingAdapter.resume({
+                  ...runInput,
+                  sessionId: existingSessionId as string,
+                })
+              : await executingAdapter.run(runInput);
+          }
+        });
         // Success — break out of retry loop
         watchdog.clear();
         break;
       } catch (err) {
         const stalledByWatchdog = watchdog.didFire;
         watchdog.clear();
-        if (stalledByWatchdog && attempt < FIRST_ACTIVITY_MAX_RETRIES) {
+        if (!deviceRun.managed && stalledByWatchdog && attempt < FIRST_ACTIVITY_MAX_RETRIES) {
           // Agent stalled — kill and retry
           log.info(
             { taskId, agentName, attempt: attempt + 1, maxRetries: FIRST_ACTIVITY_MAX_RETRIES },
@@ -1165,8 +1213,9 @@ export async function executeSubagentQuery(
     }
 
     const runtimeSessionId = getResultSessionId(result, context.capabilities);
+    recordTaskDeviceNativeSession(runtimeSessionId, context);
     if (runtimeSessionId && (context.canResume || usedWarmupFork)) {
-      saveTaskSessionId(taskId, runtimeSessionId);
+      saveTaskSessionId(taskId, runtimeSessionId, context);
       log.debug(
         {
           taskId,
@@ -1226,6 +1275,8 @@ export async function executeSubagentQuery(
 
     return { resultText };
   } catch (error) {
+    assertTaskExecutionAllowed(taskId, projectRoot);
+    if (error instanceof DeviceExecutionError) throw error;
     if (runtimeUsageLimitsEnabled) {
       refreshRuntimeProfileLimitState({
         runtimeProfileId: runtimeProfileIdForError,
@@ -1305,11 +1356,20 @@ export function setCoordinatorId(id: string): void {
 }
 
 /** Start a periodic heartbeat that updates the task's lastHeartbeatAt and renews the lock. */
-export function startHeartbeat(taskId: string): NodeJS.Timeout {
-  return setInterval(() => {
-    updateTaskHeartbeat(taskId);
-    if (_coordinatorId) {
-      renewTaskClaim(taskId, _coordinatorId, getLockRenewalMs());
-    }
-  }, HEARTBEAT_INTERVAL_MS);
+export function startHeartbeat(taskId: string, abortController?: AbortController): NodeJS.Timeout {
+  const guard = createTaskDeviceRuntimeGuard(taskId, abortController);
+  const timer = setInterval(
+    guard.bind(() => {
+      updateTaskHeartbeat(taskId);
+      if (_coordinatorId) {
+        renewTaskClaim(taskId, _coordinatorId, getLockRenewalMs());
+      }
+    }),
+    HEARTBEAT_INTERVAL_MS,
+  );
+  guard.abortController.signal.addEventListener("abort", () => clearInterval(timer), {
+    once: true,
+  });
+  if (guard.abortController.signal.aborted) clearInterval(timer);
+  return timer;
 }

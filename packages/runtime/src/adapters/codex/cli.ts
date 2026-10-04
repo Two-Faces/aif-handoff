@@ -1,3 +1,6 @@
+import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
+import { runNativeBatch } from "../../supervision/nativeBatch.js";
+import { RuntimeExecutionError } from "../../errors.js";
 import { spawn, execFileSync } from "node:child_process";
 import type { RuntimeEvent, RuntimeRunInput, RuntimeRunResult, RuntimeUsage } from "../../types.js";
 import { buildRuntimeLimitEvent } from "../../limitEvents.js";
@@ -409,6 +412,7 @@ interface CodexCliStreamState {
   rawEvents: Array<Record<string, unknown>>;
   /** True once we have seen any JSONL line that was successfully parsed. */
   sawAnyJsonLine: boolean;
+  completedTurn: boolean;
 }
 
 function createCodexStreamState(fallbackSessionId: string | null): CodexCliStreamState {
@@ -420,6 +424,7 @@ function createCodexStreamState(fallbackSessionId: string | null): CodexCliStrea
     plainTextFallback: "",
     rawEvents: [],
     sawAnyJsonLine: false,
+    completedTurn: false,
   };
 }
 
@@ -494,6 +499,7 @@ function processCodexJsonLine(
   line: string,
   state: CodexCliStreamState,
   execution: RuntimeRunInput["execution"],
+  strict = false,
 ): void {
   const trimmed = line.trim();
   if (!trimmed) return;
@@ -501,12 +507,14 @@ function processCodexJsonLine(
   let message: CodexStreamMessage;
   try {
     const parsed = JSON.parse(trimmed) as unknown;
-    if (!parsed || typeof parsed !== "object") {
+    if (!parsed || typeof parsed !== "object" || (strict && Array.isArray(parsed))) {
+      if (strict) throw nativeCliFailure("native_cli_protocol_invalid");
       state.plainTextFallback += (state.plainTextFallback ? "\n" : "") + trimmed;
       return;
     }
     message = parsed as CodexStreamMessage;
-  } catch {
+  } catch (error) {
+    if (strict) throw nativeCliFailure("native_cli_protocol_invalid", error);
     state.plainTextFallback += (state.plainTextFallback ? "\n" : "") + trimmed;
     return;
   }
@@ -515,6 +523,9 @@ function processCodexJsonLine(
   state.rawEvents.push(message as unknown as Record<string, unknown>);
 
   const type = typeof message.type === "string" ? message.type : "";
+  if (strict && !type) throw nativeCliFailure("native_cli_protocol_invalid");
+  if (strict && (type === "turn.failed" || type === "error"))
+    throw nativeCliFailure("native_cli_turn_failed", message);
   const nowIso = new Date().toISOString();
 
   if (type === "thread.started") {
@@ -591,6 +602,7 @@ function processCodexJsonLine(
   }
 
   if (type === "turn.completed") {
+    state.completedTurn = true;
     accumulateCodexUsage(state, message);
     emitCodexEvent(state, execution, {
       type: "result:success",
@@ -984,10 +996,49 @@ function runCodexCliAttempt(
   });
 }
 
+function nativeCliFailure(code: string, cause?: unknown): RuntimeExecutionError {
+  return new RuntimeExecutionError("Native Codex CLI failed: " + code, cause, "stream", {
+    adapterCode: code,
+  });
+}
+
+/** One host-owned JSONL attempt. Legacy shell/custom-argv/session readers are
+ * deliberately excluded until their own admission and provenance are covered. */
+async function runNativeCodexCli(
+  input: RuntimeRunInput,
+  executable: string,
+  args: string[],
+  environment: Record<string, string>,
+  prompt: string,
+): Promise<RuntimeRunResult> {
+  const state = createCodexStreamState(null);
+  return runNativeBatch({
+    input,
+    command: { executable, args, environment },
+    stdin: prompt,
+    runTimeoutMs: input.execution?.runTimeoutMs ?? resolveTimeoutMs(input),
+    failure: (code, cause) => nativeCliFailure("native_cli_" + code, cause),
+    line: (line) => processCodexJsonLine(line, state, input.execution, true),
+    complete: () => {
+      if (!state.completedTurn) throw nativeCliFailure("native_cli_incomplete");
+      return finalizeCodexResult(state, null);
+    },
+  });
+}
+
 export async function runCodexCli(
   input: RuntimeRunInput,
   logger?: CodexCliLogger,
 ): Promise<RuntimeRunResult> {
+  assertNativeProcessMode(input, true);
+  if (
+    input.execution?.nativeProcessScope &&
+    (input.sessionId ||
+      input.resume ||
+      asRecord(input).sourceSessionId ||
+      asRecord(input.options).codexCliArgs !== undefined)
+  )
+    throw nativeCliFailure("native_cli_input_invalid");
   const cliPath = resolveCliPath(input);
   // Compose once so the same prompt (systemPromptAppend + user prompt) is
   // used for both template substitution in `codexCliArgs` and the stdin
@@ -1008,6 +1059,11 @@ export async function runCodexCli(
   if (explicitApiKey) {
     env[apiKeyEnvVar] = explicitApiKey;
     env.OPENAI_API_KEY = explicitApiKey;
+  }
+  if (input.execution?.nativeProcessScope) {
+    for (const key of Object.keys(env))
+      if (["NODE_OPTIONS", "NODE_PATH"].includes(key.toUpperCase())) delete env[key];
+    return runNativeCodexCli(input, cliPath, args, env, composedPrompt);
   }
   logger?.debug?.(
     {

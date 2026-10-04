@@ -1,3 +1,4 @@
+import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
 import { existsSync } from "node:fs";
 import { getEnv } from "@aif/shared";
 import { asRecord, readString } from "../../utils.js";
@@ -185,9 +186,9 @@ function resolveTransport(input: {
       fellBackToDefault: false,
     };
   }
-  if (requested === RuntimeTransport.SDK) {
+  if (requested === RuntimeTransport.SDK || requested === RuntimeTransport.CLI) {
     return {
-      transport: RuntimeTransport.SDK,
+      transport: requested,
       requested,
       source,
       normalizedFromLegacy: false,
@@ -396,7 +397,14 @@ export function createCodexRuntimeAdapter(
       options: input.options,
     });
     const transport = transportResolution.transport;
-    const wantsStreaming = input.execution?.onEvent != null;
+    assertNativeProcessMode(
+      input,
+      transport === RuntimeTransport.APP_SERVER ||
+        transport === RuntimeTransport.SDK ||
+        (transport === RuntimeTransport.API && !transportResolution.fellBackToDefault) ||
+        (transport === RuntimeTransport.CLI && !transportResolution.fellBackToDefault),
+    );
+    const wantsStreaming = input.execution?.onEvent != null && input.stream !== false;
     if (
       transportResolution.requested === RuntimeTransport.APP_SERVER &&
       transportResolution.source !== "default"
@@ -471,6 +479,7 @@ export function createCodexRuntimeAdapter(
       options: input.options,
     });
     const transport = transportResolution.transport;
+    assertNativeProcessMode(input, transport === RuntimeTransport.APP_SERVER);
 
     if (transport !== RuntimeTransport.APP_SERVER) {
       logger.warn?.(

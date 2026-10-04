@@ -419,6 +419,14 @@ Mode 1 does not require MCP — the coordinator writes to the database directly 
 
 ## Troubleshooting
 
+For **personal projects**, `handoff_get_task` returns `syncRevisions`. Pass that object
+as `expectedSyncRevisions` to `handoff_push_plan` and `handoff_sync_status`. A missing
+revision or stale write is a structured MCP error (`data.code`), and the database is
+unchanged. Timestamps do not arbitrate personal workflow changes. Human ownership and
+terminal-state protections still apply. Plans remain board text; no file or runtime
+is started. Resolve concurrent versions through the personal project conflict UI/API.
+The timestamp behavior described below applies only to legacy standalone projects.
+
 - **Server won't start**: Check that `DATABASE_URL` points to an existing SQLite database and that the project has been built (`npm run build`).
 - **Rate limit errors**: Increase `MCP_RATE_LIMIT_*` environment variables or wait for the token bucket to refill.
 - **Conflict on sync**: The target task was modified more recently. Fetch the latest task state and retry with a newer timestamp, or accept the conflict.

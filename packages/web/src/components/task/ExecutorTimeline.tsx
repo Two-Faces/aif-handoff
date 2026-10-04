@@ -41,6 +41,12 @@ export function ExecutorTimeline({ taskId }: ExecutorTimelineProps) {
               compact
             />
           </div>
+          {!!entry.logicalAssignees?.length && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Shared assignees:{" "}
+              {entry.logicalAssignees.map((person) => person.displayName).join(", ")}
+            </p>
+          )}
           <p className="mt-1 text-2xs text-muted-foreground">
             Changed by {entry.actor.displayNameSnapshot ?? entry.actor.kind}
           </p>

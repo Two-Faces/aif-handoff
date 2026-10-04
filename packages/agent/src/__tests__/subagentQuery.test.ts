@@ -102,6 +102,31 @@ vi.mock("@aif/data", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@aif/data")>();
   return {
     ...actual,
+
+    // These unit fixtures model unmanaged tasks; managed lifecycles use real-DB tests.
+    recordTaskDeviceNativeSession: () => {},
+    recordTaskDeviceRuntimeEvent: () => {},
+    canResumeTaskDeviceSession: () => true,
+    assertTaskDeviceChatSession: () => {},
+    assertTaskDeviceChatProject: () => {},
+    withProjectDeviceExecution: (
+      input: { projectRoot?: string },
+      execute: (root?: string) => unknown,
+    ) => execute(input.projectRoot),
+    createTaskDeviceRuntimeGuard: (
+      _taskId?: string | null,
+      abortController = new AbortController(),
+    ) => ({
+      managed: false,
+      abortController,
+      assertCurrent: () => {},
+      bind: <T>(callback: T) => callback,
+      run: (execute: () => unknown) => execute(),
+    }),
+    invalidateTaskDeviceExecution: () => false,
+    bindTaskDeviceExecution: <T>(callback: T) => callback,
+    currentTaskDeviceRunId: () => null,
+
     clearRuntimeProfileLimitSnapshot: clearRuntimeProfileLimitSnapshotMock,
     incrementTaskTokenUsage: incrementTaskTokenUsageMock,
     updateTaskHeartbeat: vi.fn(),
@@ -602,7 +627,11 @@ describe("executeSubagentQuery session persistence policy", () => {
       workflowKind: "implementer",
     });
 
-    expect(saveTaskSessionIdMock).toHaveBeenCalledWith("task-resume", "session-impl-1");
+    expect(saveTaskSessionIdMock).toHaveBeenCalledWith(
+      "task-resume",
+      "session-impl-1",
+      expect.objectContaining({ runtimeId: "claude", providerId: "anthropic", transport: "sdk" }),
+    );
   });
 
   it("does not persist runtime session for new_session workflows", async () => {
@@ -701,7 +730,11 @@ describe("executeSubagentQuery planner warmup fork", () => {
     const callOptions = queryMock.mock.calls[0][0].options;
     expect(callOptions.resume).toBe("warm-source-session");
     expect(callOptions.forkSession).toBe(true);
-    expect(saveTaskSessionIdMock).toHaveBeenCalledWith("task-1", "planner-child-session");
+    expect(saveTaskSessionIdMock).toHaveBeenCalledWith(
+      "task-1",
+      "planner-child-session",
+      expect.objectContaining({ runtimeId: "claude", providerId: "anthropic", transport: "sdk" }),
+    );
   });
 
   it("skips warmup when the task already has a persisted session", async () => {
@@ -761,7 +794,11 @@ describe("executeSubagentQuery planner warmup fork", () => {
     const callOptions = queryMock.mock.calls[0][0].options;
     expect(callOptions.resume).toBe("warm-impl-source");
     expect(callOptions.forkSession).toBe(true);
-    expect(saveTaskSessionIdMock).toHaveBeenCalledWith("task-implementer", "impl-child-session");
+    expect(saveTaskSessionIdMock).toHaveBeenCalledWith(
+      "task-implementer",
+      "impl-child-session",
+      expect.objectContaining({ runtimeId: "claude", providerId: "anthropic", transport: "sdk" }),
+    );
   });
 
   it("uses standard resume for implementer when the task already has a session", async () => {
@@ -814,7 +851,11 @@ describe("executeSubagentQuery planner warmup fork", () => {
     const callOptions = queryMock.mock.calls[0][0].options;
     expect(callOptions.resume).toBe("warm-review-source");
     expect(callOptions.forkSession).toBe(true);
-    expect(saveTaskSessionIdMock).toHaveBeenCalledWith("task-review", "review-child-session");
+    expect(saveTaskSessionIdMock).toHaveBeenCalledWith(
+      "task-review",
+      "review-child-session",
+      expect.objectContaining({ runtimeId: "claude", providerId: "anthropic", transport: "sdk" }),
+    );
   });
 
   it("forks the reviewer warmup for security review workflows", async () => {
@@ -852,6 +893,7 @@ describe("executeSubagentQuery planner warmup fork", () => {
     expect(saveTaskSessionIdMock).toHaveBeenCalledWith(
       "task-review-security",
       "review-security-child",
+      expect.objectContaining({ runtimeId: "claude", providerId: "anthropic", transport: "sdk" }),
     );
   });
 

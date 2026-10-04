@@ -1,5 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render as renderDom, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+const render = (ui: React.ReactElement) =>
+  renderDom(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        {children}
+      </QueryClientProvider>
+    ),
+  });
 
 type MockAppRuntimeDefaults = {
   data: {
@@ -79,6 +90,8 @@ const mockValidateRuntimeProfile = {
 };
 
 const mockApi = {
+  getPeers: vi.fn(async () => ({ enabled: false, port: 3010, device: null, peers: [] })),
+  listProjects: vi.fn(async () => []),
   getMcpStatus: vi.fn(),
   getConfigStatus: vi.fn(),
   getConfig: vi.fn(),

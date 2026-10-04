@@ -1,12 +1,17 @@
 import { Hono } from "hono";
+import { hostname } from "node:os";
 import { getEnv, logger } from "@aif/shared";
 import {
   listProjects,
+  acquireLocalDeviceLock,
+  getLocalDevice,
   listStaleInProgressTasks,
   resetStaleQaCheckRuns,
   resetStaleQaRuns,
 } from "@aif/data";
 import { projectsRouter } from "./routes/projects.js";
+import { personalProjectsRouter } from "./routes/personal.js";
+import { readDeviceInstallationId } from "./services/deviceInstallation.js";
 import { tasksRouter } from "./routes/tasks.js";
 import { chatRouter } from "./routes/chat.js";
 import { buildSettingsOverview, settingsRoutes } from "./routes/settings.js";
@@ -15,7 +20,10 @@ import { codexAuthRouter } from "./routes/codexAuth.js";
 import { authRouter } from "./routes/auth.js";
 import { participantsRouter } from "./routes/participants.js";
 import { githubRouter } from "./routes/github.js";
-import { setupWebSocket, closeAllWebSocketClients } from "./ws.js";
+import { setupWebSocket, closeAllWebSocketClients, broadcast } from "./ws.js";
+import { createPeersRouter } from "./routes/peers.js";
+import { loadPeerIdentity } from "./services/peerIdentity.js";
+import { createPeerSyncService, type PeerSyncService } from "./services/peerSync.js";
 import { requestLogger } from "./middleware/logger.js";
 import { trackApiLoad } from "./middleware/apiLoad.js";
 import { startServer } from "./serverBootstrap.js";
@@ -31,6 +39,7 @@ const startTime = Date.now();
 const nodeServerV2WebSocketEnabled = getEnv().AIF_API_NODE_SERVER_V2_WEBSOCKET_ENABLED;
 
 const app = new Hono<ParticipantApiEnv>();
+let peerService: PeerSyncService | null = null;
 
 // WebSocket must be set up before routes
 const { injectWebSocket, webSocketServer } = setupWebSocket(app, nodeServerV2WebSocketEnabled);
@@ -88,6 +97,11 @@ app.get("/settings", async (c) => {
 app.route("/auth", authRouter);
 app.route("/participants", participantsRouter);
 app.route("/projects", projectsRouter);
+app.route("/projects", personalProjectsRouter);
+app.route(
+  "/peers",
+  createPeersRouter(() => peerService),
+);
 app.route("/projects", githubRouter);
 app.route("/tasks", tasksRouter);
 app.route("/chat", chatRouter);
@@ -112,7 +126,22 @@ if (getEnv().AIF_ENABLE_CODEX_LOGIN_PROXY) {
 const port = Number(process.env.PORT) || 3009;
 
 // Ensure data layer / DB is ready
-listProjects();
+const personalNode =
+  getEnv().AIF_PERSONAL_MODE || listProjects().some((project) => project.personalMode);
+const releaseDeviceLock = personalNode
+  ? acquireLocalDeviceLock(readDeviceInstallationId(), hostname())
+  : null;
+
+if (getEnv().AIF_PEER_ENABLED) {
+  if (!personalNode)
+    throw new Error("AIF_PEER_ENABLED requires AIF_PERSONAL_MODE or an attached personal project");
+  peerService = createPeerSyncService(
+    loadPeerIdentity(getLocalDevice().deviceId, getEnv().AIF_PEER_IDENTITY_DIR),
+    () => broadcast({ type: "sync:board_updated", payload: { id: "personal" } }),
+  );
+  await peerService.start(getEnv().AIF_PEER_PORT);
+  log.info({ port: getEnv().AIF_PEER_PORT }, "Pinned TLS peer listener started");
+}
 
 // Recover tasks orphaned in qaStatus:"running" by a crash/restart mid-run —
 // the atomic QA claim (tryStartQaRun) would otherwise block QA for them forever.
@@ -129,6 +158,7 @@ const codexIndexService = createCodexIndexService();
 const server = startServer({
   fetch: app.fetch,
   port,
+  hostname: personalNode ? "127.0.0.1" : undefined,
   webSocketServer,
   injectWebSocket,
   onStarted() {
@@ -145,12 +175,16 @@ const server = startServer({
 // ---------------------------------------------------------------------------
 const onShutdown = createGracefulShutdownHandler({
   logger: log,
-  stopCodexIndex: () => codexIndexService.stop(),
+  stopCodexIndex: async () => {
+    await peerService?.stop();
+    await codexIndexService.stop();
+  },
   closeWebSockets: closeAllWebSocketClients,
   closeServer: () => {
     server.close();
   },
   exitProcess: (code) => {
+    releaseDeviceLock?.();
     process.exit(code);
   },
 });

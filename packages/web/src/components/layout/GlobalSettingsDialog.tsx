@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, Check, Cpu, X as XIcon } from "lucide-react";
-import type { RuntimeProfile } from "@aif/shared/browser";
+import { peerInvitationSchema, type RuntimeProfile } from "@aif/shared/browser";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { FormField } from "@/components/ui/form-field";
+import { AlertBox } from "@/components/ui/alert-box";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogClose,
@@ -39,6 +46,42 @@ interface GlobalSettingsDialogProps {
 }
 
 export function GlobalSettingsDialog({ open, onOpenChange, projectId }: GlobalSettingsDialogProps) {
+  const queryClient = useQueryClient();
+  const peers = useQuery({
+    queryKey: ["peers"],
+    queryFn: api.getPeers,
+    enabled: open,
+    refetchInterval: open ? 5000 : false,
+  });
+  const projects = useQuery({ queryKey: ["projects"], queryFn: api.listProjects, enabled: open });
+  const [peerFingerprint, setPeerFingerprint] = useState("");
+  const [sharedProjects, setSharedProjects] = useState<string[]>([]);
+  const [pairingCode, setPairingCode] = useState("");
+  const [invitationCode, setInvitationCode] = useState("");
+  const [peerAddress, setPeerAddress] = useState("");
+  const [peerAddresses, setPeerAddresses] = useState<Record<string, string>>({});
+  const incomingInvitation = useMemo(() => {
+    try {
+      return peerInvitationSchema.parse(JSON.parse(atob(pairingCode.trim())));
+    } catch {
+      return null;
+    }
+  }, [pairingCode]);
+  const lanAction = useMutation({
+    mutationFn: (action: () => Promise<unknown>) => action(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["peers"] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+  const joinInvitation = () =>
+    lanAction.mutate(async () => {
+      if (!incomingInvitation) throw new Error("Paste a valid invitation code");
+      const invitation = incomingInvitation;
+      await api.pairPeer(peerAddress, invitation, invitation.projectIds);
+      setPairingCode("");
+      await api.syncPeer(invitation.deviceId);
+    });
   const [mcpInstalled, setMcpInstalled] = useState<boolean | null>(null);
   const [mcpRuntimes, setMcpRuntimes] = useState<McpRuntimeStatus[]>([]);
   const [mcpLoading, setMcpLoading] = useState(false);
@@ -323,6 +366,280 @@ export function GlobalSettingsDialog({ open, onOpenChange, projectId }: GlobalSe
           <DialogTitle>Global Settings</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
+          <section
+            aria-label="Personal LAN sync"
+            className="space-y-4 border border-border bg-card p-4 text-foreground"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold">Personal LAN sync</h3>
+                <p className="text-xs text-muted-foreground">Share boards between your devices.</p>
+              </div>
+              <Badge variant="outline">Board only · execution disabled</Badge>
+            </div>
+            {peers.isLoading && <p className="text-sm text-muted-foreground">Loading devices…</p>}
+            {peers.error && <AlertBox variant="error">{peers.error.message}</AlertBox>}
+            {peers.data && !peers.data.enabled && (
+              <AlertBox variant="info">
+                Enable AIF_PERSONAL_MODE=true and AIF_PEER_ENABLED=true, then restart the local API.
+                The browser API stays on loopback; the peer listener uses port {peers.data.port}.
+              </AlertBox>
+            )}
+            {peers.data?.device && (
+              <>
+                <FormField
+                  label={`${peers.data.device.name} · this device fingerprint`}
+                  htmlFor="local-peer-fingerprint"
+                >
+                  <Input
+                    id="local-peer-fingerprint"
+                    readOnly
+                    value={peers.data.device.fingerprint}
+                    className="font-mono text-xs"
+                  />
+                </FormField>
+                <p className="text-xs text-muted-foreground">
+                  Compare fingerprints on both devices. Only selected boards are shared. Code, local
+                  paths and sign-in credentials stay on this device.
+                </p>
+                <div className="space-y-3 border-t border-border pt-3">
+                  <h4 className="text-sm font-medium">Invite another device</h4>
+                  <FormField label="Other device fingerprint" htmlFor="remote-peer-fingerprint">
+                    <Input
+                      id="remote-peer-fingerprint"
+                      value={peerFingerprint}
+                      onChange={(event) =>
+                        setPeerFingerprint(event.target.value.trim().toLowerCase())
+                      }
+                      autoComplete="off"
+                    />
+                  </FormField>
+                  <fieldset className="space-y-2">
+                    <legend className="mb-2 text-xs text-muted-foreground">Boards to share</legend>
+                    {(projects.data ?? [])
+                      .filter((project) => project.personalMode)
+                      .map((project) => (
+                        <label key={project.id} className="flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={sharedProjects.includes(project.id)}
+                            onChange={(event) =>
+                              setSharedProjects((previous) =>
+                                event.target.checked
+                                  ? [...previous, project.id]
+                                  : previous.filter((id) => id !== project.id),
+                              )
+                            }
+                          />
+                          {project.name}
+                        </label>
+                      ))}
+                    {!(projects.data ?? []).some((project) => project.personalMode) && (
+                      <p className="text-xs text-muted-foreground">
+                        Attach an existing checkout as a personal project first.
+                      </p>
+                    )}
+                  </fieldset>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={
+                      lanAction.isPending ||
+                      !sharedProjects.length ||
+                      !/^[a-f0-9]{64}$/.test(peerFingerprint)
+                    }
+                    onClick={() =>
+                      lanAction.mutate(async () => {
+                        const invitation = await api.createPeerInvitation(
+                          peerFingerprint,
+                          sharedProjects,
+                        );
+                        setInvitationCode(btoa(JSON.stringify(invitation)));
+                      })
+                    }
+                  >
+                    Create five-minute invitation
+                  </Button>
+                  {invitationCode && (
+                    <FormField
+                      label="Copy this invitation to the other device"
+                      htmlFor="peer-invitation"
+                    >
+                      <Textarea
+                        id="peer-invitation"
+                        rows={3}
+                        readOnly
+                        value={invitationCode}
+                        className="font-mono text-xs"
+                      />
+                    </FormField>
+                  )}
+                </div>
+                <div className="space-y-3 border-t border-border pt-3">
+                  <h4 className="text-sm font-medium">Accept an invitation</h4>
+                  <FormField label="Other device address" htmlFor="peer-address">
+                    <Input
+                      id="peer-address"
+                      placeholder="https://192.168.1.20:3010"
+                      value={peerAddress}
+                      onChange={(event) => setPeerAddress(event.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="Invitation code" htmlFor="pairing-code">
+                    <Textarea
+                      id="pairing-code"
+                      rows={3}
+                      value={pairingCode}
+                      onChange={(event) => setPairingCode(event.target.value)}
+                      autoComplete="off"
+                    />
+                  </FormField>
+                  <p className="text-xs text-muted-foreground">
+                    Accepting connects the boards listed in the invitation. Their files and
+                    execution remain unavailable until a later handoff.
+                  </p>
+                  {incomingInvitation && (
+                    <div className="space-y-2 text-xs">
+                      <FormField
+                        label="Verify the inviting device fingerprint"
+                        htmlFor="inviting-fingerprint"
+                      >
+                        <Input
+                          id="inviting-fingerprint"
+                          readOnly
+                          value={incomingInvitation.fingerprint}
+                          className="font-mono text-xs"
+                        />
+                      </FormField>
+                      <p className="text-muted-foreground">Boards included in this invitation:</p>
+                      <ul className="space-y-1">
+                        {incomingInvitation.projectIds.map((id) => (
+                          <li key={id} className="break-all font-mono">
+                            {projects.data?.find((project) => project.id === id)?.name ?? id}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {pairingCode.trim() && !incomingInvitation && (
+                    <p className="text-xs text-destructive">
+                      The invitation is incomplete or invalid.
+                    </p>
+                  )}
+                  <Button
+                    size="sm"
+                    disabled={lanAction.isPending || !incomingInvitation || !peerAddress}
+                    onClick={joinInvitation}
+                  >
+                    Accept and sync boards
+                  </Button>
+                </div>
+              </>
+            )}
+            {(peers.data?.peers ?? []).map((peer) => (
+              <div key={peer.deviceId} className="space-y-2 border-t border-border pt-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium">{peer.name}</span>
+                  <Badge variant="outline">
+                    {peer.revoked
+                      ? "Revoked"
+                      : peer.lastErrorCode
+                        ? "Waiting for connection"
+                        : "Paired"}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Last contact:{" "}
+                  {peer.lastContactAt ? new Date(peer.lastContactAt).toLocaleString() : "Not yet"} ·{" "}
+                  {peer.projects.length} board(s)
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {peer.projects.some((scope) => !scope.bootstrapped)
+                    ? "Initial board transfer pending"
+                    : "Board transfer initialized"}{" "}
+                  · pending changes:{" "}
+                  {peer.projects.reduce((sum, scope) => sum + scope.pendingOperations, 0)}
+                  {peer.projects.some((scope) => scope.pendingOperations >= 100) ? "+" : ""}
+                </p>
+                {!peer.revoked && (
+                  <>
+                    <FormField
+                      label="Address for automatic reconnect"
+                      htmlFor={`peer-${peer.deviceId}`}
+                    >
+                      <Input
+                        id={`peer-${peer.deviceId}`}
+                        value={peerAddresses[peer.deviceId] ?? peer.address ?? ""}
+                        placeholder="https://192.168.1.20:3010"
+                        onChange={(event) =>
+                          setPeerAddresses((previous) => ({
+                            ...previous,
+                            [peer.deviceId]: event.target.value,
+                          }))
+                        }
+                      />
+                    </FormField>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={lanAction.isPending}
+                        onClick={() =>
+                          lanAction.mutate(() =>
+                            api.updatePeerAddress(
+                              peer.deviceId,
+                              peerAddresses[peer.deviceId] ?? peer.address ?? "",
+                            ),
+                          )
+                        }
+                      >
+                        Save address
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={lanAction.isPending || !peer.address}
+                        onClick={() => lanAction.mutate(() => api.syncPeer(peer.deviceId))}
+                      >
+                        Sync now
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => lanAction.mutate(() => api.cancelPeerSync(peer.deviceId))}
+                      >
+                        Cancel transfer
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={lanAction.isPending || !peer.address}
+                        onClick={() => lanAction.mutate(() => api.resyncPeer(peer.deviceId))}
+                      >
+                        Resync after restore
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => lanAction.mutate(() => api.revokePeer(peer.deviceId))}
+                      >
+                        Revoke
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+            {lanAction.isPending && (
+              <p className="text-xs text-muted-foreground" role="status">
+                Connecting and saving progress…
+              </p>
+            )}
+            {lanAction.error && (
+              <AlertBox variant="error">
+                {lanAction.error.message} Your local board is preserved. Verify the address and
+                fingerprints, then retry.
+              </AlertBox>
+            )}
+          </section>
           <div className="border border-border bg-card/50 px-3 py-3">
             <div className="flex items-center gap-2">
               <Cpu className="h-4 w-4 text-primary" />

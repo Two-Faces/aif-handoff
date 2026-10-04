@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { logger, parsePlanAnnotations } from "@aif/shared";
+import { logger, parsePlanAnnotations, type SyncRevisions } from "@aif/shared";
+import { mcpSyncRevisionsSchema as syncRevisionsSchema } from "../sync/revisions.js";
 import { findTaskById, setTaskFields, toTaskResponse } from "@aif/data";
 import { registerMcpTool, type ToolContext } from "./index.js";
 import { rateLimitError, toMcpError, validationError } from "../middleware/errorHandler.js";
@@ -9,11 +10,17 @@ import { broadcastTaskChange } from "../utils/broadcast.js";
 
 const log = logger("mcp:tool:push-plan");
 const pushPlanInputSchema: Record<string, z.ZodTypeAny> = {
+  expectedSyncRevisions: syncRevisionsSchema
+    .optional()
+    .describe(
+      "For personal projects, pass syncRevisions from handoff_get_task; stale plan writes are rejected",
+    ),
   taskId: z.string().uuid().describe("Task ID to push plan to"),
   planContent: z.string().max(100_000).describe("Plan content in markdown (max 100KB)"),
 };
 
 type PushPlanArgs = {
+  expectedSyncRevisions?: SyncRevisions;
   planContent: string;
   taskId: string;
 };
@@ -67,7 +74,14 @@ export function register(server: McpServer, context: ToolContext): void {
         });
 
         // Update the task's plan field
-        setTaskFields(args.taskId, { plan: args.planContent, updatedAt: new Date().toISOString() });
+        setTaskFields(
+          args.taskId,
+          { plan: args.planContent, updatedAt: new Date().toISOString() },
+          {
+            expected: args.expectedSyncRevisions,
+            actor: { kind: "agent", id: "mcp", displayNameSnapshot: "MCP" },
+          },
+        );
         const updatedRow = findTaskById(args.taskId);
         const task = updatedRow ? toTaskResponse(updatedRow) : toTaskResponse(row);
 

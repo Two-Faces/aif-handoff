@@ -1,3 +1,5 @@
+import { withProjectDeviceExecution, getDeviceExecutionBlock } from "@aif/data";
+import { personalTaskExecutionGate } from "../middleware/personalExecution.js";
 import { Hono, type Context } from "hono";
 import { jsonValidator } from "../middleware/zodValidator.js";
 import { internalBroadcastAuth } from "../middleware/internalBroadcastAuth.js";
@@ -8,6 +10,7 @@ import {
   getProjectConfig,
   defaultsForMode,
   getEnv,
+  SyncError,
   type TaskActionContext,
 } from "@aif/shared";
 import {
@@ -69,6 +72,10 @@ const QA_LOCK_DURATION_MS =
   Math.max(getEnv().AGENT_STAGE_RUN_TIMEOUT_MS, 60_000) * 2 + 5 * 60 * 1000;
 
 export const tasksRouter = new Hono<ParticipantApiEnv>();
+tasksRouter.onError((error, c) => {
+  if (error instanceof SyncError) return c.json({ error: error.message, code: error.code }, 409);
+  throw error;
+});
 
 const LEGACY_ACTION_CONTEXT: TaskActionContext = {
   participantsModeEnabled: false,
@@ -207,58 +214,65 @@ function dispatchQaRun(
   executionRoot: string,
   lockId: string,
 ): void {
-  void (async () => {
-    try {
-      const { runQaQuery } = await import("../services/qaRunner.js");
-      const result = await runQaQuery({ projectId, taskId, executionRoot });
-      broadcast(
-        result.ok
-          ? { type: "task:qa_done", payload: { taskId, projectId, status: "done" } }
-          : {
-              type: "task:qa_failed",
-              payload: { taskId, projectId, status: "failed", error: result.error },
-            },
-      );
-      const refreshedTask = result.ok ? findTaskById(taskId) : undefined;
-      if (refreshedTask?.autoQaCheck) {
-        if (tryStartQaCheckRun(taskId)) {
-          const runningTask = findTaskById(taskId);
-          if (runningTask) {
-            broadcast({ type: "task:updated", payload: toTaskBroadcastPayload(runningTask) });
-          }
-          log.info({ taskId, projectId }, "QA Check chained after successful QA run");
-          await runClaimedQaCheck(projectId, taskId, executionRoot);
-        } else {
-          log.warn({ taskId, projectId }, "QA Check chain skipped because it is already running");
-        }
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      log.error({ taskId, projectId, error }, "QA dispatch failed before runner completed");
-      // Release the claimed "running" slot with a terminal status: tryStartQaRun
-      // only wins when qa_status != 'running', so without this a dispatch failure
-      // would block every future QA start for the task. Defensive wrap — a DB
-      // failure here must not prevent the task:qa_failed broadcast below.
+  void withProjectDeviceExecution(
+    { projectId, taskId, projectRoot: executionRoot, coordinatorId: lockId },
+    async (root) => {
+      executionRoot = root ?? executionRoot;
       try {
-        updateTask(taskId, { qaStatus: "error" });
-        const failedTask = findTaskById(taskId);
-        if (failedTask) {
-          broadcast({ type: "task:updated", payload: toTaskBroadcastPayload(failedTask) });
-        }
-      } catch (persistErr) {
-        log.error(
-          { persistErr, taskId },
-          "Failed to persist QA error status after dispatch failure",
+        const { runQaQuery } = await import("../services/qaRunner.js");
+        const result = await runQaQuery({ projectId, taskId, executionRoot });
+        const fenced = getDeviceExecutionBlock(projectId, taskId);
+        if (fenced) return;
+        broadcast(
+          result.ok
+            ? { type: "task:qa_done", payload: { taskId, projectId, status: "done" } }
+            : {
+                type: "task:qa_failed",
+                payload: { taskId, projectId, status: "failed", error: result.error },
+              },
         );
+        const refreshedTask = result.ok ? findTaskById(taskId) : undefined;
+        if (refreshedTask?.autoQaCheck) {
+          if (tryStartQaCheckRun(taskId)) {
+            const runningTask = findTaskById(taskId);
+            if (runningTask) {
+              broadcast({ type: "task:updated", payload: toTaskBroadcastPayload(runningTask) });
+            }
+            log.info({ taskId, projectId }, "QA Check chained after successful QA run");
+            await runClaimedQaCheck(projectId, taskId, executionRoot);
+          } else {
+            log.warn({ taskId, projectId }, "QA Check chain skipped because it is already running");
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        log.error({ taskId, projectId, error }, "QA dispatch failed before runner completed");
+        if (getDeviceExecutionBlock(projectId, taskId)) return;
+        // Release the claimed "running" slot with a terminal status: tryStartQaRun
+        // only wins when qa_status != 'running', so without this a dispatch failure
+        // would block every future QA start for the task. Defensive wrap — a DB
+        // failure here must not prevent the task:qa_failed broadcast below.
+        try {
+          updateTask(taskId, { qaStatus: "error" });
+          const failedTask = findTaskById(taskId);
+          if (failedTask) {
+            broadcast({ type: "task:updated", payload: toTaskBroadcastPayload(failedTask) });
+          }
+        } catch (persistErr) {
+          log.error(
+            { persistErr, taskId },
+            "Failed to persist QA error status after dispatch failure",
+          );
+        }
+        broadcast({
+          type: "task:qa_failed",
+          payload: { taskId, projectId, status: "failed", error: message },
+        });
+      } finally {
+        releaseTaskClaim(taskId, lockId);
       }
-      broadcast({
-        type: "task:qa_failed",
-        payload: { taskId, projectId, status: "failed", error: message },
-      });
-    } finally {
-      releaseTaskClaim(taskId, lockId);
-    }
-  })();
+    },
+  ).catch((error) => log.error({ error, taskId }, "QA lifecycle fenced; reservation retained"));
 }
 
 /**
@@ -310,13 +324,17 @@ function dispatchQaCheckRun(
   executionRoot: string,
   lockId: string,
 ): void {
-  void (async () => {
-    try {
-      await runClaimedQaCheck(projectId, taskId, executionRoot);
-    } finally {
-      releaseTaskClaim(taskId, lockId);
-    }
-  })();
+  void withProjectDeviceExecution(
+    { projectId, taskId, projectRoot: executionRoot, coordinatorId: lockId },
+    async (root) => {
+      executionRoot = root ?? executionRoot;
+      try {
+        await runClaimedQaCheck(projectId, taskId, executionRoot);
+      } finally {
+        releaseTaskClaim(taskId, lockId);
+      }
+    },
+  ).catch((error) => log.error({ error, taskId }, "QA lifecycle fenced; reservation retained"));
 }
 
 function startQaCheckRun(
@@ -565,10 +583,12 @@ tasksRouter.post("/", jsonValidator(createTaskSchema), async (c) => {
   // Persist attachments to project files and update the task with path-based metadata
   if (body.attachments.length > 0) {
     if (project) {
-      const persisted = await persistAttachments(body.attachments, {
-        projectRoot: project.rootPath,
-        taskId: created.id,
-      });
+      const persisted = project.personalMode
+        ? body.attachments
+        : await persistAttachments(body.attachments, {
+            projectRoot: project.rootPath,
+            taskId: created.id,
+          });
       updateTask(created.id, { attachments: persisted });
     }
   }
@@ -651,6 +671,7 @@ tasksRouter.post("/:id/handoff", jsonValidator(handoffTaskSchema), (c) => {
     expectedOwnershipRevision: body.expectedOwnershipRevision,
     expectedExecutionOwner: body.expectedExecutionOwner,
     expectedStatus: body.expectedStatus,
+    expectedSyncRevisions: body.expectedSyncRevisions,
     actor: actionContext.actor,
     reason: body.reason,
     resumeAction: body.resumeAction,
@@ -845,11 +866,13 @@ tasksRouter.post("/:id/comments", jsonValidator(createTaskCommentSchema), async 
   if (body.attachments.length > 0) {
     const project = findProjectById(task.projectId);
     if (project) {
-      const persisted = await persistAttachments(body.attachments, {
-        projectRoot: project.rootPath,
-        taskId: id,
-        commentId: created.id,
-      });
+      const persisted = project.personalMode
+        ? body.attachments
+        : await persistAttachments(body.attachments, {
+            projectRoot: project.rootPath,
+            taskId: id,
+            commentId: created.id,
+          });
       const updated = updateComment(created.id, { attachments: persisted });
       finalComment = updated ?? created;
     }
@@ -910,7 +933,7 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
     }
   }
 
-  const { plan, attachments: incomingAttachments, ...updatePayload } = body;
+  const { plan, expectedSyncRevisions, attachments: incomingAttachments, ...updatePayload } = body;
   const effectiveUseSubagents = updatePayload.useSubagents ?? existing.useSubagents;
   if (effectiveUseSubagents) {
     updatePayload.runPlanImprove = false;
@@ -937,7 +960,7 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
   }
 
   const hasPlanUpdate = Object.prototype.hasOwnProperty.call(body, "plan");
-  if (hasPlanUpdate) {
+  if (hasPlanUpdate && !existing.personalMode) {
     try {
       updateTaskPlan(id, plan ?? null, existing.isFix, existing.planPath);
     } catch {
@@ -948,7 +971,9 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
   // Persist new attachments to project files and clean up replaced ones
   if (incomingAttachments !== undefined) {
     const project = findProjectById(existing.projectId);
-    if (project) {
+    if (project?.personalMode) {
+      (updatePayload as Record<string, unknown>).attachments = incomingAttachments;
+    } else if (project) {
       const oldAttachments = parseAttachments(existing.attachments);
       cleanupReplacedAttachments(project.rootPath, oldAttachments, incomingAttachments);
       (updatePayload as Record<string, unknown>).attachments = await persistAttachments(
@@ -958,7 +983,14 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
     }
   }
 
-  const updated = updateTask(id, updatePayload);
+  const updated = updateTask(
+    id,
+    {
+      ...updatePayload,
+      ...(hasPlanUpdate && existing.personalMode ? { plan: plan ?? null } : {}),
+    },
+    { expected: expectedSyncRevisions, actor: requestActionContext(c).actor },
+  );
   if (!updated) return c.json({ error: "Task not found after update" }, 500);
   log.debug({ taskId: id, fields: Object.keys(body) }, "Task updated");
 
@@ -967,7 +999,7 @@ tasksRouter.put("/:id", jsonValidator(updateTaskSchema), async (c) => {
 });
 
 // POST /tasks/:id/sync-plan — sync DB plan with physical plan file
-tasksRouter.post("/:id/sync-plan", (c) => {
+tasksRouter.post("/:id/sync-plan", personalTaskExecutionGate, (c) => {
   const { id } = c.req.param();
   const existing = findTaskById(id);
   if (!existing) {
@@ -1010,7 +1042,7 @@ tasksRouter.delete("/:id", (c) => {
 // POST /tasks/:id/events — apply a human action through state machine
 tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
   const { id } = c.req.param();
-  const { event, deletePlanFile, commitOnApprove } = c.req.valid("json");
+  const { event, deletePlanFile, commitOnApprove, expectedSyncRevisions } = c.req.valid("json");
   const actionContext = requestActionContext(c);
   const existing = findTaskById(id);
   if (!existing) {
@@ -1021,6 +1053,7 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
       taskId: id,
       event,
       deletePlanFile,
+      expectedSyncRevisions,
       participantsModeEnabled: actionContext.participantsModeEnabled,
       actor: actionContext.actor,
       participantRole: actionContext.participantRole,
@@ -1045,14 +1078,14 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
       payload: toTaskBroadcastPayload(handled.task),
     });
     // Wake coordinator when task transitions may require agent processing
-    if (handled.broadcastType === "task:moved") {
+    if (handled.broadcastType === "task:moved" && !existing.personalMode) {
       broadcast({ type: "agent:wake", payload: { id: handled.task.id } });
     }
 
     // Fire-and-forget: run /aif-commit when approved with commit checkbox.
     // Broadcast lifecycle over WS so the UI can show a spinner/toast and the
     // approve modal does not close without feedback.
-    if (event === "approve_done" && commitOnApprove) {
+    if (!existing.personalMode && event === "approve_done" && commitOnApprove) {
       const taskId = handled.task.id;
       const projectId = handled.task.projectId;
       log.info({ taskId, projectId }, "Approve-done commit flow started");
@@ -1087,7 +1120,7 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
         { taskId: handled.task.id },
         "Auto QA skipped — AIF_QA_PIPELINE_ENABLED is disabled",
       );
-    } else if (event === "approve_done" && handled.task.autoQa) {
+    } else if (!existing.personalMode && event === "approve_done" && handled.task.autoQa) {
       // Branchless (fast-mode) tasks are allowed: the runner resolves the branch
       // via `git branch --show-current`, mirroring the aif-qa skill.
       const { id: taskId, projectId, worktreePath } = handled.task;
@@ -1112,7 +1145,7 @@ tasksRouter.post("/:id/events", jsonValidator(taskEventSchema), async (c) => {
 });
 
 // POST /tasks/:id/run-qa — manually trigger the aif-qa pipeline (fire-and-forget)
-tasksRouter.post("/:id/run-qa", (c) => {
+tasksRouter.post("/:id/run-qa", personalTaskExecutionGate, (c) => {
   const { id } = c.req.param();
   const task = findTaskById(id);
   if (!task) {
@@ -1165,7 +1198,7 @@ tasksRouter.post("/:id/run-qa", (c) => {
 });
 
 // POST /tasks/:id/run-qa-check — execute test cases produced by aif-qa.
-tasksRouter.post("/:id/run-qa-check", (c) => {
+tasksRouter.post("/:id/run-qa-check", personalTaskExecutionGate, (c) => {
   const { id } = c.req.param();
   const task = findTaskById(id);
   if (!task) {

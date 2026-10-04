@@ -1,9 +1,11 @@
+import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
 import type { RuntimeRunInput, RuntimeRunResult } from "../../types.js";
 import { isRetriableTimeoutError, resolveRetryDelay } from "../../timeouts.js";
 import { classifyClaudeRuntimeError } from "./errors.js";
 import { parseExecutionOptions } from "./options.js";
 import { assertClaudeExecutableCompatible } from "./version.js";
 import { runClaudeQueryAttempt } from "./stream.js";
+import { runNativeClaude } from "./native.js";
 
 export type { ClaudeRuntimeExecutionOptions } from "./options.js";
 
@@ -76,6 +78,12 @@ export async function runClaudeRuntime(
     pathToClaudeCodeExecutable?: string;
   },
 ): Promise<RuntimeRunResult> {
+  assertNativeProcessMode(
+    input,
+    input.transport === undefined || input.transport === "sdk" || input.transport === "api",
+  );
+  if (input.execution?.nativeProcessScope)
+    return runNativeClaude(input, adapterDefaults?.pathToClaudeCodeExecutable);
   const execution = parseExecutionOptions(input, adapterDefaults);
 
   // Enforce the minimum Claude Code version before starting the run. Older

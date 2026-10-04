@@ -1,5 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -46,6 +54,7 @@ function writeConfig(projectRoot: string, yaml: string): void {
 
 function initRepo(projectRoot: string): void {
   git(projectRoot, ["init"]);
+  git(projectRoot, ["config", "core.autocrlf", "false"]);
   git(projectRoot, ["config", "user.email", "test@example.com"]);
   git(projectRoot, ["config", "user.name", "Test User"]);
   writeFileSync(join(projectRoot, "README.md"), "initial\n");
@@ -159,6 +168,59 @@ describe("gitIsolation", () => {
       expect(getCurrentBranch(worktreePath)).toBe(branchName);
       expect(existsSync(join(worktreePath, ".ai-factory", "config.yaml"))).toBe(true);
       expect(existsSync(join(worktreePath, "CLAUDE.md"))).toBe(true);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "does not overwrite tracked context on creation or task context on reuse",
+    () => {
+      initRepo(projectRoot);
+      writeConfig(projectRoot, "git:\n  base_branch: main\n  create_branches: true\n");
+      writeFileSync(join(projectRoot, "AGENTS.md"), "committed context\n");
+      git(projectRoot, ["add", "AGENTS.md"]);
+      git(projectRoot, ["commit", "-m", "test: tracked context"]);
+      writeFileSync(join(projectRoot, "AGENTS.md"), "source user edits\n");
+      writeFileSync(join(projectRoot, "CLAUDE.md"), "initial overlay\n");
+      const taskId = "context-reuse";
+      const branchName = "feature/context-reuse";
+      const worktreePath = buildTaskWorktreePath(projectRoot, branchName, taskId);
+      extraPaths.push(worktreePath);
+      const input = { projectRoot, taskId, title: "Context reuse", explicitBranchName: branchName };
+      expect(ensureTaskWorktree(input).action).toBe("created");
+      expect(readFileSync(join(worktreePath, "AGENTS.md"), "utf8")).toBe("committed context\n");
+      writeFileSync(join(worktreePath, "AGENTS.md"), "task edits\n");
+      unlinkSync(join(worktreePath, "CLAUDE.md"));
+      expect(ensureTaskWorktree(input).action).toBe("reused");
+      expect(readFileSync(join(worktreePath, "AGENTS.md"), "utf8")).toBe("task edits\n");
+      expect(existsSync(join(worktreePath, "CLAUDE.md"))).toBe(false);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "refuses a different repository with the same branch label and different HEAD",
+    () => {
+      initRepo(projectRoot);
+      writeConfig(projectRoot, "git:\n  create_branches: true\n");
+      const other = mkdtempSync(join(tmpdir(), "aif-other-repository-"));
+      extraPaths.push(other);
+      initRepo(other);
+      git(other, ["checkout", "-b", "feature/task"]);
+      writeFileSync(join(other, "different.txt"), "different history\n");
+      git(other, ["add", "different.txt"]);
+      git(other, ["commit", "-m", "different HEAD"]);
+      const headBefore = getHeadCommitSha(other);
+      expect(() =>
+        ensureTaskWorktree({
+          projectRoot,
+          taskId: "task-1",
+          title: "Task",
+          explicitBranchName: "feature/task",
+          explicitWorktreePath: other,
+        }),
+      ).toThrowError(BranchIsolationError);
+      expect(getHeadCommitSha(other)).toBe(headBefore);
     },
     GIT_TEST_TIMEOUT_MS,
   );

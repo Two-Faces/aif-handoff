@@ -1,4 +1,6 @@
 import { and, desc, eq, max } from "drizzle-orm";
+import { withSharedMutation, getEntitySyncRevisions } from "./syncMutations.js";
+import { isPersonalProject } from "./personalMode.js";
 import {
   auditEvents,
   generatePlanPath,
@@ -70,7 +72,15 @@ function parseIssueSnapshot(raw: string): GitHubIssueSnapshot {
         : [],
     };
   } catch {
-    return { title: "", body: "", author: "unknown", labels: [], assignees: [], milestone: null, comments: [] };
+    return {
+      title: "",
+      body: "",
+      author: "unknown",
+      labels: [],
+      assignees: [],
+      milestone: null,
+      comments: [],
+    };
   }
 }
 
@@ -168,7 +178,10 @@ export function upsertGitHubRepository(input: {
       },
     })
     .run();
-  log.info({ projectId: input.projectId, repository: `${input.owner}/${input.name}` }, "GitHub repository connection saved");
+  log.info(
+    { projectId: input.projectId, repository: `${input.owner}/${input.name}` },
+    "GitHub repository connection saved",
+  );
   return findGitHubRepository(input.projectId)!;
 }
 
@@ -200,13 +213,20 @@ function renderIssueDescription(input: {
     `Source: ${input.htmlUrl}`,
     `Author: @${snapshot.author}`,
     snapshot.labels.length > 0 ? `Labels: ${snapshot.labels.join(", ")}` : null,
-    snapshot.assignees.length > 0 ? `Assignees: ${snapshot.assignees.map((name) => `@${name}`).join(", ")}` : null,
+    snapshot.assignees.length > 0
+      ? `Assignees: ${snapshot.assignees.map((name) => `@${name}`).join(", ")}`
+      : null,
     snapshot.milestone ? `Milestone: ${snapshot.milestone}` : null,
   ].filter(Boolean);
   const comments = snapshot.comments.map(
-    (comment) => `### @${comment.author} — ${comment.createdAt}\n\n${comment.body}\n\n${comment.htmlUrl}`,
+    (comment) =>
+      `### @${comment.author} — ${comment.createdAt}\n\n${comment.body}\n\n${comment.htmlUrl}`,
   );
-  return [context.join("\n"), snapshot.body, comments.length > 0 ? `## GitHub comments\n\n${comments.join("\n\n")}` : null]
+  return [
+    context.join("\n"),
+    snapshot.body,
+    comments.length > 0 ? `## GitHub comments\n\n${comments.join("\n\n")}` : null,
+  ]
     .filter(Boolean)
     .join("\n\n");
 }
@@ -233,161 +253,194 @@ export function importGitHubIssueTask(input: ImportGitHubIssueInput): {
   taskId: string;
   created: boolean;
 } {
-  const db = getDb();
-  const now = new Date().toISOString();
-  const initialStatus = input.pullRequest ? "done" : "backlog";
-  let taskId = "";
-  let created = false;
+  const existingId = findGitHubIssue(input.projectId, input.issueNumber)?.taskId ?? undefined;
+  return withSharedMutation(
+    { entityType: "task", entityId: existingId, projectId: input.projectId },
+    () => {
+      const db = getDb();
+      const now = new Date().toISOString();
+      const initialStatus = input.pullRequest ? "done" : "backlog";
+      let taskId = "";
+      let created = false;
 
-  db.transaction((tx) => {
-    tx.insert(githubIssues)
-      .values({
-        projectId: input.projectId,
-        issueNumber: input.issueNumber,
-        nodeId: input.nodeId,
-        htmlUrl: input.htmlUrl,
-        state: input.state,
-        metadataJson: JSON.stringify(input.snapshot),
-        sourceUpdatedAt: input.sourceUpdatedAt,
-        lastSyncedAt: now,
-        ...(input.pullRequest
-          ? {
-              prNumber: input.pullRequest.number,
-              prUrl: input.pullRequest.url,
-              prState: input.pullRequest.state,
-            }
-          : {}),
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [githubIssues.projectId, githubIssues.issueNumber],
-        set: {
-          nodeId: input.nodeId,
-          htmlUrl: input.htmlUrl,
-          state: input.state,
-          metadataJson: JSON.stringify(input.snapshot),
-          sourceUpdatedAt: input.sourceUpdatedAt,
-          lastSyncedAt: now,
-          syncError: null,
-          ...(input.pullRequest
-            ? {
-                prNumber: input.pullRequest.number,
-                prUrl: input.pullRequest.url,
-                prState: input.pullRequest.state,
-              }
-            : {}),
-          updatedAt: now,
-        },
-      })
-      .run();
-
-    const linked = tx
-      .select()
-      .from(githubIssues)
-      .where(and(eq(githubIssues.projectId, input.projectId), eq(githubIssues.issueNumber, input.issueNumber)))
-      .get();
-    if (!linked) throw new Error("GitHub issue upsert did not return a row");
-
-    const title = `#${input.issueNumber} ${input.snapshot.title}`;
-    const description = renderIssueDescription(input);
-    const tags = [...new Set(["github", ...input.snapshot.labels])].slice(0, 50);
-    if (linked.taskId) {
-      taskId = linked.taskId;
-      tx.update(tasks)
-        .set({ title, description, tags: JSON.stringify(tags), paused: input.state === "closed", updatedAt: now })
-        .where(eq(tasks.id, taskId))
-        .run();
-      return;
-    }
-
-    const project = tx.select().from(projects).where(eq(projects.id, input.projectId)).get();
-    if (!project) throw new Error(`Project ${input.projectId} not found`);
-    taskId = crypto.randomUUID();
-    const maxPosition = tx
-      .select({ value: max(tasks.position) })
-      .from(tasks)
-      .where(eq(tasks.projectId, input.projectId))
-      .get()?.value;
-    const config = getProjectConfig(project.rootPath);
-    const planPath = generatePlanPath(`github-issue-${input.issueNumber}`, "full", {
-      plansDir: config.paths.plans,
-      defaultPlanPath: config.paths.plan,
-    });
-    tx.insert(tasks)
-      .values({
-        id: taskId,
-        projectId: input.projectId,
-        title,
-        description,
-        autoMode: true,
-        executionOwner: "ai",
-        plannerMode: "full",
-        planPath,
-        planDocs: true,
-        planTests: true,
-        autoQueueCommitStatus: "pending",
-        autoQueueCommitBaseSha: null,
-        paused: input.state === "closed",
-        tags: JSON.stringify(tags),
-        status: initialStatus,
-        position: Number(maxPosition ?? 1000) + 100,
-        lastHeartbeatAt: now,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .run();
-    tx.insert(taskExecutorHistory)
-      .values({
-        id: crypto.randomUUID(),
-        taskId,
-        taskTitleSnapshot: title,
-        ownershipRevision: 0,
-        executionOwner: "ai",
-        assigneesSnapshotJson: "[]",
-        statusSnapshot: initialStatus,
-        actorKind: "system",
-        actorId: "github-sync",
-        actorDisplayNameSnapshot: "GitHub Sync",
-        reason: "github_issue_imported",
-        createdAt: now,
-      })
-      .run();
-    tx.insert(auditEvents)
-      .values(
-        createAuditEventValues({
-          action: "github.issue_imported",
-          entityType: "task",
-          entityId: taskId,
-          taskId,
-          taskTitleSnapshot: title,
-          executionOwnerSnapshot: "ai",
-          assigneesSnapshot: [],
-          statusSnapshot: initialStatus,
-          actor: { kind: "system", id: "github-sync", displayNameSnapshot: "GitHub Sync" },
-          metadata: {
-            repository: `${input.owner}/${input.repository}`,
+      db.transaction((tx) => {
+        tx.insert(githubIssues)
+          .values({
+            projectId: input.projectId,
             issueNumber: input.issueNumber,
-            ...(input.pullRequest ? { prNumber: input.pullRequest.number } : {}),
-          },
-          createdAt: now,
-        }),
-      )
-      .run();
-    tx.update(githubIssues)
-      .set({ taskId, updatedAt: now })
-      .where(and(eq(githubIssues.projectId, input.projectId), eq(githubIssues.issueNumber, input.issueNumber)))
-      .run();
-    created = true;
-  });
+            nodeId: input.nodeId,
+            htmlUrl: input.htmlUrl,
+            state: input.state,
+            metadataJson: JSON.stringify(input.snapshot),
+            sourceUpdatedAt: input.sourceUpdatedAt,
+            lastSyncedAt: now,
+            ...(input.pullRequest
+              ? {
+                  prNumber: input.pullRequest.number,
+                  prUrl: input.pullRequest.url,
+                  prState: input.pullRequest.state,
+                }
+              : {}),
+            createdAt: now,
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: [githubIssues.projectId, githubIssues.issueNumber],
+            set: {
+              nodeId: input.nodeId,
+              htmlUrl: input.htmlUrl,
+              state: input.state,
+              metadataJson: JSON.stringify(input.snapshot),
+              sourceUpdatedAt: input.sourceUpdatedAt,
+              lastSyncedAt: now,
+              syncError: null,
+              ...(input.pullRequest
+                ? {
+                    prNumber: input.pullRequest.number,
+                    prUrl: input.pullRequest.url,
+                    prState: input.pullRequest.state,
+                  }
+                : {}),
+              updatedAt: now,
+            },
+          })
+          .run();
 
-  const issue = findGitHubIssue(input.projectId, input.issueNumber);
-  if (!issue || !taskId) throw new Error("GitHub issue import failed");
-  log.info({ projectId: input.projectId, issueNumber: input.issueNumber, taskId, created }, "GitHub issue synchronized");
-  return { issue, taskId, created };
+        const linked = tx
+          .select()
+          .from(githubIssues)
+          .where(
+            and(
+              eq(githubIssues.projectId, input.projectId),
+              eq(githubIssues.issueNumber, input.issueNumber),
+            ),
+          )
+          .get();
+        if (!linked) throw new Error("GitHub issue upsert did not return a row");
+
+        const title = `#${input.issueNumber} ${input.snapshot.title}`;
+        const description = renderIssueDescription(input);
+        const tags = [...new Set(["github", ...input.snapshot.labels])].slice(0, 50);
+        if (linked.taskId) {
+          taskId = linked.taskId;
+          tx.update(tasks)
+            .set({
+              title,
+              description,
+              tags: JSON.stringify(tags),
+              paused: input.state === "closed",
+              updatedAt: now,
+            })
+            .where(eq(tasks.id, taskId))
+            .run();
+          return;
+        }
+
+        const project = tx.select().from(projects).where(eq(projects.id, input.projectId)).get();
+        if (!project) throw new Error(`Project ${input.projectId} not found`);
+        taskId = crypto.randomUUID();
+        const maxPosition = tx
+          .select({ value: max(tasks.position) })
+          .from(tasks)
+          .where(eq(tasks.projectId, input.projectId))
+          .get()?.value;
+        const config = getProjectConfig(project.rootPath);
+        const planPath = generatePlanPath(`github-issue-${input.issueNumber}`, "full", {
+          plansDir: config.paths.plans,
+          defaultPlanPath: config.paths.plan,
+        });
+        tx.insert(tasks)
+          .values({
+            id: taskId,
+            projectId: input.projectId,
+            title,
+            description,
+            autoMode: !isPersonalProject(input.projectId),
+            executionOwner: "ai",
+            plannerMode: "full",
+            planPath,
+            planDocs: true,
+            planTests: true,
+            autoQueueCommitStatus: "pending",
+            autoQueueCommitBaseSha: null,
+            paused: isPersonalProject(input.projectId) || input.state === "closed",
+            tags: JSON.stringify(tags),
+            status: initialStatus,
+            position: Number(maxPosition ?? 1000) + 100,
+            lastHeartbeatAt: now,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .run();
+        tx.insert(taskExecutorHistory)
+          .values({
+            id: crypto.randomUUID(),
+            taskId,
+            taskTitleSnapshot: title,
+            ownershipRevision: 0,
+            executionOwner: "ai",
+            assigneesSnapshotJson: "[]",
+            statusSnapshot: initialStatus,
+            actorKind: "system",
+            actorId: "github-sync",
+            actorDisplayNameSnapshot: "GitHub Sync",
+            reason: "github_issue_imported",
+            createdAt: now,
+          })
+          .run();
+        tx.insert(auditEvents)
+          .values(
+            createAuditEventValues({
+              action: "github.issue_imported",
+              entityType: "task",
+              entityId: taskId,
+              taskId,
+              taskTitleSnapshot: title,
+              executionOwnerSnapshot: "ai",
+              assigneesSnapshot: [],
+              statusSnapshot: initialStatus,
+              actor: { kind: "system", id: "github-sync", displayNameSnapshot: "GitHub Sync" },
+              metadata: {
+                repository: `${input.owner}/${input.repository}`,
+                issueNumber: input.issueNumber,
+                ...(input.pullRequest ? { prNumber: input.pullRequest.number } : {}),
+              },
+              createdAt: now,
+            }),
+          )
+          .run();
+        tx.update(githubIssues)
+          .set({ taskId, updatedAt: now })
+          .where(
+            and(
+              eq(githubIssues.projectId, input.projectId),
+              eq(githubIssues.issueNumber, input.issueNumber),
+            ),
+          )
+          .run();
+        created = true;
+      });
+
+      const issue = findGitHubIssue(input.projectId, input.issueNumber);
+      if (!issue || !taskId) throw new Error("GitHub issue import failed");
+      log.info(
+        { projectId: input.projectId, issueNumber: input.issueNumber, taskId, created },
+        "GitHub issue synchronized",
+      );
+      return { issue, taskId, created };
+    },
+    {
+      expected: existingId
+        ? getEntitySyncRevisions(input.projectId, "task", existingId)
+        : undefined,
+    },
+  );
 }
 
-export function findGitHubIssue(projectId: string, issueNumber: number): GitHubIssueLink | undefined {
+export function findGitHubIssue(
+  projectId: string,
+  issueNumber: number,
+): GitHubIssueLink | undefined {
   const row = getDb()
     .select()
     .from(githubIssues)
@@ -422,15 +475,11 @@ export function markGitHubIssueUnavailable(
     const issue = tx
       .select({ taskId: githubIssues.taskId })
       .from(githubIssues)
-      .where(
-        and(eq(githubIssues.projectId, projectId), eq(githubIssues.issueNumber, issueNumber)),
-      )
+      .where(and(eq(githubIssues.projectId, projectId), eq(githubIssues.issueNumber, issueNumber)))
       .get();
     tx.update(githubIssues)
       .set({ syncError: error, lastSyncedAt: now, updatedAt: now })
-      .where(
-        and(eq(githubIssues.projectId, projectId), eq(githubIssues.issueNumber, issueNumber)),
-      )
+      .where(and(eq(githubIssues.projectId, projectId), eq(githubIssues.issueNumber, issueNumber)))
       .run();
     if (issue?.taskId) {
       tx.update(tasks)
@@ -462,20 +511,32 @@ export function updateGitHubPullRequest(input: {
       ...(input.prChecksStatus !== undefined ? { prChecksStatus: input.prChecksStatus } : {}),
       ...(input.reviewState !== undefined ? { reviewState: input.reviewState } : {}),
       ...(input.lastReviewId !== undefined ? { lastReviewId: input.lastReviewId } : {}),
-      ...(input.reviewFingerprint !== undefined ? { reviewFingerprint: input.reviewFingerprint } : {}),
+      ...(input.reviewFingerprint !== undefined
+        ? { reviewFingerprint: input.reviewFingerprint }
+        : {}),
       syncError: null,
       lastSyncedAt: now,
       updatedAt: now,
     })
-    .where(and(eq(githubIssues.projectId, input.projectId), eq(githubIssues.issueNumber, input.issueNumber)))
+    .where(
+      and(
+        eq(githubIssues.projectId, input.projectId),
+        eq(githubIssues.issueNumber, input.issueNumber),
+      ),
+    )
     .run();
   return findGitHubIssue(input.projectId, input.issueNumber);
 }
 
-export function getGitHubIssueReviewFingerprint(projectId: string, issueNumber: number): string | null {
-  return getDb()
-    .select({ value: githubIssues.reviewFingerprint })
-    .from(githubIssues)
-    .where(and(eq(githubIssues.projectId, projectId), eq(githubIssues.issueNumber, issueNumber)))
-    .get()?.value ?? null;
+export function getGitHubIssueReviewFingerprint(
+  projectId: string,
+  issueNumber: number,
+): string | null {
+  return (
+    getDb()
+      .select({ value: githubIssues.reviewFingerprint })
+      .from(githubIssues)
+      .where(and(eq(githubIssues.projectId, projectId), eq(githubIssues.issueNumber, issueNumber)))
+      .get()?.value ?? null
+  );
 }

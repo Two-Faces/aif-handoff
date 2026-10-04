@@ -38,6 +38,29 @@ interface GeneratorFixture {
 }
 
 describe("codex app-server protocol generator", () => {
+  it("can check the npm PATH CLI without consuming the runtime CLI override", () => {
+    const fixture = createGeneratorFixture();
+    try {
+      copyFileSync(
+        fixture.executablePath,
+        path.join(fixture.root, process.platform === "win32" ? "codex.cmd" : "codex"),
+      );
+      const pathKey =
+        Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+      const result = runGenerator(
+        { ...fixture, executablePath: path.join(fixture.root, "missing-runtime-cli") },
+        ["--use-path"],
+        {
+          [pathKey]: `${fixture.root}${path.delimiter}${process.env[pathKey] ?? ""}`,
+        },
+      );
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("committed protocol artifacts generated");
+      expect(existsSync(path.join(fixture.generatedDir, "Protocol.ts"))).toBe(true);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
   it("uses CODEX_CLI_PATH when launching Codex", () => {
     const tempDir = mkdtempSync(path.join(tmpdir(), "aif-codex-cli-path-"));
     const missingExecutable = path.join(tempDir, "missing codex executable.cmd");
@@ -205,12 +228,17 @@ function createExecutableWrapper(root: string, fakeCliScript: string): string {
   return executablePath;
 }
 
-function runGenerator(fixture: GeneratorFixture, args: string[] = []) {
+function runGenerator(
+  fixture: GeneratorFixture,
+  args: string[] = [],
+  extraEnv: NodeJS.ProcessEnv = {},
+) {
   return spawnSync(process.execPath, [fixture.scriptPath, ...args], {
     cwd: fixture.root,
     env: {
       ...process.env,
       CODEX_CLI_PATH: fixture.executablePath,
+      ...extraEnv,
     },
     encoding: "utf8",
   });

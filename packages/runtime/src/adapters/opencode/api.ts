@@ -1,3 +1,5 @@
+import { assertOpenCodeNativeAdmission } from "./nativeAdmission.js";
+import { runNativeOpenCode } from "./native.js";
 import type {
   RuntimeConnectionValidationInput,
   RuntimeConnectionValidationResult,
@@ -352,6 +354,7 @@ export async function createOpenCodeSession(
   input: RuntimeRunInput,
   logger?: OpenCodeApiLogger,
 ): Promise<RuntimeSession> {
+  assertOpenCodeNativeAdmission(input);
   const payload = await requestJson<OpenCodeSessionResponse>(input, {
     method: "POST",
     path: "/session",
@@ -369,6 +372,8 @@ export async function runOpenCodeApi(
   input: RuntimeRunInput,
   logger?: OpenCodeApiLogger,
 ): Promise<RuntimeRunResult> {
+  assertOpenCodeNativeAdmission(input, true);
+  if (input.execution?.nativeProcessScope) return runNativeOpenCode(input);
   const runtimeId = input.runtimeId;
   const providerId = input.providerId ?? "opencode";
 

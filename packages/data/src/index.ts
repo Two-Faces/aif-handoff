@@ -1,3 +1,59 @@
+export * from "./taskWorkspaces.js";
+export * from "./deviceHandoff.js";
+export {
+  createTaskDeviceProcessJournal,
+  getTaskDeviceProcess,
+  listTaskDeviceProcesses,
+  getTaskDeviceProcessRecovery,
+  recordTaskDeviceProcessRecovery,
+} from "./deviceProcesses.js";
+export {
+  assertTaskDeviceChatSession,
+  assertTaskDeviceChatProject,
+  getTaskDeviceChatRoot,
+  recordTaskDeviceNativeSession,
+  recordTaskDeviceRuntimeEvent,
+  canResumeTaskDeviceSession,
+  type TaskDeviceRuntimeIdentity,
+} from "./deviceSessions.js";
+import {
+  bindTaskDeviceChatSession,
+  assertTaskDeviceChatRuntimeWrite,
+  assertTaskDeviceNativeImport,
+  recordTaskDeviceNativeSession,
+  canResumeTaskDeviceSession,
+  type TaskDeviceRuntimeIdentity,
+} from "./deviceSessions.js";
+export {
+  getTaskDeviceGrant,
+  getTaskDeviceRun,
+  initializeTaskDeviceGrant,
+  issueTaskDeviceSuccessor,
+  receiveTaskDeviceSuccessor,
+  assertTaskDeviceExecution,
+  assertProjectDeviceExecution,
+  assertTasklessDeviceExecution,
+  getDeviceExecutionBlock,
+  withTaskDeviceExecution,
+  withTaskDeviceNativeExecution,
+  assertTaskDeviceNativeRuntime,
+  bindTaskDeviceExecution,
+  withProjectDeviceExecution,
+  createTaskDeviceRuntimeGuard,
+  invalidateTaskDeviceExecution,
+  currentTaskDeviceRunId,
+} from "./deviceExecution.js";
+export * from "./codeSnapshots.js";
+export * from "./snapshotTransfers.js";
+import { getTaskExecutionWorkspace, resolveRegisteredTaskRoot } from "./taskWorkspaces.js";
+import {
+  unmanagedTaskExecutionFilter,
+  availableTaskDeviceFilter,
+  currentTaskDeviceFilter,
+  withTaskDeviceMutation,
+  withCurrentTaskDeviceMutation,
+} from "./deviceExecution.js";
+
 import {
   and,
   asc,
@@ -27,6 +83,7 @@ import {
   generatePlanPath,
   getEnv,
   getProjectConfig,
+  taskCheckoutFilePath,
   isRuntimeTransport,
   logger as createLogger,
   normalizeRuntimeLimitSnapshot,
@@ -94,14 +151,33 @@ import {
 } from "./taskOwnership.js";
 import { transitionTaskStatus as transitionTaskStatusAtomic } from "./taskTransitions.js";
 import { createAuditEventValues } from "./audit.js";
+import { isPersonalProject, isPersonalTask } from "./personalMode.js";
+import {
+  withSharedMutation,
+  isReplicatedProject,
+  type SharedMutationOptions,
+} from "./syncMutations.js";
+import { projectIdForEntity } from "./syncDomain.js";
+import { taskSyncMetadata } from "./syncQueries.js";
+
+export * from "./personalMode.js";
+export * from "./devices.js";
+export * from "./projectBindings.js";
+export * from "./participantBindings.js";
+export {
+  ensureProjectSyncState,
+  getEntitySyncRevisions,
+  isReplicatedProject,
+  type SharedMutationOptions,
+} from "./syncMutations.js";
+export { resolveSyncConflict } from "./syncConflicts.js";
+export * from "./peers.js";
+export * from "./peerSync.js";
+export { listSyncConflicts } from "./syncJournal.js";
 
 export * from "./normalizeBacklogPositions.js";
 export * from "./github.js";
-export {
-  appendAuditEvent,
-  listAuditEvents,
-  type AppendAuditEventInput,
-} from "./audit.js";
+export { appendAuditEvent, listAuditEvents, type AppendAuditEventInput } from "./audit.js";
 export {
   authenticateParticipant,
   createParticipantSession,
@@ -169,6 +245,7 @@ export type CodexLimitHeadIndexRow = typeof codexLimitHeads.$inferSelect;
 export type CodexLimitHistoryIndexRow = typeof codexLimitHistory.$inferSelect;
 export type CodexIndexCursorRow = typeof codexIndexCursors.$inferSelect;
 export type HydratedTaskRow = TaskRow & {
+  personalMode?: boolean;
   assignees: TaskAssigneeSummary[];
   autoReviewState?: AutoReviewState | null;
   runtimeLimitSnapshot?: RuntimeLimitSnapshot | null;
@@ -221,12 +298,7 @@ export interface CreateRuntimeWarmupSessionInput extends RuntimeWarmupScopeInput
 export type TaskFieldsPatch = Partial<
   Omit<
     TaskRow,
-    | "id"
-    | "projectId"
-    | "createdAt"
-    | "status"
-    | "executionOwner"
-    | "ownershipRevision"
+    "id" | "projectId" | "createdAt" | "status" | "executionOwner" | "ownershipRevision"
   >
 > & {
   autoReviewState?: AutoReviewState | null;
@@ -234,6 +306,7 @@ export type TaskFieldsPatch = Partial<
 
 /** API-level update: domain types (attachments as array, tags as string[]). Serialization handled by data layer. */
 export type TaskFieldsUpdate = {
+  plan?: string | null;
   title?: string;
   description?: string;
   attachments?: unknown[];
@@ -304,7 +377,7 @@ function parseTaskRuntimeLimitSnapshot(
 }
 
 export function toTaskResponse(
-  task: TaskRow & { assignees?: TaskAssigneeSummary[] },
+  task: TaskRow & { assignees?: TaskAssigneeSummary[]; personalMode?: boolean },
   actionContext: TaskActionContext = LEGACY_TASK_ACTION_CONTEXT,
 ): Task {
   const {
@@ -321,6 +394,7 @@ export function toTaskResponse(
   return {
     ...rest,
     attachments: parseAttachments(attachments),
+    ...(task.personalMode ? taskSyncMetadata(task.projectId, task.id) : {}),
     tags: parseTags(tags),
     assignees,
     permissions: resolveTaskPermissions(
@@ -385,7 +459,10 @@ function parseStringRecord(value: unknown): Record<string, string> | null {
   return result;
 }
 
-function readOptionalString(value: Record<string, unknown>, key: string): string | null | undefined {
+function readOptionalString(
+  value: Record<string, unknown>,
+  key: string,
+): string | null | undefined {
   const raw = value[key];
   if (raw === null) return null;
   if (raw === undefined) return undefined;
@@ -502,10 +579,7 @@ function parseRuntimeLimitWindow(
   rawLength: number,
 ): RuntimeLimitWindow | null {
   if (!isObjectRecord(value) || typeof value.scope !== "string") {
-    log.warn(
-      { entity, entityId, index, rawLength },
-      "Malformed persisted runtime-limit window",
-    );
+    log.warn({ entity, entityId, index, rawLength }, "Malformed persisted runtime-limit window");
     return null;
   }
 
@@ -633,7 +707,10 @@ function parseAutoReviewState(raw: string | null | undefined): AutoReviewState |
   if (!raw) return null;
 
   const warnMalformed = (reason: string, extra: Record<string, unknown> = {}) => {
-    log.warn({ reason, rawLength: raw.length, ...extra }, "Malformed persisted auto-review payload");
+    log.warn(
+      { reason, rawLength: raw.length, ...extra },
+      "Malformed persisted auto-review payload",
+    );
   };
 
   try {
@@ -646,8 +723,7 @@ function parseAutoReviewState(raw: string | null | undefined): AutoReviewState |
     const candidate = parsed as Record<string, unknown>;
 
     const strategy =
-      typeof candidate.strategy === "string" &&
-      AUTO_REVIEW_STRATEGY_SET.has(candidate.strategy)
+      typeof candidate.strategy === "string" && AUTO_REVIEW_STRATEGY_SET.has(candidate.strategy)
         ? candidate.strategy
         : null;
     const iteration =
@@ -751,6 +827,12 @@ export function toCommentResponse(
     author: comment.author,
     participantId: comment.participantId,
     participant: comment.participant ?? null,
+    ...(comment.logicalAuthorId
+      ? {
+          logicalAuthorId: comment.logicalAuthorId,
+          authorDisplayNameSnapshot: comment.authorDisplayNameSnapshot,
+        }
+      : {}),
     message: comment.message,
     attachments: parseAttachments(comment.attachments),
     createdAt: comment.createdAt,
@@ -767,15 +849,13 @@ function taskCommentSelection() {
   };
 }
 
-function hydrateCommentSelection(
-  row: {
-    comment: CommentRow;
-    participantId: string | null;
-    participantDisplayName: string | null;
-    participantRole: "admin" | "member" | null;
-    participantActive: boolean | null;
-  },
-): HydratedCommentRow {
+function hydrateCommentSelection(row: {
+  comment: CommentRow;
+  participantId: string | null;
+  participantDisplayName: string | null;
+  participantRole: "admin" | "member" | null;
+  participantActive: boolean | null;
+}): HydratedCommentRow {
   if (
     row.participantId === null ||
     row.participantDisplayName === null ||
@@ -810,8 +890,12 @@ function findHydratedTaskComment(commentId: string): HydratedCommentRow | undefi
 
 function hydrateTaskRows(rows: TaskRow[]): HydratedTaskRow[] {
   const assigneesByTaskId = listTaskAssigneesByTaskIds(rows.map((row) => row.id));
+  const personal = new Map(
+    [...new Set(rows.map((row) => row.projectId))].map((id) => [id, isReplicatedProject(id)]),
+  );
   return rows.map((row) => ({
     ...row,
+    ...(personal.get(row.projectId) ? { personalMode: true } : {}),
     assignees: assigneesByTaskId.get(row.id) ?? [],
     autoReviewState: parseAutoReviewState(row.autoReviewStateJson),
     runtimeLimitSnapshot: parseTaskRuntimeLimitSnapshot(row.runtimeLimitSnapshotJson, row.id),
@@ -842,17 +926,44 @@ export function listTasks(
   return hydrateTaskRows(rows);
 }
 
-type TaskListItemRow = Pick<TaskRow,
-  | "id" | "projectId" | "title" | "description" | "status" | "priority" | "position"
-  | "autoMode" | "executionOwner" | "ownershipRevision"
-  | "skipReview" | "runPostVerify"
-  | "isFix" | "paused" | "roadmapAlias" | "tags"
-  | "runtimeProfileId" | "modelOverride"
-  | "blockedReason" | "blockedFromStatus" | "retryAfter" | "retryCount"
-  | "reworkRequested" | "reviewIterationCount" | "maxReviewIterations" | "manualReviewRequired"
-  | "runtimeLimitSnapshotJson" | "runtimeLimitUpdatedAt"
-  | "tokenInput" | "tokenOutput" | "tokenTotal" | "costUsd"
-  | "lastSyncedAt" | "scheduledAt" | "createdAt" | "updatedAt"
+type TaskListItemRow = Pick<
+  TaskRow,
+  | "id"
+  | "projectId"
+  | "title"
+  | "description"
+  | "status"
+  | "priority"
+  | "position"
+  | "autoMode"
+  | "executionOwner"
+  | "ownershipRevision"
+  | "skipReview"
+  | "runPostVerify"
+  | "isFix"
+  | "paused"
+  | "roadmapAlias"
+  | "tags"
+  | "runtimeProfileId"
+  | "modelOverride"
+  | "blockedReason"
+  | "blockedFromStatus"
+  | "retryAfter"
+  | "retryCount"
+  | "reworkRequested"
+  | "reviewIterationCount"
+  | "maxReviewIterations"
+  | "manualReviewRequired"
+  | "runtimeLimitSnapshotJson"
+  | "runtimeLimitUpdatedAt"
+  | "tokenInput"
+  | "tokenOutput"
+  | "tokenTotal"
+  | "costUsd"
+  | "lastSyncedAt"
+  | "scheduledAt"
+  | "createdAt"
+  | "updatedAt"
 > & { hasPlan: boolean | number };
 
 const TASK_LIST_COLUMNS = {
@@ -916,14 +1027,7 @@ export function toTaskListItem(
   assignees: TaskAssigneeSummary[] = [],
   actionContext: TaskActionContext = LEGACY_TASK_ACTION_CONTEXT,
 ): TaskListItem {
-  const {
-    tags,
-    runtimeLimitSnapshotJson,
-    hasPlan,
-    skipReview,
-    runPostVerify,
-    ...rest
-  } = row;
+  const { tags, runtimeLimitSnapshotJson, hasPlan, skipReview, runPostVerify, ...rest } = row;
   return {
     ...rest,
     tags: parseTags(tags),
@@ -962,15 +1066,17 @@ export function listTaskListItems(
     .all();
   const assigneesByTaskId = listTaskAssigneesByTaskIds(rows.map((row) => row.id));
 
-  rows.sort(compareTaskListRows);
-  log.debug({ projectId, count: rows.length, projection: "task-list" }, "Listed task list items");
-  return rows.map((row) =>
-    toTaskListItem(
-      row,
-      assigneesByTaskId.get(row.id) ?? [],
-      actionContext,
-    ),
+  const personal = isReplicatedProject(projectId);
+  rows.sort(
+    personal
+      ? (a, b) => a.position - b.position || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+      : compareTaskListRows,
   );
+  log.debug({ projectId, count: rows.length, projection: "task-list" }, "Listed task list items");
+  return rows.map((row) => ({
+    ...toTaskListItem(row, assigneesByTaskId.get(row.id) ?? [], actionContext),
+    ...(personal ? taskSyncMetadata(projectId, row.id) : {}),
+  }));
 }
 
 export function getMinBacklogPosition(projectId: string): number | null {
@@ -992,16 +1098,40 @@ export function getMaxBacklogPosition(projectId: string): number | null {
 }
 
 /** Summary projection — excludes heavy text fields for list/search responses. */
-export type TaskSummaryRow = Pick<TaskRow,
-  | "id" | "projectId" | "title" | "status" | "priority" | "position"
-  | "autoMode" | "executionOwner" | "ownershipRevision"
-  | "skipReview" | "runPostVerify"
-  | "isFix" | "paused" | "roadmapAlias" | "tags"
-  | "runtimeProfileId" | "modelOverride"
-  | "blockedReason" | "blockedFromStatus" | "retryAfter" | "retryCount"
-  | "reworkRequested" | "reviewIterationCount" | "maxReviewIterations" | "manualReviewRequired"
-  | "runtimeLimitSnapshotJson" | "runtimeLimitUpdatedAt"
-  | "tokenTotal" | "costUsd" | "lastSyncedAt" | "createdAt" | "updatedAt"
+export type TaskSummaryRow = Pick<
+  TaskRow,
+  | "id"
+  | "projectId"
+  | "title"
+  | "status"
+  | "priority"
+  | "position"
+  | "autoMode"
+  | "executionOwner"
+  | "ownershipRevision"
+  | "skipReview"
+  | "runPostVerify"
+  | "isFix"
+  | "paused"
+  | "roadmapAlias"
+  | "tags"
+  | "runtimeProfileId"
+  | "modelOverride"
+  | "blockedReason"
+  | "blockedFromStatus"
+  | "retryAfter"
+  | "retryCount"
+  | "reworkRequested"
+  | "reviewIterationCount"
+  | "maxReviewIterations"
+  | "manualReviewRequired"
+  | "runtimeLimitSnapshotJson"
+  | "runtimeLimitUpdatedAt"
+  | "tokenTotal"
+  | "costUsd"
+  | "lastSyncedAt"
+  | "createdAt"
+  | "updatedAt"
 > & { assignees?: TaskAssigneeSummary[] };
 
 const SUMMARY_COLUMNS = {
@@ -1050,12 +1180,14 @@ export interface PaginatedResult<T> {
  * List tasks with pagination and optional filters.
  * Returns summary rows (no plan, description, logs) to keep payloads small.
  */
-export function listTasksPaginated(options: {
-  projectId?: string;
-  status?: string;
-  limit?: number;
-  offset?: number;
-} & TaskOwnershipFilters): PaginatedResult<TaskSummaryRow> {
+export function listTasksPaginated(
+  options: {
+    projectId?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  } & TaskOwnershipFilters,
+): PaginatedResult<TaskSummaryRow> {
   const db = getDb();
   const lim = Math.min(options.limit ?? 20, 100);
   const off = options.offset ?? 0;
@@ -1067,11 +1199,7 @@ export function listTasksPaginated(options: {
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-  const total = db
-    .select({ count: count() })
-    .from(tasks)
-    .where(where)
-    .get()?.count ?? 0;
+  const total = db.select({ count: count() }).from(tasks).where(where).get()?.count ?? 0;
 
   const items = db
     .select(SUMMARY_COLUMNS)
@@ -1097,30 +1225,26 @@ export function listTasksPaginated(options: {
 /**
  * Search tasks with pagination. Returns summary rows.
  */
-export function searchTasksPaginated(options: {
-  query: string;
-  projectId?: string;
-  limit?: number;
-  offset?: number;
-} & TaskOwnershipFilters): PaginatedResult<TaskSummaryRow> {
+export function searchTasksPaginated(
+  options: {
+    query: string;
+    projectId?: string;
+    limit?: number;
+    offset?: number;
+  } & TaskOwnershipFilters,
+): PaginatedResult<TaskSummaryRow> {
   const db = getDb();
   const lim = Math.min(options.limit ?? 20, 50);
   const off = options.offset ?? 0;
   const pattern = `%${options.query}%`;
 
-  const conditions = [
-    or(like(tasks.title, pattern), like(tasks.description, pattern)),
-  ];
+  const conditions = [or(like(tasks.title, pattern), like(tasks.description, pattern))];
   if (options.projectId) conditions.push(eq(tasks.projectId, options.projectId));
   conditions.push(...buildTaskOwnershipConditions(options));
 
   const where = and(...conditions);
 
-  const total = db
-    .select({ count: count() })
-    .from(tasks)
-    .where(where)
-    .get()?.count ?? 0;
+  const total = db.select({ count: count() }).from(tasks).where(where).get()?.count ?? 0;
 
   const items = db
     .select(SUMMARY_COLUMNS)
@@ -1207,207 +1331,256 @@ export function createTask(input: {
   scheduledAt?: string | null;
   position?: number;
 }): HydratedTaskRow | undefined {
-  const db = getDb();
-  const id = crypto.randomUUID();
-  const now = new Date().toISOString();
-  const executionOwner = input.executionOwner ?? "ai";
-  const assigneeIds = [...new Set(input.assigneeIds ?? [])];
-  const actor = input.actor ?? {
-    kind: "system",
-    id: null,
-    displayNameSnapshot: "System",
-  };
+  return withSharedMutation(
+    { entityType: "task", projectId: input.projectId },
+    () => {
+      const db = getDb();
+      const personalMode = isPersonalProject(input.projectId);
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const executionOwner = input.executionOwner ?? "ai";
+      const assigneeIds = [...new Set(input.assigneeIds ?? [])];
+      const actor = input.actor ?? {
+        kind: "system",
+        id: null,
+        displayNameSnapshot: "System",
+      };
 
-  // Auto-compute planPath for full mode when no explicit path is provided
-  let resolvedPlanPath = input.planPath;
-  if (input.plannerMode === "full") {
-    const project = findProjectById(input.projectId);
-    const projectRoot = project?.rootPath ?? process.cwd();
-    const cfg = getProjectConfig(projectRoot);
-    const defaultPlanPath = cfg.paths.plan;
+      // Auto-compute planPath for full mode when no explicit path is provided
+      let resolvedPlanPath = input.planPath;
+      if (input.plannerMode === "full") {
+        const project = findProjectById(input.projectId);
+        const projectRoot = project?.rootPath ?? process.cwd();
+        const cfg = getProjectConfig(projectRoot);
+        const defaultPlanPath = cfg.paths.plan;
 
-    if (resolvedPlanPath === undefined || resolvedPlanPath === defaultPlanPath) {
-      resolvedPlanPath = generatePlanPath(input.title, "full", {
-        plansDir: cfg.paths.plans,
-        defaultPlanPath,
-      });
-      log.debug("Auto-generated plan path for full mode: %s", resolvedPlanPath);
-    }
-  }
+        if (resolvedPlanPath === undefined || resolvedPlanPath === defaultPlanPath) {
+          resolvedPlanPath = generatePlanPath(input.title, "full", {
+            plansDir: cfg.paths.plans,
+            defaultPlanPath,
+          });
+          log.debug("Auto-generated plan path for full mode: %s", resolvedPlanPath);
+        }
+      }
 
-  const assignees =
-    assigneeIds.length === 0
-      ? []
-      : db
-          .select({
-            participantId: participants.id,
-            displayName: participants.displayName,
-            role: participants.role,
-            active: participants.active,
-          })
-          .from(participants)
-          .where(inArray(participants.id, assigneeIds))
-          .orderBy(asc(participants.displayName), asc(participants.id))
-          .all();
-  const hasInvalidAssignees =
-    assignees.length !== assigneeIds.length ||
-    assignees.some((participant) => !participant.active);
-  if (
-    hasInvalidAssignees ||
-    (executionOwner === "ai" && assigneeIds.length > 0)
-  ) {
-    log.warn(
-      {
-        projectId: input.projectId,
-        executionOwner,
-        requestedAssigneeCount: assigneeIds.length,
-        activeAssigneeCount: assignees.filter((participant) => participant.active).length,
-      },
-      "Rejected task creation ownership",
-    );
-    return undefined;
-  }
-  const position =
-    input.position ??
-    (() => {
-      const maxPosition = getMaxBacklogPosition(input.projectId);
-      return (maxPosition ?? 1000) + 100;
-    })();
+      const assignees =
+        assigneeIds.length === 0
+          ? []
+          : db
+              .select({
+                participantId: participants.id,
+                displayName: participants.displayName,
+                role: participants.role,
+                active: participants.active,
+              })
+              .from(participants)
+              .where(inArray(participants.id, assigneeIds))
+              .orderBy(asc(participants.displayName), asc(participants.id))
+              .all();
+      const hasInvalidAssignees =
+        assignees.length !== assigneeIds.length ||
+        assignees.some((participant) => !participant.active);
+      if (hasInvalidAssignees || (executionOwner === "ai" && assigneeIds.length > 0)) {
+        log.warn(
+          {
+            projectId: input.projectId,
+            executionOwner,
+            requestedAssigneeCount: assigneeIds.length,
+            activeAssigneeCount: assignees.filter((participant) => participant.active).length,
+          },
+          "Rejected task creation ownership",
+        );
+        return undefined;
+      }
+      const position =
+        input.position ??
+        (() => {
+          const maxPosition = getMaxBacklogPosition(input.projectId);
+          return (maxPosition ?? 1000) + 100;
+        })();
 
-  db.transaction((tx) => {
-    tx.insert(tasks)
-      .values({
-      id,
-      projectId: input.projectId,
-      title: input.title,
-      description: input.description,
-      attachments: JSON.stringify(input.attachments ?? []),
-      priority: input.priority,
-      autoMode: input.autoMode,
-      executionOwner,
-      ownershipRevision: 0,
-      isFix: input.isFix,
-      plannerMode: input.plannerMode,
-      planPath: resolvedPlanPath,
-      planDocs: input.planDocs,
-      planTests: input.planTests,
-      skipReview: input.skipReview,
-      useSubagents: input.useSubagents,
-      runPlanImprove: input.runPlanImprove,
-      runPostVerify: input.runPostVerify,
-      autoQa: input.autoQa,
-      autoQaCheck: input.autoQaCheck,
-      maxReviewIterations: input.maxReviewIterations,
-      paused: input.paused,
-      runtimeProfileId: input.runtimeProfileId ?? null,
-      modelOverride: input.modelOverride ?? null,
-      runtimeOptionsJson:
-        input.runtimeOptions === undefined ? null : JSON.stringify(input.runtimeOptions),
-      roadmapAlias: input.roadmapAlias ?? null,
-      tags: JSON.stringify(input.tags ?? []),
-      scheduledAt: input.scheduledAt ?? null,
-      reworkRequested: false,
-      manualReviewRequired: false,
-      status: "backlog",
-      position,
-      lastHeartbeatAt: now,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .run();
-    if (executionOwner === "human" && assignees.length > 0) {
-      tx.insert(taskAssignments)
-        .values(
-          assignees.map((assignee) => ({
-            taskId: id,
-            participantId: assignee.participantId,
-            assignedByKind: actor.kind,
-            assignedById: actor.id,
-            assignedByDisplayNameSnapshot: actor.displayNameSnapshot,
+      db.transaction((tx) => {
+        tx.insert(tasks)
+          .values({
+            id,
+            projectId: input.projectId,
+            title: input.title,
+            description: input.description,
+            attachments: JSON.stringify(input.attachments ?? []),
+            priority: input.priority,
+            autoMode: personalMode ? false : input.autoMode,
+            executionOwner,
+            ownershipRevision: 0,
+            isFix: input.isFix,
+            plannerMode: input.plannerMode,
+            planPath: resolvedPlanPath,
+            planDocs: input.planDocs,
+            planTests: input.planTests,
+            skipReview: input.skipReview,
+            useSubagents: input.useSubagents,
+            runPlanImprove: input.runPlanImprove,
+            runPostVerify: input.runPostVerify,
+            autoQa: input.autoQa,
+            autoQaCheck: input.autoQaCheck,
+            maxReviewIterations: input.maxReviewIterations,
+            paused: personalMode ? true : input.paused,
+            runtimeProfileId: input.runtimeProfileId ?? null,
+            modelOverride: input.modelOverride ?? null,
+            runtimeOptionsJson:
+              input.runtimeOptions === undefined ? null : JSON.stringify(input.runtimeOptions),
+            roadmapAlias: input.roadmapAlias ?? null,
+            tags: JSON.stringify(input.tags ?? []),
+            scheduledAt: input.scheduledAt ?? null,
+            reworkRequested: false,
+            manualReviewRequired: false,
+            status: "backlog",
+            position,
+            lastHeartbeatAt: now,
             createdAt: now,
-          })),
-        )
-        .run();
-    }
-    tx.insert(taskExecutorHistory)
-      .values({
-        id: crypto.randomUUID(),
-        taskId: id,
-        taskTitleSnapshot: input.title,
-        ownershipRevision: 0,
-        executionOwner,
-        assigneesSnapshotJson: JSON.stringify(executionOwner === "human" ? assignees : []),
-        statusSnapshot: "backlog",
-        actorKind: actor.kind,
-        actorId: actor.id,
-        actorDisplayNameSnapshot: actor.displayNameSnapshot,
-        reason: "task_created",
-        createdAt: now,
-      })
-      .run();
-    tx.insert(auditEvents)
-      .values(
-        createAuditEventValues({
-          action: "task.created",
-          entityType: "task",
-          entityId: id,
-          taskId: id,
-          taskTitleSnapshot: input.title,
-          executionOwnerSnapshot: executionOwner,
-          assigneesSnapshot: executionOwner === "human" ? assignees : [],
-          statusSnapshot: "backlog",
-          actor,
-          metadata: { ownershipRevision: 0 },
-          createdAt: now,
-        }),
-      )
-      .run();
-  });
+            updatedAt: now,
+          })
+          .run();
+        if (executionOwner === "human" && assignees.length > 0) {
+          tx.insert(taskAssignments)
+            .values(
+              assignees.map((assignee) => ({
+                taskId: id,
+                participantId: assignee.participantId,
+                assignedByKind: actor.kind,
+                assignedById: actor.id,
+                assignedByDisplayNameSnapshot: actor.displayNameSnapshot,
+                createdAt: now,
+              })),
+            )
+            .run();
+        }
+        tx.insert(taskExecutorHistory)
+          .values({
+            id: crypto.randomUUID(),
+            taskId: id,
+            taskTitleSnapshot: input.title,
+            ownershipRevision: 0,
+            executionOwner,
+            assigneesSnapshotJson: JSON.stringify(executionOwner === "human" ? assignees : []),
+            statusSnapshot: "backlog",
+            actorKind: actor.kind,
+            actorId: actor.id,
+            actorDisplayNameSnapshot: actor.displayNameSnapshot,
+            reason: "task_created",
+            createdAt: now,
+          })
+          .run();
+        tx.insert(auditEvents)
+          .values(
+            createAuditEventValues({
+              action: "task.created",
+              entityType: "task",
+              entityId: id,
+              taskId: id,
+              taskTitleSnapshot: input.title,
+              executionOwnerSnapshot: executionOwner,
+              assigneesSnapshot: executionOwner === "human" ? assignees : [],
+              statusSnapshot: "backlog",
+              actor,
+              metadata: { ownershipRevision: 0 },
+              createdAt: now,
+            }),
+          )
+          .run();
+      });
 
-  return findTaskById(id);
+      return findTaskById(id);
+    },
+    { actor: input.actor },
+  );
 }
 
-export function updateTask(id: string, fields: TaskFieldsUpdate): TaskRow | undefined {
-  const {
-    attachments,
-    tags,
-    runtimeOptions,
-    autoReviewState,
-    executionOwner: _executionOwner,
-    ownershipRevision: _ownershipRevision,
-    assigneeIds: _assigneeIds,
-    ...rest
-  } = fields as TaskFieldsUpdate & {
-    executionOwner?: unknown;
-    ownershipRevision?: unknown;
-    assigneeIds?: unknown;
-  };
-  const patch: TaskFieldsPatch = { ...rest, updatedAt: new Date().toISOString() };
-  if (attachments !== undefined) {
-    patch.attachments = JSON.stringify(attachments);
-  }
-  if (tags !== undefined) {
-    patch.tags = JSON.stringify(tags);
-  }
-  if (runtimeOptions !== undefined) {
-    patch.runtimeOptionsJson = runtimeOptions === null ? null : JSON.stringify(runtimeOptions);
-  }
-  if (autoReviewState !== undefined) {
-    patch.autoReviewStateJson =
-      autoReviewState === null ? null : JSON.stringify(autoReviewState);
-  }
-  if (fields.runtimeProfileId !== undefined || fields.modelOverride !== undefined) {
-    log.debug(
-      {
-        taskId: id,
-        runtimeProfileId: fields.runtimeProfileId ?? null,
-        modelOverride: fields.modelOverride ?? null,
-      },
-      "Updated task runtime metadata",
-    );
-  }
-  getDb().update(tasks).set(patch).where(eq(tasks.id, id)).run();
-  return findTaskById(id);
+// Runtime outputs are fenced even if an error handler lost its async scope.
+// Human board/config edits remain possible and invalidate an in-flight run's input digest.
+const BOARD_EDITABLE_TASK_FIELDS = new Set([
+  "title",
+  "description",
+  "plan",
+  "priority",
+  "position",
+  "attachments",
+  "tags",
+  "paused",
+  "autoMode",
+  "scheduledAt",
+  "isFix",
+  "useSubagents",
+  "plannerMode",
+  "planDocs",
+  "planTests",
+  "skipReview",
+  "runPlanImprove",
+  "runPostVerify",
+  "runtimeProfileId",
+  "modelOverride",
+  "runtimeOptions",
+  "autoQa",
+  "roadmapAlias",
+  "executionOwner",
+  "ownershipRevision",
+  "assigneeIds",
+]);
+
+export function updateTask(
+  id: string,
+  fields: TaskFieldsUpdate,
+  syncOptions: SharedMutationOptions = {},
+): TaskRow | undefined {
+  return withSharedMutation(
+    {
+      entityType: "task",
+      entityId: id,
+      execution: Object.keys(fields).some((key) => !BOARD_EDITABLE_TASK_FIELDS.has(key)),
+    },
+    () => {
+      const {
+        attachments,
+        tags,
+        runtimeOptions,
+        autoReviewState,
+        executionOwner: _executionOwner,
+        ownershipRevision: _ownershipRevision,
+        assigneeIds: _assigneeIds,
+        ...rest
+      } = fields as TaskFieldsUpdate & {
+        executionOwner?: unknown;
+        ownershipRevision?: unknown;
+        assigneeIds?: unknown;
+      };
+      const patch: TaskFieldsPatch = { ...rest, updatedAt: new Date().toISOString() };
+      if (attachments !== undefined) {
+        patch.attachments = JSON.stringify(attachments);
+      }
+      if (tags !== undefined) {
+        patch.tags = JSON.stringify(tags);
+      }
+      if (runtimeOptions !== undefined) {
+        patch.runtimeOptionsJson = runtimeOptions === null ? null : JSON.stringify(runtimeOptions);
+      }
+      if (autoReviewState !== undefined) {
+        patch.autoReviewStateJson =
+          autoReviewState === null ? null : JSON.stringify(autoReviewState);
+      }
+      if (fields.runtimeProfileId !== undefined || fields.modelOverride !== undefined) {
+        log.debug(
+          {
+            taskId: id,
+            runtimeProfileId: fields.runtimeProfileId ?? null,
+            modelOverride: fields.modelOverride ?? null,
+          },
+          "Updated task runtime metadata",
+        );
+      }
+      getDb().update(tasks).set(patch).where(eq(tasks.id, id)).run();
+      return findTaskById(id);
+    },
+    syncOptions,
+  );
 }
 
 /**
@@ -1419,11 +1592,13 @@ export function updateTask(id: string, fields: TaskFieldsUpdate): TaskRow | unde
  * and never spawn two runtime runs. Bumps `updatedAt` to mirror updateTask.
  */
 export function tryStartQaRun(id: string): boolean {
+  if (isPersonalTask(id)) return false;
   const result = getDb()
     .update(tasks)
     .set({ qaStatus: "running", updatedAt: new Date().toISOString() })
     .where(
       and(
+        currentTaskDeviceFilter(true),
         eq(tasks.id, id),
         eq(tasks.executionOwner, "ai"),
         ne(tasks.qaStatus, "running"),
@@ -1435,6 +1610,7 @@ export function tryStartQaRun(id: string): boolean {
 
 /** Atomically claim QA Check and clear outputs from the previous run. */
 export function tryStartQaCheckRun(id: string): boolean {
+  if (isPersonalTask(id)) return false;
   const result = getDb()
     .update(tasks)
     .set({
@@ -1445,6 +1621,7 @@ export function tryStartQaCheckRun(id: string): boolean {
     })
     .where(
       and(
+        currentTaskDeviceFilter(true),
         eq(tasks.id, id),
         eq(tasks.executionOwner, "ai"),
         ne(tasks.qaCheckStatus, "running"),
@@ -1467,7 +1644,7 @@ export function resetStaleQaRuns(): number {
   const result = getDb()
     .update(tasks)
     .set({ qaStatus: "error", updatedAt: new Date().toISOString() })
-    .where(eq(tasks.qaStatus, "running"))
+    .where(and(unmanagedTaskExecutionFilter(), eq(tasks.qaStatus, "running")))
     .run();
   return result.changes;
 }
@@ -1477,7 +1654,7 @@ export function resetStaleQaCheckRuns(): number {
   const result = getDb()
     .update(tasks)
     .set({ qaCheckStatus: "error", updatedAt: new Date().toISOString() })
-    .where(eq(tasks.qaCheckStatus, "running"))
+    .where(and(unmanagedTaskExecutionFilter(), eq(tasks.qaCheckStatus, "running")))
     .run();
   if (result.changes > 0) {
     log.warn({ recoveredRuns: result.changes }, "Recovered stale QA Check runs");
@@ -1490,31 +1667,43 @@ export function resetStaleQaCheckRuns(): number {
  * is metadata, not content, and must not disturb "updated at" sort views.
  */
 export function updateTaskPositionOnly(id: string, position: number): void {
-  getDb().update(tasks).set({ position }).where(eq(tasks.id, id)).run();
+  return withSharedMutation({ entityType: "task", entityId: id }, () => {
+    getDb().update(tasks).set({ position }).where(eq(tasks.id, id)).run();
+  });
 }
 
-export function setTaskFields(id: string, fields: TaskFieldsPatch): void {
-  const {
-    autoReviewState,
-    status: _status,
-    executionOwner: _executionOwner,
-    ownershipRevision: _ownershipRevision,
-    ...rest
-  } = fields as TaskFieldsPatch & {
-    status?: unknown;
-    executionOwner?: unknown;
-    ownershipRevision?: unknown;
-  };
-  const patch: Partial<TaskRow> & { autoReviewStateJson?: string | null } = { ...rest };
-  if (autoReviewState !== undefined) {
-    patch.autoReviewStateJson =
-      autoReviewState === null ? null : JSON.stringify(autoReviewState);
-  }
-  if (Object.keys(patch).length === 0) {
-    log.warn({ taskId: id }, "Ignored task field update with no mutable fields");
-    return;
-  }
-  getDb().update(tasks).set(patch).where(eq(tasks.id, id)).run();
+export function setTaskFields(
+  id: string,
+  fields: TaskFieldsPatch,
+  syncOptions: SharedMutationOptions = {},
+): void {
+  return withSharedMutation(
+    { entityType: "task", entityId: id, execution: true },
+    () => {
+      const {
+        autoReviewState,
+        status: _status,
+        executionOwner: _executionOwner,
+        ownershipRevision: _ownershipRevision,
+        ...rest
+      } = fields as TaskFieldsPatch & {
+        status?: unknown;
+        executionOwner?: unknown;
+        ownershipRevision?: unknown;
+      };
+      const patch: Partial<TaskRow> & { autoReviewStateJson?: string | null } = { ...rest };
+      if (autoReviewState !== undefined) {
+        patch.autoReviewStateJson =
+          autoReviewState === null ? null : JSON.stringify(autoReviewState);
+      }
+      if (Object.keys(patch).length === 0) {
+        log.warn({ taskId: id }, "Ignored task field update with no mutable fields");
+        return;
+      }
+      getDb().update(tasks).set(patch).where(eq(tasks.id, id)).run();
+    },
+    syncOptions,
+  );
 }
 
 export function persistTaskRuntimeLimitSnapshot(
@@ -1534,15 +1723,21 @@ export function persistTaskRuntimeLimitSnapshot(
     },
     "Persisting task runtime limit snapshot",
   );
-  getDb()
-    .update(tasks)
-    .set({
-      runtimeLimitSnapshotJson: serializeRuntimeLimitSnapshot(normalizedSnapshot),
-      runtimeLimitUpdatedAt: persistedAt,
-    })
-    .where(eq(tasks.id, taskId))
-    .run();
-  return findTaskById(taskId);
+  return withTaskDeviceMutation(
+    taskId,
+    () => {
+      getDb()
+        .update(tasks)
+        .set({
+          runtimeLimitSnapshotJson: serializeRuntimeLimitSnapshot(normalizedSnapshot),
+          runtimeLimitUpdatedAt: persistedAt,
+        })
+        .where(eq(tasks.id, taskId))
+        .run();
+      return findTaskById(taskId);
+    },
+    true,
+  );
 }
 
 export function clearTaskRuntimeLimitSnapshot(
@@ -1550,21 +1745,29 @@ export function clearTaskRuntimeLimitSnapshot(
   persistedAt = new Date().toISOString(),
 ): TaskRow | undefined {
   log.debug({ taskId, persistedAt }, "Clearing task runtime limit snapshot");
-  getDb()
-    .update(tasks)
-    .set({
-      runtimeLimitSnapshotJson: null,
-      runtimeLimitUpdatedAt: persistedAt,
-    })
-    .where(eq(tasks.id, taskId))
-    .run();
-  return findTaskById(taskId);
+  return withTaskDeviceMutation(
+    taskId,
+    () => {
+      getDb()
+        .update(tasks)
+        .set({
+          runtimeLimitSnapshotJson: null,
+          runtimeLimitUpdatedAt: persistedAt,
+        })
+        .where(eq(tasks.id, taskId))
+        .run();
+      return findTaskById(taskId);
+    },
+    true,
+  );
 }
 
 export function deleteTask(id: string): void {
-  const db = getDb();
-  db.delete(tasks).where(eq(tasks.id, id)).run();
-  db.delete(taskComments).where(eq(taskComments.taskId, id)).run();
+  return withSharedMutation({ entityType: "task", entityId: id, deleting: true }, () => {
+    const db = getDb();
+    db.delete(tasks).where(eq(tasks.id, id)).run();
+    db.delete(taskComments).where(eq(taskComments.taskId, id)).run();
+  });
 }
 
 export function listTaskComments(taskId: string): HydratedCommentRow[] {
@@ -1586,42 +1789,57 @@ export function createTaskComment(input: {
   attachments?: unknown[];
   createdAt?: string;
 }): HydratedCommentRow | undefined {
-  const id = crypto.randomUUID();
-  const createdAt = input.createdAt ?? new Date().toISOString();
-  getDb()
-    .insert(taskComments)
-    .values({
-      id,
-      taskId: input.taskId,
-      author: input.author,
-      participantId: input.participantId ?? null,
-      message: input.message,
-      attachments: JSON.stringify(input.attachments ?? []),
-      createdAt,
-    })
-    .run();
-  return findHydratedTaskComment(id);
+  return withTaskDeviceMutation(
+    input.taskId,
+    () =>
+      withSharedMutation(
+        { entityType: "comment", projectId: projectIdForEntity("task", input.taskId) ?? undefined },
+        () => {
+          const id = crypto.randomUUID();
+          const createdAt = input.createdAt ?? new Date().toISOString();
+          getDb()
+            .insert(taskComments)
+            .values({
+              id,
+              taskId: input.taskId,
+              author: input.author,
+              participantId: input.participantId ?? null,
+              message: input.message,
+              attachments: JSON.stringify(input.attachments ?? []),
+              createdAt,
+            })
+            .run();
+          return findHydratedTaskComment(id);
+        },
+      ),
+    input.author === "agent",
+  );
 }
 
 export function updateTaskComment(
   commentId: string,
   patch: { attachments?: unknown[] },
+  syncOptions: SharedMutationOptions = {},
 ): HydratedCommentRow | undefined {
-  const sets: Record<string, unknown> = {};
-  if (patch.attachments !== undefined) {
-    sets.attachments = JSON.stringify(patch.attachments);
-  }
-  if (Object.keys(sets).length === 0) return findHydratedTaskComment(commentId);
-  getDb()
-    .update(taskComments)
-    .set(sets)
-    .where(eq(taskComments.id, commentId))
-    .run();
-  return findHydratedTaskComment(commentId);
+  return withSharedMutation(
+    { entityType: "comment", entityId: commentId },
+    () => {
+      const sets: Record<string, unknown> = {};
+      if (patch.attachments !== undefined) {
+        sets.attachments = JSON.stringify(patch.attachments);
+      }
+      if (Object.keys(sets).length === 0) return findHydratedTaskComment(commentId);
+      getDb().update(taskComments).set(sets).where(eq(taskComments.id, commentId)).run();
+      return findHydratedTaskComment(commentId);
+    },
+    syncOptions,
+  );
 }
 
 export function getLatestHumanComment(taskId: string): HydratedCommentRow | undefined {
-  return listTaskComments(taskId).filter((comment) => comment.author === "human").at(-1);
+  return listTaskComments(taskId)
+    .filter((comment) => comment.author === "human")
+    .at(-1);
 }
 
 export function getLatestReworkComment(taskId: string): HydratedCommentRow | undefined {
@@ -1651,8 +1869,7 @@ function ensureAppSettingsRow(): AppSettingsRow {
 
   const now = new Date().toISOString();
   log.debug({ appSettingsId: APP_SETTINGS_ID }, "Seeding missing singleton app settings row");
-  db
-    .insert(appSettings)
+  db.insert(appSettings)
     .values({
       id: APP_SETTINGS_ID,
       createdAt: now,
@@ -1700,11 +1917,7 @@ export function updateAppSettings(input: UpdateAppSettingsInput): AppSettingsRow
     "Updating app settings runtime defaults",
   );
 
-  getDb()
-    .update(appSettings)
-    .set(patch)
-    .where(eq(appSettings.id, APP_SETTINGS_ID))
-    .run();
+  getDb().update(appSettings).set(patch).where(eq(appSettings.id, APP_SETTINGS_ID)).run();
 
   return ensureAppSettingsRow();
 }
@@ -1943,6 +2156,7 @@ export function findProjectById(id: string): ProjectRow | undefined {
 export function createProject(input: {
   name: string;
   rootPath: string;
+  personalMode?: boolean;
   plannerMaxBudgetUsd?: number | null;
   planCheckerMaxBudgetUsd?: number | null;
   implementerMaxBudgetUsd?: number | null;
@@ -1953,38 +2167,49 @@ export function createProject(input: {
   defaultReviewRuntimeProfileId?: string | null;
   defaultChatRuntimeProfileId?: string | null;
 }): ProjectRow | undefined {
-  const id = crypto.randomUUID();
-  const now = new Date().toISOString();
-  log.debug(
+  return withSharedMutation(
     {
-      projectId: id,
-      defaultTaskRuntimeProfileId: input.defaultTaskRuntimeProfileId ?? null,
-      defaultPlanRuntimeProfileId: input.defaultPlanRuntimeProfileId ?? null,
-      defaultReviewRuntimeProfileId: input.defaultReviewRuntimeProfileId ?? null,
-      defaultChatRuntimeProfileId: input.defaultChatRuntimeProfileId ?? null,
+      entityType: "project",
+      createPersonalProject: input.personalMode === true || getEnv().AIF_PERSONAL_MODE,
     },
-    "Creating project runtime defaults",
+    () => {
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      log.debug(
+        {
+          projectId: id,
+          defaultTaskRuntimeProfileId: input.defaultTaskRuntimeProfileId ?? null,
+          defaultPlanRuntimeProfileId: input.defaultPlanRuntimeProfileId ?? null,
+          defaultReviewRuntimeProfileId: input.defaultReviewRuntimeProfileId ?? null,
+          defaultChatRuntimeProfileId: input.defaultChatRuntimeProfileId ?? null,
+        },
+        "Creating project runtime defaults",
+      );
+      getDb()
+        .insert(projects)
+        .values({
+          id,
+          name: input.name,
+          rootPath: input.rootPath,
+          personalMode: input.personalMode === true || getEnv().AIF_PERSONAL_MODE,
+          publicationPolicy:
+            input.personalMode === true || getEnv().AIF_PERSONAL_MODE ? "local_only" : "standard",
+          plannerMaxBudgetUsd: input.plannerMaxBudgetUsd ?? null,
+          planCheckerMaxBudgetUsd: input.planCheckerMaxBudgetUsd ?? null,
+          implementerMaxBudgetUsd: input.implementerMaxBudgetUsd ?? null,
+          reviewSidecarMaxBudgetUsd: input.reviewSidecarMaxBudgetUsd ?? null,
+          parallelEnabled: input.parallelEnabled ?? false,
+          defaultTaskRuntimeProfileId: input.defaultTaskRuntimeProfileId ?? null,
+          defaultPlanRuntimeProfileId: input.defaultPlanRuntimeProfileId ?? null,
+          defaultReviewRuntimeProfileId: input.defaultReviewRuntimeProfileId ?? null,
+          defaultChatRuntimeProfileId: input.defaultChatRuntimeProfileId ?? null,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+      return findProjectById(id);
+    },
   );
-  getDb()
-    .insert(projects)
-    .values({
-      id,
-      name: input.name,
-      rootPath: input.rootPath,
-      plannerMaxBudgetUsd: input.plannerMaxBudgetUsd ?? null,
-      planCheckerMaxBudgetUsd: input.planCheckerMaxBudgetUsd ?? null,
-      implementerMaxBudgetUsd: input.implementerMaxBudgetUsd ?? null,
-      reviewSidecarMaxBudgetUsd: input.reviewSidecarMaxBudgetUsd ?? null,
-      parallelEnabled: input.parallelEnabled ?? false,
-      defaultTaskRuntimeProfileId: input.defaultTaskRuntimeProfileId ?? null,
-      defaultPlanRuntimeProfileId: input.defaultPlanRuntimeProfileId ?? null,
-      defaultReviewRuntimeProfileId: input.defaultReviewRuntimeProfileId ?? null,
-      defaultChatRuntimeProfileId: input.defaultChatRuntimeProfileId ?? null,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .run();
-  return findProjectById(id);
 }
 
 export function updateProject(
@@ -2003,81 +2228,95 @@ export function updateProject(
     defaultChatRuntimeProfileId?: string | null;
   },
 ): ProjectRow | undefined {
-  const patch: Partial<ProjectRow> = {
-    name: input.name,
-    rootPath: input.rootPath,
-    plannerMaxBudgetUsd: input.plannerMaxBudgetUsd ?? null,
-    planCheckerMaxBudgetUsd: input.planCheckerMaxBudgetUsd ?? null,
-    implementerMaxBudgetUsd: input.implementerMaxBudgetUsd ?? null,
-    reviewSidecarMaxBudgetUsd: input.reviewSidecarMaxBudgetUsd ?? null,
-    parallelEnabled: input.parallelEnabled ?? false,
-    updatedAt: new Date().toISOString(),
-  };
-  if (input.defaultTaskRuntimeProfileId !== undefined) {
-    patch.defaultTaskRuntimeProfileId = input.defaultTaskRuntimeProfileId;
-  }
-  if (input.defaultPlanRuntimeProfileId !== undefined) {
-    patch.defaultPlanRuntimeProfileId = input.defaultPlanRuntimeProfileId;
-  }
-  if (input.defaultReviewRuntimeProfileId !== undefined) {
-    patch.defaultReviewRuntimeProfileId = input.defaultReviewRuntimeProfileId;
-  }
-  if (input.defaultChatRuntimeProfileId !== undefined) {
-    patch.defaultChatRuntimeProfileId = input.defaultChatRuntimeProfileId;
-  }
+  return withSharedMutation({ entityType: "project", entityId: id }, () => {
+    const patch: Partial<ProjectRow> = {
+      name: input.name,
+      rootPath: input.rootPath,
+      plannerMaxBudgetUsd: input.plannerMaxBudgetUsd ?? null,
+      planCheckerMaxBudgetUsd: input.planCheckerMaxBudgetUsd ?? null,
+      implementerMaxBudgetUsd: input.implementerMaxBudgetUsd ?? null,
+      reviewSidecarMaxBudgetUsd: input.reviewSidecarMaxBudgetUsd ?? null,
+      parallelEnabled: input.parallelEnabled ?? false,
+      updatedAt: new Date().toISOString(),
+    };
+    if (input.defaultTaskRuntimeProfileId !== undefined) {
+      patch.defaultTaskRuntimeProfileId = input.defaultTaskRuntimeProfileId;
+    }
+    if (input.defaultPlanRuntimeProfileId !== undefined) {
+      patch.defaultPlanRuntimeProfileId = input.defaultPlanRuntimeProfileId;
+    }
+    if (input.defaultReviewRuntimeProfileId !== undefined) {
+      patch.defaultReviewRuntimeProfileId = input.defaultReviewRuntimeProfileId;
+    }
+    if (input.defaultChatRuntimeProfileId !== undefined) {
+      patch.defaultChatRuntimeProfileId = input.defaultChatRuntimeProfileId;
+    }
 
-  log.debug(
-    {
-      projectId: id,
-      defaultTaskRuntimeProfileId: patch.defaultTaskRuntimeProfileId ?? null,
-      defaultPlanRuntimeProfileId: patch.defaultPlanRuntimeProfileId ?? null,
-      defaultReviewRuntimeProfileId: patch.defaultReviewRuntimeProfileId ?? null,
-      defaultChatRuntimeProfileId: patch.defaultChatRuntimeProfileId ?? null,
-    },
-    "Updating project runtime defaults",
-  );
-  getDb()
-    .update(projects)
-    .set(patch)
-    .where(eq(projects.id, id))
-    .run();
-  return findProjectById(id);
+    log.debug(
+      {
+        projectId: id,
+        defaultTaskRuntimeProfileId: patch.defaultTaskRuntimeProfileId ?? null,
+        defaultPlanRuntimeProfileId: patch.defaultPlanRuntimeProfileId ?? null,
+        defaultReviewRuntimeProfileId: patch.defaultReviewRuntimeProfileId ?? null,
+        defaultChatRuntimeProfileId: patch.defaultChatRuntimeProfileId ?? null,
+      },
+      "Updating project runtime defaults",
+    );
+    getDb().update(projects).set(patch).where(eq(projects.id, id)).run();
+    return findProjectById(id);
+  });
 }
 
 export function updateProjectOrganization(
   id: string,
   input: UpdateProjectOrganizationInput,
 ): ProjectRow | undefined {
-  const existing = findProjectById(id);
-  if (!existing) return undefined;
+  return withSharedMutation({ entityType: "project", entityId: id }, () => {
+    const existing = findProjectById(id);
+    if (!existing) return undefined;
 
-  const patch: Partial<ProjectRow> = { updatedAt: new Date().toISOString() };
-  if (input.pinned !== undefined) {
-    patch.pinnedAt = input.pinned ? (existing.pinnedAt ?? new Date().toISOString()) : null;
-  }
-  if (input.groupName !== undefined) {
-    patch.groupName = input.groupName?.trim() || null;
-  }
+    const patch: Partial<ProjectRow> = { updatedAt: new Date().toISOString() };
+    if (input.pinned !== undefined) {
+      patch.pinnedAt = input.pinned ? (existing.pinnedAt ?? new Date().toISOString()) : null;
+    }
+    if (input.groupName !== undefined) {
+      patch.groupName = input.groupName?.trim() || null;
+    }
 
-  log.debug(
-    {
-      projectId: id,
-      pinned: patch.pinnedAt != null,
-      groupName: patch.groupName,
-    },
-    "[FIX:147] Updating project organization",
-  );
-  getDb().update(projects).set(patch).where(eq(projects.id, id)).run();
-  const updated = findProjectById(id);
-  log.debug(
-    { projectId: id, updated: updated != null },
-    "[FIX:147] Project organization updated",
-  );
-  return updated;
+    log.debug(
+      {
+        projectId: id,
+        pinned: patch.pinnedAt != null,
+        groupName: patch.groupName,
+      },
+      "[FIX:147] Updating project organization",
+    );
+    getDb().update(projects).set(patch).where(eq(projects.id, id)).run();
+    const updated = findProjectById(id);
+    log.debug(
+      { projectId: id, updated: updated != null },
+      "[FIX:147] Project organization updated",
+    );
+    return updated;
+  });
 }
 
 export function deleteProject(id: string): void {
-  getDb().delete(projects).where(eq(projects.id, id)).run();
+  return withSharedMutation({ entityType: "project", entityId: id, deleting: true }, () => {
+    if (isPersonalProject(id)) {
+      getDb()
+        .delete(taskComments)
+        .where(
+          inArray(
+            taskComments.taskId,
+            getDb().select({ id: tasks.id }).from(tasks).where(eq(tasks.projectId, id)),
+          ),
+        )
+        .run();
+      getDb().delete(tasks).where(eq(tasks.projectId, id)).run();
+    }
+    getDb().delete(projects).where(eq(projects.id, id)).run();
+  });
 }
 
 export function findProjectByTaskId(taskId: string): ProjectRow | undefined {
@@ -2093,16 +2332,50 @@ export function persistTaskPlanForTask(input: {
   projectRoot?: string;
   isFix?: boolean;
   planPath?: string;
+  expectedSyncRevisions?: import("@aif/shared").SyncRevisions;
+  actor?: AuditActor;
 }): { updatedAt: string } {
-  return persistTaskPlan({
-    db: getDb(),
-    taskId: input.taskId,
-    planText: input.planText,
-    updatedAt: input.updatedAt,
-    projectRoot: input.projectRoot,
-    isFix: input.isFix,
-    planPath: input.planPath,
-  });
+  return withSharedMutation(
+    { entityType: "task", entityId: input.taskId, execution: !isPersonalTask(input.taskId) },
+    () => {
+      if (isPersonalTask(input.taskId)) {
+        const updatedAt = input.updatedAt ?? new Date().toISOString();
+        getDb()
+          .update(tasks)
+          .set({ plan: input.planText, updatedAt, lastSyncedAt: updatedAt })
+          .where(eq(tasks.id, input.taskId))
+          .run();
+        return { updatedAt };
+      }
+      const workspace = getTaskExecutionWorkspace(input.taskId);
+      const executionRoot = workspace
+        ? resolveRegisteredTaskRoot(input.taskId, input.projectRoot ?? workspace.worktreePath)
+        : input.projectRoot;
+      let effectiveIsFix = input.isFix;
+      let effectivePlanPath = input.planPath;
+      if (workspace && executionRoot) {
+        const task = getDb().select().from(tasks).where(eq(tasks.id, input.taskId)).get();
+        const config = getProjectConfig(executionRoot);
+        effectiveIsFix = input.isFix ?? task?.isFix;
+        const path = effectiveIsFix
+          ? config.paths.fix_plan
+          : input.planPath || task?.planPath || config.paths.plan;
+        // Pass the checked path through: supplying isFix can suppress the shared
+        // helper's metadata lookup, otherwise it could select a different path.
+        effectivePlanPath = taskCheckoutFilePath(executionRoot, path);
+      }
+      return persistTaskPlan({
+        db: getDb(),
+        taskId: input.taskId,
+        planText: input.planText,
+        updatedAt: input.updatedAt,
+        projectRoot: executionRoot,
+        isFix: effectiveIsFix,
+        planPath: effectivePlanPath,
+      });
+    },
+    { expected: input.expectedSyncRevisions, actor: input.actor },
+  );
 }
 
 export function findCoordinatorTaskCandidate(stage: CoordinatorStage): TaskRow | undefined {
@@ -2133,8 +2406,20 @@ function coordinatorAnyStageFilter() {
   );
 }
 
+function executableTaskProjectFilter() {
+  return getEnv().AIF_PERSONAL_MODE
+    ? sql`0`
+    : and(
+        availableTaskDeviceFilter(),
+        notInArray(
+          tasks.projectId,
+          getDb().select({ id: projects.id }).from(projects).where(eq(projects.personalMode, true)),
+        ),
+      );
+}
 function unlockedCoordinatorTaskFilter(nowIso: string) {
   return and(
+    executableTaskProjectFilter(),
     eq(tasks.paused, false),
     or(sql`${tasks.lockedBy} IS NULL`, lte(tasks.lockedUntil, nowIso)),
   );
@@ -2219,20 +2504,21 @@ export function listCoordinatorActionableProjectIds(
 
 /** Atomically claim a task for processing. Returns true if claim succeeded. */
 export function claimTask(taskId: string, coordinatorId: string, lockDurationMs: number): boolean {
+  if (isPersonalTask(taskId)) return false;
   const nowIso = new Date().toISOString();
   const lockedUntil = new Date(Date.now() + lockDurationMs).toISOString();
 
   const result = getDb()
     .update(tasks)
     .set({ lockedBy: coordinatorId, lockedUntil })
-    .where(and(
-      eq(tasks.id, taskId),
-      eq(tasks.executionOwner, "ai"),
-      or(
-        sql`${tasks.lockedBy} IS NULL`,
-        lte(tasks.lockedUntil, nowIso),
+    .where(
+      and(
+        availableTaskDeviceFilter(),
+        eq(tasks.id, taskId),
+        eq(tasks.executionOwner, "ai"),
+        or(sql`${tasks.lockedBy} IS NULL`, lte(tasks.lockedUntil, nowIso)),
       ),
-    ))
+    )
     .run();
 
   return result.changes > 0;
@@ -2245,9 +2531,11 @@ export function claimTask(taskId: string, coordinatorId: string, lockDurationMs:
 export function claimCoordinatorTaskIfEligible(
   input: CoordinatorTaskClaimInput,
 ): TaskRow | undefined {
+  if (isPersonalTask(input.taskId)) return undefined;
   const nowIso = new Date().toISOString();
   const lockedUntil = new Date(Date.now() + input.lockDurationMs).toISOString();
   const conditions = [
+    availableTaskDeviceFilter(),
     eq(tasks.id, input.taskId),
     eq(tasks.projectId, input.expectedProjectId),
     eq(tasks.status, input.expectedStatus),
@@ -2287,6 +2575,10 @@ export function blockTaskForRuntimeGateIfEligible(input: {
   const nowIso = input.persistedAt ?? new Date().toISOString();
   const normalizedSnapshot = input.snapshot ? normalizeRuntimeLimitSnapshot(input.snapshot) : null;
   const conditions = [
+    executableTaskProjectFilter(),
+    // The pre-claim quota probe has no run scope. It may skip a managed
+    // candidate, but cannot publish status/results on its behalf.
+    unmanagedTaskExecutionFilter(),
     eq(tasks.id, input.taskId),
     eq(tasks.status, input.expectedStatus),
     eq(tasks.executionOwner, "ai"),
@@ -2368,6 +2660,7 @@ export function claimBacklogTaskForAdvance(
     baseSha: string | null;
   },
 ): boolean {
+  if (isPersonalTask(taskId)) return false;
   const nowIso = new Date().toISOString();
   return getDb().transaction((tx) => {
     const task = tx.select().from(tasks).where(eq(tasks.id, taskId)).get();
@@ -2399,6 +2692,7 @@ export function claimBacklogTaskForAdvance(
       })
       .where(
         and(
+          unmanagedTaskExecutionFilter(),
           eq(tasks.id, taskId),
           eq(tasks.status, "backlog"),
           eq(tasks.paused, false),
@@ -2528,29 +2822,35 @@ export function hasActiveLockedTaskForProject(projectId: string): boolean {
   const row = getDb()
     .select({ cnt: count() })
     .from(tasks)
-    .where(and(
-      eq(tasks.projectId, projectId),
-      eq(tasks.executionOwner, "ai"),
-      isNotNull(tasks.lockedBy),
-      gt(tasks.lockedUntil, nowIso),
-    ))
+    .where(
+      and(
+        eq(tasks.projectId, projectId),
+        eq(tasks.executionOwner, "ai"),
+        isNotNull(tasks.lockedBy),
+        gt(tasks.lockedUntil, nowIso),
+      ),
+    )
     .get();
   return (row?.cnt ?? 0) > 0;
 }
 
 /** Extend lock expiry for a task owned by this coordinator. */
-export function renewTaskClaim(taskId: string, coordinatorId: string, lockDurationMs: number): void {
+export function renewTaskClaim(
+  taskId: string,
+  coordinatorId: string,
+  lockDurationMs: number,
+): void {
   const lockedUntil = new Date(Date.now() + lockDurationMs).toISOString();
   getDb()
     .update(tasks)
     .set({ lockedUntil })
-    .where(and(eq(tasks.id, taskId), eq(tasks.lockedBy, coordinatorId)))
+    .where(and(currentTaskDeviceFilter(), eq(tasks.id, taskId), eq(tasks.lockedBy, coordinatorId)))
     .run();
 }
 
 /** Release a task claim after processing completes. */
 export function releaseTaskClaim(taskId: string, coordinatorId?: string): void {
-  const conditions = [eq(tasks.id, taskId)];
+  const conditions = [unmanagedTaskExecutionFilter(), eq(tasks.id, taskId)];
   if (coordinatorId != null) {
     conditions.push(eq(tasks.lockedBy, coordinatorId));
   }
@@ -2564,29 +2864,32 @@ export function releaseTaskClaim(taskId: string, coordinatorId?: string): void {
 /** Release expired or abandoned task claims. Returns count of released claims. */
 export function releaseStaleTaskClaims(): number {
   const nowIso = new Date().toISOString();
-  // Heartbeat older than 5 minutes means the process is dead
+  // Legacy recovery only. A stale heartbeat is never proof of a managed run's exit.
   const heartbeatDeadline = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
   const result = getDb()
     .update(tasks)
     .set({ lockedBy: null, lockedUntil: null })
-    .where(and(
-      isNotNull(tasks.lockedBy),
-      or(
-        // Lock TTL expired
-        lte(tasks.lockedUntil, nowIso),
-        // Process died: heartbeat stale, task still in-progress, and not freshly claimed
-        and(
-          inArray(tasks.status, ["planning", "improve", "implementing", "review", "verify"]),
-          // Ensure task was claimed at least 5 min ago (avoid race with fresh claims)
-          lte(tasks.updatedAt, heartbeatDeadline),
-          or(
-            sql`${tasks.lastHeartbeatAt} IS NULL`,
-            lte(tasks.lastHeartbeatAt, heartbeatDeadline),
+    .where(
+      and(
+        unmanagedTaskExecutionFilter(),
+        isNotNull(tasks.lockedBy),
+        or(
+          // Lock TTL expired
+          lte(tasks.lockedUntil, nowIso),
+          // Process died: heartbeat stale, task still in-progress, and not freshly claimed
+          and(
+            inArray(tasks.status, ["planning", "improve", "implementing", "review", "verify"]),
+            // Ensure task was claimed at least 5 min ago (avoid race with fresh claims)
+            lte(tasks.updatedAt, heartbeatDeadline),
+            or(
+              sql`${tasks.lastHeartbeatAt} IS NULL`,
+              lte(tasks.lastHeartbeatAt, heartbeatDeadline),
+            ),
           ),
         ),
       ),
-    ))
+    )
     .run();
   return result.changes;
 }
@@ -2597,6 +2900,8 @@ export function listDueBlockedExternalTasks(nowIso: string): TaskRow[] {
     .from(tasks)
     .where(
       and(
+        executableTaskProjectFilter(),
+        unmanagedTaskExecutionFilter(),
         eq(tasks.status, "blocked_external"),
         eq(tasks.executionOwner, "ai"),
         eq(tasks.paused, false),
@@ -2616,6 +2921,8 @@ export function listDueScheduledTasks(nowIso: string): TaskRow[] {
     .from(tasks)
     .where(
       and(
+        executableTaskProjectFilter(),
+        unmanagedTaskExecutionFilter(),
         eq(tasks.status, "backlog"),
         eq(tasks.executionOwner, "ai"),
         eq(tasks.paused, false),
@@ -2630,24 +2937,24 @@ export function listDueScheduledTasks(nowIso: string): TaskRow[] {
 
 /** Clear scheduledAt after firing; bumps updatedAt. */
 export function clearScheduledAt(taskId: string): void {
-  log.debug({ taskId }, "Clearing scheduledAt");
-  const nowIso = new Date().toISOString();
-  getDb()
-    .update(tasks)
-    .set({ scheduledAt: null, updatedAt: nowIso })
-    .where(eq(tasks.id, taskId))
-    .run();
+  return withSharedMutation({ entityType: "task", entityId: taskId }, () => {
+    log.debug({ taskId }, "Clearing scheduledAt");
+    const nowIso = new Date().toISOString();
+    getDb()
+      .update(tasks)
+      .set({ scheduledAt: null, updatedAt: nowIso })
+      .where(eq(tasks.id, taskId))
+      .run();
+  });
 }
 
 /** Set or clear scheduledAt. Caller validates the ISO string upstream. */
 export function updateScheduledAt(taskId: string, scheduledAt: string | null): void {
-  log.debug({ taskId, scheduledAt }, "Updating scheduledAt");
-  const nowIso = new Date().toISOString();
-  getDb()
-    .update(tasks)
-    .set({ scheduledAt, updatedAt: nowIso })
-    .where(eq(tasks.id, taskId))
-    .run();
+  return withSharedMutation({ entityType: "task", entityId: taskId }, () => {
+    log.debug({ taskId, scheduledAt }, "Updating scheduledAt");
+    const nowIso = new Date().toISOString();
+    getDb().update(tasks).set({ scheduledAt, updatedAt: nowIso }).where(eq(tasks.id, taskId)).run();
+  });
 }
 
 /** Read the auto-queue flag for a project. Returns false for unknown projects. */
@@ -2662,7 +2969,12 @@ export function getAutoQueueMode(projectId: string): boolean {
 
 /** Projects with `autoQueueMode = true`. Used by the coordinator's auto-advance pass. */
 export function listAutoQueueProjects(): ProjectRow[] {
-  return getDb().select().from(projects).where(eq(projects.autoQueueMode, true)).all();
+  if (getEnv().AIF_PERSONAL_MODE) return [];
+  return getDb()
+    .select()
+    .from(projects)
+    .where(and(eq(projects.autoQueueMode, true), eq(projects.personalMode, false)))
+    .all();
 }
 
 /** Toggle the project-level auto-queue flag. */
@@ -2688,14 +3000,13 @@ export function nextBacklogTaskByPosition(projectId: string): TaskRow | undefine
     .from(tasks)
     .where(
       and(
+        executableTaskProjectFilter(),
+        unmanagedTaskExecutionFilter(),
         eq(tasks.projectId, projectId),
         eq(tasks.status, "backlog"),
         eq(tasks.executionOwner, "ai"),
         eq(tasks.paused, false),
-        or(
-          isNull(tasks.scheduledAt),
-          lte(tasks.scheduledAt, nowIso),
-        ),
+        or(isNull(tasks.scheduledAt), lte(tasks.scheduledAt, nowIso)),
       ),
     )
     .orderBy(asc(tasks.position), asc(tasks.createdAt), asc(tasks.id))
@@ -2710,14 +3021,13 @@ export function listStaleInProgressTasks(): TaskRow[] {
     .from(tasks)
     .where(
       and(
+        executableTaskProjectFilter(),
+        unmanagedTaskExecutionFilter(),
         inArray(tasks.status, ["planning", "improve", "implementing", "review", "verify"]),
         eq(tasks.executionOwner, "ai"),
         eq(tasks.paused, false),
         // Skip tasks with active (non-expired) locks — they're being processed
-        or(
-          sql`${tasks.lockedBy} IS NULL`,
-          lte(tasks.lockedUntil, nowIso),
-        ),
+        or(sql`${tasks.lockedBy} IS NULL`, lte(tasks.lockedUntil, nowIso)),
       ),
     )
     .all();
@@ -2772,13 +3082,29 @@ export function updateTaskStatus(
   }
 }
 
-export function saveTaskSessionId(taskId: string, sessionId: string): void {
-  setTaskFields(taskId, { sessionId });
+export function saveTaskSessionId(
+  taskId: string,
+  sessionId: string,
+  identity?: TaskDeviceRuntimeIdentity,
+): void {
+  withTaskDeviceMutation(
+    taskId,
+    () => {
+      if (identity) recordTaskDeviceNativeSession(sessionId, identity);
+      setTaskFields(taskId, { sessionId });
+    },
+    true,
+  );
 }
 
-export function getTaskSessionId(taskId: string): string | null {
+export function getTaskSessionId(
+  taskId: string,
+  identity?: TaskDeviceRuntimeIdentity,
+): string | null {
   const task = findTaskById(taskId);
-  return task?.sessionId ?? null;
+  return task?.sessionId && canResumeTaskDeviceSession(taskId, task.sessionId, identity)
+    ? task.sessionId
+    : null;
 }
 
 export function saveTaskActiveRuntimeSelection(
@@ -2791,9 +3117,7 @@ export function saveTaskActiveRuntimeSelection(
   });
 }
 
-export function getTaskActiveRuntimeSelection(
-  taskId: string,
-): TaskActiveRuntimeSelection | null {
+export function getTaskActiveRuntimeSelection(taskId: string): TaskActiveRuntimeSelection | null {
   const task = findTaskById(taskId);
   if (!task?.activeRuntimeSelectionJson) return null;
 
@@ -2828,18 +3152,24 @@ export function incrementTaskTokenUsage(
   const delta = parseTaskTokenUsage(usage);
   if (delta.total === 0 && delta.costUsd === 0) return delta;
 
-  getDb()
-    .update(tasks)
-    .set({
-      tokenInput: sql<number>`coalesce(${tasks.tokenInput}, 0) + ${delta.input}`,
-      tokenOutput: sql<number>`coalesce(${tasks.tokenOutput}, 0) + ${delta.output}`,
-      tokenTotal: sql<number>`coalesce(${tasks.tokenTotal}, 0) + ${delta.total}`,
-      costUsd: sql<number>`coalesce(${tasks.costUsd}, 0) + ${delta.costUsd}`,
-    })
-    .where(eq(tasks.id, taskId))
-    .run();
+  return withTaskDeviceMutation(
+    taskId,
+    () => {
+      getDb()
+        .update(tasks)
+        .set({
+          tokenInput: sql<number>`coalesce(${tasks.tokenInput}, 0) + ${delta.input}`,
+          tokenOutput: sql<number>`coalesce(${tasks.tokenOutput}, 0) + ${delta.output}`,
+          tokenTotal: sql<number>`coalesce(${tasks.tokenTotal}, 0) + ${delta.total}`,
+          costUsd: sql<number>`coalesce(${tasks.costUsd}, 0) + ${delta.costUsd}`,
+        })
+        .where(eq(tasks.id, taskId))
+        .run();
 
-  return delta;
+      return delta;
+    },
+    true,
+  );
 }
 
 export function incrementProjectTokenUsage(
@@ -2867,21 +3197,23 @@ export function incrementChatSessionTokenUsage(
   chatSessionId: string,
   usage: Record<string, unknown> | null | undefined,
 ) {
-  const delta = parseTaskTokenUsage(usage);
-  if (delta.total === 0 && delta.costUsd === 0) return delta;
+  return withCurrentTaskDeviceMutation(() => {
+    const delta = parseTaskTokenUsage(usage);
+    if (delta.total === 0 && delta.costUsd === 0) return delta;
 
-  getDb()
-    .update(chatSessions)
-    .set({
-      tokenInput: sql<number>`coalesce(${chatSessions.tokenInput}, 0) + ${delta.input}`,
-      tokenOutput: sql<number>`coalesce(${chatSessions.tokenOutput}, 0) + ${delta.output}`,
-      tokenTotal: sql<number>`coalesce(${chatSessions.tokenTotal}, 0) + ${delta.total}`,
-      costUsd: sql<number>`coalesce(${chatSessions.costUsd}, 0) + ${delta.costUsd}`,
-    })
-    .where(eq(chatSessions.id, chatSessionId))
-    .run();
+    getDb()
+      .update(chatSessions)
+      .set({
+        tokenInput: sql<number>`coalesce(${chatSessions.tokenInput}, 0) + ${delta.input}`,
+        tokenOutput: sql<number>`coalesce(${chatSessions.tokenOutput}, 0) + ${delta.output}`,
+        tokenTotal: sql<number>`coalesce(${chatSessions.tokenTotal}, 0) + ${delta.total}`,
+        costUsd: sql<number>`coalesce(${chatSessions.costUsd}, 0) + ${delta.costUsd}`,
+      })
+      .where(eq(chatSessions.id, chatSessionId))
+      .run();
 
-  return delta;
+    return delta;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -3061,12 +3393,7 @@ export function searchTasks(
 ): HydratedTaskRow[] {
   const db = getDb();
   const pattern = `%${query}%`;
-  const conditions = [
-    or(
-      like(tasks.title, pattern),
-      like(tasks.description, pattern),
-    ),
-  ];
+  const conditions = [or(like(tasks.title, pattern), like(tasks.description, pattern))];
   if (projectId) {
     conditions.push(eq(tasks.projectId, projectId));
   }
@@ -3118,14 +3445,8 @@ function runtimeWarmupScopeConditions(input: RuntimeWarmupScopeInput) {
   ];
 }
 
-export function findRuntimeWarmupSessionById(
-  id: string,
-): RuntimeWarmupSessionRow | undefined {
-  return getDb()
-    .select()
-    .from(runtimeWarmupSessions)
-    .where(eq(runtimeWarmupSessions.id, id))
-    .get();
+export function findRuntimeWarmupSessionById(id: string): RuntimeWarmupSessionRow | undefined {
+  return getDb().select().from(runtimeWarmupSessions).where(eq(runtimeWarmupSessions.id, id)).get();
 }
 
 export function createRuntimeWarmupSession(
@@ -3240,9 +3561,7 @@ export function clearActiveRuntimeWarmupSessions(
   return result.changes;
 }
 
-export function expireStaleRuntimeWarmupSessions(
-  nowIso = new Date().toISOString(),
-): number {
+export function expireStaleRuntimeWarmupSessions(nowIso = new Date().toISOString()): number {
   const result = getDb()
     .update(runtimeWarmupSessions)
     .set({ status: "expired", updatedAt: nowIso })
@@ -3370,15 +3689,19 @@ export function getRuntimeProfileResponseById(id: string): RuntimeProfile | unde
   return toRuntimeProfileResponse(row, usageState);
 }
 
-export function listRuntimeProfiles(input: {
-  projectId?: string;
-  includeGlobal?: boolean;
-  enabledOnly?: boolean;
-} = {}): RuntimeProfileRow[] {
+export function listRuntimeProfiles(
+  input: {
+    projectId?: string;
+    includeGlobal?: boolean;
+    enabledOnly?: boolean;
+  } = {},
+): RuntimeProfileRow[] {
   const conditions = [];
   if (input.projectId) {
     if (input.includeGlobal) {
-      conditions.push(or(eq(runtimeProfiles.projectId, input.projectId), isNull(runtimeProfiles.projectId)));
+      conditions.push(
+        or(eq(runtimeProfiles.projectId, input.projectId), isNull(runtimeProfiles.projectId)),
+      );
     } else {
       conditions.push(eq(runtimeProfiles.projectId, input.projectId));
     }
@@ -3404,11 +3727,13 @@ export function listRuntimeProfiles(input: {
     .all();
 }
 
-export function listRuntimeProfileResponses(input: {
-  projectId?: string;
-  includeGlobal?: boolean;
-  enabledOnly?: boolean;
-} = {}): RuntimeProfile[] {
+export function listRuntimeProfileResponses(
+  input: {
+    projectId?: string;
+    includeGlobal?: boolean;
+    enabledOnly?: boolean;
+  } = {},
+): RuntimeProfile[] {
   const rows = listRuntimeProfiles(input);
   const usageByProfileId = findLatestRuntimeProfileUsageByIds(rows.map((row) => row.id));
   return rows.map((row) => toRuntimeProfileResponse(row, usageByProfileId.get(row.id) ?? null));
@@ -3430,7 +3755,9 @@ function getProjectRuntimeProfileId(
   return project?.defaultTaskRuntimeProfileId ?? null;
 }
 
-export function createRuntimeProfile(input: CreateRuntimeProfileInput): RuntimeProfileRow | undefined {
+export function createRuntimeProfile(
+  input: CreateRuntimeProfileInput,
+): RuntimeProfileRow | undefined {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   log.debug(
@@ -3560,7 +3887,10 @@ export function isRuntimeProfileVisibleToProject(input: {
   runtimeProfileId: string | null;
 }): boolean {
   if (input.runtimeProfileId == null) {
-    log.debug({ projectId: input.projectId, runtimeProfileId: null }, "Null runtime profile is visible");
+    log.debug(
+      { projectId: input.projectId, runtimeProfileId: null },
+      "Null runtime profile is visible",
+    );
     return true;
   }
 
@@ -3614,10 +3944,14 @@ export function updateProjectRuntimeDefaults(
 ): ProjectRow | undefined {
   log.debug({ projectId, ...input }, "Updating project runtime default profiles");
   const patch: Record<string, unknown> = { updatedAt: new Date().toISOString() };
-  if (input.defaultTaskRuntimeProfileId !== undefined) patch.defaultTaskRuntimeProfileId = input.defaultTaskRuntimeProfileId;
-  if (input.defaultPlanRuntimeProfileId !== undefined) patch.defaultPlanRuntimeProfileId = input.defaultPlanRuntimeProfileId;
-  if (input.defaultReviewRuntimeProfileId !== undefined) patch.defaultReviewRuntimeProfileId = input.defaultReviewRuntimeProfileId;
-  if (input.defaultChatRuntimeProfileId !== undefined) patch.defaultChatRuntimeProfileId = input.defaultChatRuntimeProfileId;
+  if (input.defaultTaskRuntimeProfileId !== undefined)
+    patch.defaultTaskRuntimeProfileId = input.defaultTaskRuntimeProfileId;
+  if (input.defaultPlanRuntimeProfileId !== undefined)
+    patch.defaultPlanRuntimeProfileId = input.defaultPlanRuntimeProfileId;
+  if (input.defaultReviewRuntimeProfileId !== undefined)
+    patch.defaultReviewRuntimeProfileId = input.defaultReviewRuntimeProfileId;
+  if (input.defaultChatRuntimeProfileId !== undefined)
+    patch.defaultChatRuntimeProfileId = input.defaultChatRuntimeProfileId;
   getDb().update(projects).set(patch).where(eq(projects.id, projectId)).run();
   return findProjectById(projectId);
 }
@@ -3661,24 +3995,32 @@ export function updateChatSessionRuntime(
     runtimeSessionId?: string | null;
   },
 ): ChatSessionRow | undefined {
-  log.debug(
-    {
-      sessionId,
-      runtimeProfileId: input.runtimeProfileId ?? null,
-      hasRuntimeSessionId: input.runtimeSessionId !== undefined,
-    },
-    "Updating chat session runtime metadata",
-  );
-  getDb()
-    .update(chatSessions)
-    .set({
-      ...(input.runtimeProfileId !== undefined ? { runtimeProfileId: input.runtimeProfileId } : {}),
-      ...(input.runtimeSessionId !== undefined ? { runtimeSessionId: input.runtimeSessionId } : {}),
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(chatSessions.id, sessionId))
-    .run();
-  return findChatSessionById(sessionId);
+  return withCurrentTaskDeviceMutation(() => {
+    assertTaskDeviceChatRuntimeWrite(sessionId);
+    assertTaskDeviceNativeImport(input.runtimeSessionId);
+    log.debug(
+      {
+        sessionId,
+        runtimeProfileId: input.runtimeProfileId ?? null,
+        hasRuntimeSessionId: input.runtimeSessionId !== undefined,
+      },
+      "Updating chat session runtime metadata",
+    );
+    getDb()
+      .update(chatSessions)
+      .set({
+        ...(input.runtimeProfileId !== undefined
+          ? { runtimeProfileId: input.runtimeProfileId }
+          : {}),
+        ...(input.runtimeSessionId !== undefined
+          ? { runtimeSessionId: input.runtimeSessionId }
+          : {}),
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(chatSessions.id, sessionId))
+      .run();
+    return findChatSessionById(sessionId);
+  });
 }
 
 export interface RuntimeLimitGateDecision {
@@ -3960,10 +4302,7 @@ export function resolveEffectiveRuntimeProfilesForTasks(
 
       results.set(task.id, {
         source: candidate.source,
-        profile: toRuntimeProfileResponse(
-          profile,
-          usageByProfileId.get(profile.id) ?? null,
-        ),
+        profile: toRuntimeProfileResponse(profile, usageByProfileId.get(profile.id) ?? null),
         taskRuntimeProfileId,
         projectRuntimeProfileId,
         systemRuntimeProfileId,
@@ -4036,28 +4375,32 @@ export function createChatSession(input: {
   runtimeProfileId?: string | null;
   runtimeSessionId?: string | null;
 }): ChatSessionRow | undefined {
-  const id = crypto.randomUUID();
-  const now = new Date().toISOString();
-  log.debug(
-    {
-      projectId: input.projectId,
-      runtimeProfileId: input.runtimeProfileId ?? null,
-    },
-    "Creating chat session",
-  );
-  getDb()
-    .insert(chatSessions)
-    .values({
-      id,
-      projectId: input.projectId,
-      title: input.title ?? "New Chat",
-      runtimeProfileId: input.runtimeProfileId ?? null,
-      runtimeSessionId: input.runtimeSessionId ?? null,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .run();
-  return findChatSessionById(id);
+  return withCurrentTaskDeviceMutation(() => {
+    assertTaskDeviceNativeImport(input.runtimeSessionId);
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    log.debug(
+      {
+        projectId: input.projectId,
+        runtimeProfileId: input.runtimeProfileId ?? null,
+      },
+      "Creating chat session",
+    );
+    getDb()
+      .insert(chatSessions)
+      .values({
+        id,
+        projectId: input.projectId,
+        title: input.title ?? "New Chat",
+        runtimeProfileId: input.runtimeProfileId ?? null,
+        runtimeSessionId: input.runtimeSessionId ?? null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+    bindTaskDeviceChatSession(id, input.projectId);
+    return findChatSessionById(id);
+  });
 }
 
 export function findChatSessionById(id: string): ChatSessionRow | undefined {
@@ -4084,28 +4427,40 @@ export function updateChatSession(
     runtimeSessionId?: string | null;
   },
 ): ChatSessionRow | undefined {
-  log.debug(
-    {
-      sessionId: id,
-      runtimeProfileId: fields.runtimeProfileId ?? null,
-      hasRuntimeSessionId: fields.runtimeSessionId !== undefined,
-    },
-    "Updating chat session runtime metadata",
-  );
-  const patch: Record<string, unknown> = { updatedAt: new Date().toISOString() };
-  if (fields.title !== undefined) patch.title = fields.title;
-  if (fields.agentSessionId !== undefined) patch.agentSessionId = fields.agentSessionId;
-  if (fields.runtimeProfileId !== undefined) patch.runtimeProfileId = fields.runtimeProfileId;
-  if (fields.runtimeSessionId !== undefined) patch.runtimeSessionId = fields.runtimeSessionId;
-  getDb().update(chatSessions).set(patch).where(eq(chatSessions.id, id)).run();
-  return findChatSessionById(id);
+  return withCurrentTaskDeviceMutation(() => {
+    if (
+      fields.runtimeSessionId !== undefined ||
+      fields.agentSessionId !== undefined ||
+      fields.runtimeProfileId !== undefined
+    ) {
+      assertTaskDeviceChatRuntimeWrite(id);
+      assertTaskDeviceNativeImport(fields.runtimeSessionId ?? fields.agentSessionId);
+    }
+    log.debug(
+      {
+        sessionId: id,
+        runtimeProfileId: fields.runtimeProfileId ?? null,
+        hasRuntimeSessionId: fields.runtimeSessionId !== undefined,
+      },
+      "Updating chat session runtime metadata",
+    );
+    const patch: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+    if (fields.title !== undefined) patch.title = fields.title;
+    if (fields.agentSessionId !== undefined) patch.agentSessionId = fields.agentSessionId;
+    if (fields.runtimeProfileId !== undefined) patch.runtimeProfileId = fields.runtimeProfileId;
+    if (fields.runtimeSessionId !== undefined) patch.runtimeSessionId = fields.runtimeSessionId;
+    getDb().update(chatSessions).set(patch).where(eq(chatSessions.id, id)).run();
+    return findChatSessionById(id);
+  });
 }
 
 export function deleteChatSession(id: string): void {
-  log.debug("deleteChatSession id=%s", id);
-  const db = getDb();
-  db.delete(chatMessages).where(eq(chatMessages.sessionId, id)).run();
-  db.delete(chatSessions).where(eq(chatSessions.id, id)).run();
+  return withCurrentTaskDeviceMutation(() => {
+    log.debug("deleteChatSession id=%s", id);
+    const db = getDb();
+    db.delete(chatMessages).where(eq(chatMessages.sessionId, id)).run();
+    db.delete(chatSessions).where(eq(chatSessions.id, id)).run();
+  });
 }
 
 export function createChatMessage(input: {
@@ -4114,21 +4469,24 @@ export function createChatMessage(input: {
   content: string;
   attachments?: ChatMessageAttachment[];
 }): ChatMessageRow | undefined {
-  const id = crypto.randomUUID();
-  const now = new Date().toISOString();
-  log.debug("createChatMessage sessionId=%s role=%s", input.sessionId, input.role);
-  getDb()
-    .insert(chatMessages)
-    .values({
-      id,
-      sessionId: input.sessionId,
-      role: input.role,
-      content: input.content,
-      attachments: input.attachments?.length ? JSON.stringify(input.attachments) : null,
-      createdAt: now,
-    })
-    .run();
-  return getDb().select().from(chatMessages).where(eq(chatMessages.id, id)).get();
+  return withCurrentTaskDeviceMutation(() => {
+    assertTaskDeviceChatRuntimeWrite(input.sessionId);
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    log.debug("createChatMessage sessionId=%s role=%s", input.sessionId, input.role);
+    getDb()
+      .insert(chatMessages)
+      .values({
+        id,
+        sessionId: input.sessionId,
+        role: input.role,
+        content: input.content,
+        attachments: input.attachments?.length ? JSON.stringify(input.attachments) : null,
+        createdAt: now,
+      })
+      .run();
+    return getDb().select().from(chatMessages).where(eq(chatMessages.id, id)).get();
+  });
 }
 
 export function listChatMessages(sessionId: string): ChatMessageRow[] {
@@ -4142,12 +4500,15 @@ export function listChatMessages(sessionId: string): ChatMessageRow[] {
 }
 
 export function updateChatSessionTimestamp(id: string): void {
-  log.debug("updateChatSessionTimestamp id=%s", id);
-  getDb()
-    .update(chatSessions)
-    .set({ updatedAt: new Date().toISOString() })
-    .where(eq(chatSessions.id, id))
-    .run();
+  return withCurrentTaskDeviceMutation(() => {
+    assertTaskDeviceChatRuntimeWrite(id);
+    log.debug("updateChatSessionTimestamp id=%s", id);
+    getDb()
+      .update(chatSessions)
+      .set({ updatedAt: new Date().toISOString() })
+      .where(eq(chatSessions.id, id))
+      .run();
+  });
 }
 
 // - Codex index repository (session read-model + limit overlays) -
@@ -4619,9 +4980,7 @@ export function pruneStaleCodexSessionIndexRows(input: {
   };
 }
 
-export function listCodexLimitHeadScopesByFilePaths(
-  filePaths: string[],
-): CodexLimitHeadScopeRow[] {
+export function listCodexLimitHeadScopesByFilePaths(filePaths: string[]): CodexLimitHeadScopeRow[] {
   if (filePaths.length === 0) {
     return [];
   }
@@ -4930,18 +5289,28 @@ export function listCodexSessionsByProjectRoot(input: {
   const limit = sanitizeCodexCount(input.limit, 20);
   const projectRoot = normalizeCodexProjectRoot(input.projectRoot);
   const whereClause =
-    projectRoot == null ? isNull(codexSessions.projectRoot) : eq(codexSessions.projectRoot, projectRoot);
+    projectRoot == null
+      ? isNull(codexSessions.projectRoot)
+      : eq(codexSessions.projectRoot, projectRoot);
 
   const rows = getDb()
     .select()
     .from(codexSessions)
     .where(whereClause)
-    .orderBy(desc(codexSessions.sourceUpdatedAt), desc(codexSessions.mtimeMs), desc(codexSessions.updatedAt))
+    .orderBy(
+      desc(codexSessions.sourceUpdatedAt),
+      desc(codexSessions.mtimeMs),
+      desc(codexSessions.updatedAt),
+    )
     .limit(limit)
     .all();
 
   log.debug(
-    { scope: projectRoot == null ? "global" : "project", requestedLimit: limit, returnedCount: rows.length },
+    {
+      scope: projectRoot == null ? "global" : "project",
+      requestedLimit: limit,
+      returnedCount: rows.length,
+    },
     "Listed codex indexed sessions for project scope",
   );
   return rows;
@@ -4954,7 +5323,10 @@ export function findCodexSessionFilePathBySessionId(sessionId: string): string |
     .where(eq(codexSessions.sessionId, sessionId))
     .get();
   if (sessionRow?.filePath) {
-    log.debug({ sessionId, source: "codex_sessions", hit: true }, "Resolved codex session file path");
+    log.debug(
+      { sessionId, source: "codex_sessions", hit: true },
+      "Resolved codex session file path",
+    );
     return sessionRow.filePath;
   }
 

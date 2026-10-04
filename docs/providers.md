@@ -13,6 +13,191 @@ This guide describes the runtime/provider model introduced by `@aif/runtime`.
 - runtime-profile resolution (`resolveRuntimeProfile`) with capability checks and redaction helpers
 - adapter surfaces for run/resume/session/model-discovery operations
 
+## Native process supervision (P14 in progress)
+
+The internal `executeTaskDeviceIsolatedRuntime` service now reserves an entire
+fresh invocation with durable `isolated_runtime_v1` admission. It accepts Claude
+SDK/CLI/API, text-only Codex/OpenRouter API and owned OpenCode API through their
+existing isolated native paths. Caller callbacks, hooks, session reuse and
+external execution services are excluded. Codex CLI/SDK/app-server still need
+configuration isolation before they can acquire this whole-run admission.
+Existing transport tests and native receipts alone do not retroactively admit
+old runs. Normal workflows, public actions and personal AI remain disabled.
+The new source checkpoint/release native Mac subset is pending.
+
+The internal Windows supervisor in `@aif/runtime` launches a process directly
+inside a Job Object and confirms that the job is empty before producing a stop
+receipt. It requires durable callbacks before child creation and before resuming
+the suspended child. It does not select support by Windows version: unavailable
+native APIs or policy restrictions fail before the target runs.
+
+The internal Mac backend uses a dedicated launchd resource coalition and a
+private control socket. It checks a suspended `posix_spawn` child before the
+durable preparation callback may authorize resume, then independently verifies
+that the coalition including its host is empty. UID, boot-session UUID and native
+process incarnation bind local recovery. The installed clang/macOS SDK is needed
+for launch and recovery. On 2026-10-03 the user supplied passing Mac logs for
+54 runtime tests (including all nine native process cases) and both native API
+journal/recovery tests after the fixes in `2f62264`. This accepts the targeted
+backend suite; it is separate from the earlier fixed-fixture capability probe.
+
+The first internal transport integration connects **Codex app-server stdio** to
+this supervisor. `runTaskDeviceAppServer` requires an existing host-owned task run,
+the exact registered checkout and a new session. It is not called by routes,
+chat or the worker yet. A host-only `nativeProcessScope` permits one launch and
+awaits native stop plus journal acknowledgement before returning a result. Abort
+retains the fenced run even after its native process unit stops. Start timeouts
+do not retry; dynamic model discovery cannot spawn an uncontained helper.
+The user supplied passing Mac logs on 2026-10-03 for all 42 targeted tests:
+16 scope/parity, 21 app-server protocol and 5 real native/journal cases using an
+offline provider fixture. This accepts the internal increment, not full P14/M2.
+
+The second internal integration adds **Codex CLI** through `runTaskDeviceCli`.
+It uses generated `exec --json` arguments, a new session and the same task/root
+and durable journal gates. Custom argv and unknown-transport fallback are denied.
+The batch collector waits for native proof and drained stdout/stderr, including
+early process completion. It preserves split UTF-8, caps combined output at
+16 MiB and requires both zero exit and a completed turn. Abort, protocol failures
+and callback errors reject the run without retry. Global session-limit file scans
+are skipped; JSONL usage remains `PARTIAL`. Targeted Mac CLI acceptance passed
+on 2026-10-03 from the user's logs: 85 runtime + 9 native API/journal tests using
+an offline provider fixture, including CLI success, cancellation and timeout.
+This does not establish complete P14/M2 acceptance or a live provider run.
+The output contract follows [Codex non-interactive JSONL](https://learn.chatgpt.com/docs/non-interactive-mode).
+
+The next internal integration adds **Codex SDK** through `runTaskDeviceSdk`.
+The installed SDK owns its subprocess launch and exposes no public spawn hook,
+so the real SDK runs in a fixed native Node worker. Its CLI and descendants stay
+in the same native unit. Host callbacks retain task fencing; a worker-complete
+frame is not stop evidence. The host resolves the SDK module, sends a bounded
+stdin payload rather than placing secrets in argv, validates projected events,
+and awaits native proof. CLI and SDK share the same batch collector.
+Only new text-only SDK sessions are admitted here. Custom config/argv, execution
+hooks/environment, output schemas and resume/fork fail before launch. This avoids
+uncovered SDK temporary-schema cleanup and alternate launch paths. Global session
+scans and native retries are disabled; ordinary SDK capabilities and `FULL` usage
+declaration are unchanged. The host bounds worker I/O, not the SDK's private
+stderr buffer. Targeted Mac acceptance was recorded on 2026-10-03 from the user's
+confirmation that the requested SDK smoke commands passed (109 runtime + 15 API
+expected); no detailed output or timings were supplied in that report. See the
+[Codex SDK documentation](https://learn.chatgpt.com/docs/codex-sdk) for the public API.
+
+The next internal integration adds **Claude Agent SDK** via
+`runTaskDeviceClaudeSdk`. The real pinned SDK 0.3.220 runs in a fixed native Node
+worker, with CLI and descendants in the same native unit. Host callbacks for
+streaming text, tool use and subagent start retain task fencing; a matching
+successful result, worker completion, zero exit and journaled native stop are
+required. Errors from the SDK are opaque, and start/run failures never retry.
+Adapter construction now defers legacy PATH discovery. The native path reads
+the bundled manifest or probes an explicit `claudeCliPath` inside the worker;
+it does not honor the legacy version-check bypass. Literal native binaries or
+absolute `.js`/`.mjs` scripts are supported; the SDK itself selects their launch
+form and scripts run with the journaled worker's Node executable.
+
+This internal path disables settings sources, external MCP configuration and
+session persistence. Resume/fork, custom hooks/environment/schema/agent definitions,
+permission bypass and unsupported profile options reject before launch.
+Ordinary Claude transport capabilities, provider profiles and usage `FULL` remain
+unchanged. Native usage preserves input/output tokens and cost; the limited
+projection does not yet include provider quota refresh or every SDK event.
+Bounded worker I/O does not bound the SDK's private buffers. Targeted Mac
+acceptance was recorded on 2026-10-03 from the user's confirmation for the
+requested 54 runtime + 23 API set; the user reported 38 seconds for the API suite.
+Detailed console logs/counts were not supplied. Commands and acceptance scope
+are recorded in `local-device-sync.md`.
+The public query/options contract is documented in the
+[Claude Agent SDK reference](https://platform.claude.com/docs/en/agent-sdk/typescript).
+
+The next internal increment covers **Claude CLI and API** via
+`runTaskDeviceClaudeCli` and `runTaskDeviceClaudeApi`. In this fork the API
+transport already uses the Agent SDK, so it follows the same native SDK worker
+path with the existing provider environment. CLI mode directly spawns the
+selected literal executable inside the worker and never imports the SDK there.
+It resolves `claudeCliPath`, then `CLAUDE_CLI_PATH`, the explicit adapter path,
+or `claude` on PATH; it never invokes legacy shell/discovery helpers. Version
+probes stay in that same native unit. Generated print-mode argv disables settings
+sources, external MCP configuration and session persistence. The main prompt is
+sent through stdin; system-prompt append uses the CLI's literal argument contract.
+See the [Claude CLI reference](https://code.claude.com/docs/en/cli-reference).
+
+Direct CLI parsing bounds raw stdout/stderr at 16 MiB, including ignored metadata,
+preserves split UTF-8/final JSON without newline, and rejects a missing result or
+nonzero exit. Blocked stdin, callback errors, timeout and abort still require
+native stop and journal acknowledgement. CLI retains its default 300-second run
+timeout, and usage includes cache input tokens as in the ordinary CLI transport.
+Its tool callback reports invocation; SDK/API retain PostToolUse/SubagentStart
+hooks. The restricted admission rules above remain, including no resume/fork or
+custom argv/config. Targeted Mac acceptance for CLI/API was recorded on
+2026-10-03 from the user's confirmation for the requested 114 runtime + 39 API
+tests, with 60 seconds reported for the API suite. Detailed logs/counts were not
+supplied; the acceptance scope is recorded in `local-device-sync.md`.
+
+The next internal increment adds **Codex API and OpenRouter** text-only Chat
+Completions clients through `runTaskDeviceHttp`. Existing provider request/auth
+builders are reused, while a fixed native Node worker owns the actual HTTP client.
+Prompt, headers and proxy credentials travel over bounded stdin, never worker
+argv. It makes one request without retries or redirects. JSON/SSE responses must
+have a consistent ID, successful finish, usage and worker completion before
+native stop and journal acknowledgement permit the result. Tool/refusal/error,
+truncated and malformed responses reject. Explicit `stream:false` is honored
+even when Codex has an event callback. Rate-limit headers retain structured
+status and metadata; raw upstream error bodies are not echoed.
+
+The worker bounds response bytes before parsing, including SSE comments, and
+uses the configured proxy/NO_PROXY selection. Streaming requests include usage:
+[OpenAI's accounting chunk](https://developers.openai.com/api/reference/resources/chat)
+has empty choices, while
+[OpenRouter's accounting chunk](https://openrouter.ai/docs/api_reference/streaming)
+may repeat the finish marker with no content. The parser accepts these distinct
+accounting forms and still rejects duplicated usage, late content and missing
+`[DONE]`. Local client stop does not guarantee that remote inference or billing
+has stopped, and grants no remote tool/server authority.
+
+**OpenCode now has a fresh owned-server path** for internal native scopes via
+`runTaskDeviceOpenCode`. The fixed worker checks OpenCode **1.18.34**, launches
+`serve --hostname 127.0.0.1 --port 0` in the same native unit, and uses a random
+per-attempt password and separate HOME/XDG/temp directories. Existing-server
+`baseUrl`/credentials, direct session creation and resume remain denied. This
+path supports explicit `opencodeCliPath` (or `OPENCODE_CLI_PATH`), `modelBaseUrl`
+(the model's OpenAI-compatible `/v1` endpoint), `apiKey`, `contextWindow` and
+`maxOutputTokens`. `model` is the exact model identifier at that endpoint.
+No model is downloaded or selected implicitly. macOS npm/fnm shims are resolved
+to their installed platform binary using filesystem lookup only.
+
+Project OpenCode config and managed machine config are rejected before launch;
+ambient auth, plugins, external MCP, LSP, formatters, updates and model discovery
+are excluded. The built-in build agent allows read/glob/grep/list/edit/bash;
+other tool permissions are denied. This is process supervision, not a filesystem
+or network sandbox. The model server remains independent: stop evidence covers
+the owned OpenCode server and descendants, not model inference or billing.
+Only a successful complete message for the new session plus native stop and
+durable journal acknowledgement returns success. Storage is removed after proven
+stop; coordinator death/uncertain stop retains it. Runtime usage remains `NONE`
+and `usage:null` consistently with the existing external-server adapter.
+
+The official [server contract](https://opencode.ai/docs/server/) and pinned
+[configuration loader](https://github.com/anomalyco/opencode/blob/v1.18.34/packages/opencode/src/config/config.ts)
+were checked against the actual 1.18.34 Windows binary with a local model and a
+real file-write tool call. The previous HTTP subset was accepted on Mac (255
+tests). On 2026-10-04 the user also confirmed the requested OpenCode Mac subset
+passed (241 runtime + 14 API); detailed output was not supplied.
+See `local-device-sync.md` for its exact test commands and scope.
+
+All four built-in adapters check the native scope. Cancellation callbacks,
+SDK results and remote responses are not native stop receipts.
+Configured external MCP/services, normal runner admission, bound resume/fork and
+runtime-backed handoff remain open. No public capability or profile flag grants
+native execution, and personal AI remains disabled. Linux and other unsupported mechanisms reject;
+process-group termination is never substituted for native proof.
+
+Native launch resolves literal executables without a shell; Windows `.cmd`
+wrappers are rejected, so this internal path requires a real `.exe`. Its curated
+environment retains Windows OS defaults normally supplied by libuv without
+adding ambient provider keys or `NODE_OPTIONS`. The RPC contract remains the
+[Codex app-server stdio protocol](https://learn.chatgpt.com/docs/app-server);
+`turn/interrupt` is followed by native stop verification, not treated as proof.
+See [device sync](local-device-sync.md) for scope, recovery and native acceptance.
+
 ## Runtime Profile Model
 
 Runtime profiles are persisted in `runtime_profiles` and reference only non-secret configuration.
@@ -68,6 +253,12 @@ The API exposes effective selection endpoints:
 | Custom       | Any          | Any                       | Configurable             | Configurable     | Configurable         | Configurable  | Configurable     | Configurable      | Must declare                             | Configurable        | Via `AIF_RUNTIME_MODULES` |
 
 Capabilities are **transport-aware**: the same adapter may expose different capabilities depending on the selected transport. For example, Codex supports resume on SDK/CLI/App Server, session fork only on App Server, and session discovery on SDK/App Server. Use `resolveAdapterCapabilities(adapter, transport)` to get the effective set.
+
+The table describes regular runtime features. P14's internal native process path
+supports Codex App Server/default JSONL CLI, the Codex SDK worker and restricted
+Claude SDK/API/CLI worker paths, plus text-only Codex API/OpenRouter HTTP clients,
+with new sessions; it does not advertise
+whole-adapter containment or change the regular transports' capabilities.
 
 ### Model-specific effort discovery
 
@@ -141,7 +332,7 @@ Every adapter must declare a `usageReporting` value in its `RuntimeCapabilities`
 
 - **`FULL`** — adapter always populates `RuntimeRunResult.usage` on a successful run. If the wrapper observes a null `usage` while the capability says `FULL`, it logs an error (dev) or fires a metric (prod). The contract test in `bootstrap.test.ts` also fails the build if the field is missing.
 - **`PARTIAL`** — adapter returns usage when the provider gives it, but may return `null` on some transport/streaming paths (e.g. CLI early-termination). The wrapper accepts both and records only the non-null events.
-- **`NONE`** — transport fundamentally cannot report token counts (e.g. OpenCode message payload). The wrapper warns if usage unexpectedly appears, but this is an opt-out from the usage pipeline — dashboards will show zero traffic for runtimes in this tier.
+- **`NONE`** — the adapter does not provide normalized token accounting (e.g. the current OpenCode adapter). The wrapper warns if usage unexpectedly appears, but this is an opt-out from the usage pipeline — dashboards will show zero traffic for runtimes in this tier.
 
 All successful runs that produce non-null usage flow through the registry's `usageSink`, which persists them to the `usage_events` table and rolls them up into per-task / per-project / per-chat-session aggregates. Sink wiring lives in `packages/api/src/services/runtime.ts` (API) and `packages/agent/src/index.ts` / `subagentQuery.ts` (agent) — both use `createDbUsageSink()` from `@aif/data`.
 

@@ -16,6 +16,7 @@
     "coverage": "vitest run --coverage",
     "lint": "eslint \"src/**/*.ts\"",
     "test:watch": "vitest --configLoader runner",
+    "probe:macos-supervision": "node --import tsx ./scripts/macos-supervision-probe.mjs",
     "codex:app-server:protocol:generate": "node ./scripts/generate-codex-app-server-protocol.mjs",
     "codex:app-server:protocol:check": "node ./scripts/generate-codex-app-server-protocol.mjs --check"
   },

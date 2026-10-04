@@ -89,6 +89,9 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [rootPath, setRootPath] = useState("");
+  const [registrationMode, setRegistrationMode] = useState<"initialize" | "attach_existing">(
+    "initialize",
+  );
   const [groupName, setGroupName] = useState("");
   const [plannerMaxBudgetUsd, setPlannerMaxBudgetUsd] = useState("");
   const [planCheckerMaxBudgetUsd, setPlanCheckerMaxBudgetUsd] = useState("");
@@ -205,6 +208,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
   const openCreate = () => {
     if (!canManage) return;
     setDialogMode("create");
+    setRegistrationMode("initialize");
     setBudgetsOpen(false);
     setEditingId(null);
     setName("");
@@ -358,6 +362,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
         {
           name: name.trim(),
           rootPath: rootPath.trim(),
+          registrationMode,
           plannerMaxBudgetUsd: parsedPlannerBudget,
           planCheckerMaxBudgetUsd: parsedPlanCheckerBudget,
           implementerMaxBudgetUsd: parsedImplementerBudget,
@@ -366,7 +371,7 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
         },
         {
           onSuccess: (project) => {
-            if (autoQueueMode) {
+            if (autoQueueMode && !project.personalMode) {
               setAutoQueue.mutate(
                 { id: project.id, enabled: true },
                 {
@@ -674,6 +679,36 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
             <DialogTitle>{dialogMode === "create" ? "Create Project" : "Edit Project"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
+            {dialogMode === "create" && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="project-registration-mode">
+                  Registration
+                </label>
+                <Select
+                  id="project-registration-mode"
+                  value={registrationMode}
+                  onChange={(event) =>
+                    setRegistrationMode(
+                      event.target.value === "attach_existing" ? "attach_existing" : "initialize",
+                    )
+                  }
+                  options={[
+                    { value: "initialize", label: "Initialize a standard project" },
+                    {
+                      value: "attach_existing",
+                      label: "Attach existing checkout · personal board",
+                    },
+                  ]}
+                />
+                {registrationMode === "attach_existing" && (
+                  <p className="text-xs text-muted-foreground">
+                    Read-only registration: preserve HEAD, index, dirty files and AI context.
+                    Execution stays disabled. To bind a checkout to an already synced board, open
+                    that project's settings instead.
+                  </p>
+                )}
+              </div>
+            )}
             <div>
               <label className="text-sm font-medium">Name</label>
               <Input
@@ -692,8 +727,9 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
                 className="font-mono text-sm"
               />
               <p className="mt-1 text-xs text-muted-foreground">
-                Absolute path where agents will create files. In Docker, paths are stored under
-                PROJECTS_MOUNT; host paths under PROJECTS_DIR use the same mount.
+                {registrationMode === "attach_existing" && dialogMode === "create"
+                  ? "Absolute path to an existing Git checkout on this device."
+                  : "Absolute path where agents will create files. In Docker, paths are stored under PROJECTS_MOUNT; host paths under PROJECTS_DIR use the same mount."}
               </p>
             </div>
             {dialogMode === "edit" && githubIssuePrEnabled && (
@@ -942,7 +978,9 @@ export function ProjectSelector({ selectedId, onSelect, onDeselect, canManage = 
                   ? "Creating..."
                   : "Saving..."
                 : dialogMode === "create"
-                  ? "Create"
+                  ? registrationMode === "attach_existing"
+                    ? "Attach existing checkout"
+                    : "Create"
                   : "Save"}
             </Button>
           </form>

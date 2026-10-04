@@ -29,6 +29,7 @@ function clearProxyEnv() {
 describe("codex model discovery process helpers", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
+    vi.stubEnv("CODEX_CLI_PATH", undefined);
     clearProxyEnv();
   });
 
@@ -59,7 +60,7 @@ describe("codex model discovery process helpers", () => {
     expect(result.droppedDisallowedPrefixKeys).toContain("npm_config_registry");
   });
 
-  it("forwards HTTP(S)_PROXY / NO_PROXY env vars (both cases) for closed-network builds", () => {
+  it("normalizes both proxy spellings for the host OS in closed-network builds", () => {
     vi.stubEnv("HTTP_PROXY", "http://proxy.example.com:8080");
     vi.stubEnv("HTTPS_PROXY", "http://proxy.example.com:8080");
     vi.stubEnv("ALL_PROXY", "socks5://proxy.example.com:1080");
@@ -81,13 +82,21 @@ describe("codex model discovery process helpers", () => {
     expect(result.env.HTTPS_PROXY).toBe("http://proxy.example.com:8080");
     expect(result.env.ALL_PROXY).toBe("socks5://proxy.example.com:1080");
     expect(result.env.NO_PROXY).toBe("localhost,127.0.0.1,api,agent");
-    expect(result.env.http_proxy).toBe("http://proxy.example.com:8080");
-    expect(result.env.https_proxy).toBe("http://proxy.example.com:8080");
-    expect(result.env.all_proxy).toBe("socks5://proxy.example.com:1080");
-    expect(result.env.no_proxy).toBe("localhost,127.0.0.1,api,agent");
+    expect(result.env.http_proxy).toBe(
+      process.platform === "win32" ? undefined : "http://proxy.example.com:8080",
+    );
+    expect(result.env.https_proxy).toBe(
+      process.platform === "win32" ? undefined : "http://proxy.example.com:8080",
+    );
+    expect(result.env.all_proxy).toBe(
+      process.platform === "win32" ? undefined : "socks5://proxy.example.com:1080",
+    );
+    expect(result.env.no_proxy).toBe(
+      process.platform === "win32" ? undefined : "localhost,127.0.0.1,api,agent",
+    );
   });
 
-  it("mirrors uppercase proxy env vars into lowercase aliases when only uppercase is present", () => {
+  it("preserves uppercase proxy values with OS-appropriate aliases", () => {
     vi.stubEnv("HTTP_PROXY", "http://proxy.example.com:8080");
     vi.stubEnv("HTTPS_PROXY", "http://proxy.example.com:8080");
     vi.stubEnv("ALL_PROXY", "socks5://proxy.example.com:1080");
@@ -99,13 +108,21 @@ describe("codex model discovery process helpers", () => {
     expect(result.env.HTTPS_PROXY).toBe("http://proxy.example.com:8080");
     expect(result.env.ALL_PROXY).toBe("socks5://proxy.example.com:1080");
     expect(result.env.NO_PROXY).toBe("localhost,127.0.0.1,api,agent");
-    expect(result.env.http_proxy).toBe("http://proxy.example.com:8080");
-    expect(result.env.https_proxy).toBe("http://proxy.example.com:8080");
-    expect(result.env.all_proxy).toBe("socks5://proxy.example.com:1080");
-    expect(result.env.no_proxy).toBe("localhost,127.0.0.1,api,agent");
+    expect(result.env.http_proxy).toBe(
+      process.platform === "win32" ? undefined : "http://proxy.example.com:8080",
+    );
+    expect(result.env.https_proxy).toBe(
+      process.platform === "win32" ? undefined : "http://proxy.example.com:8080",
+    );
+    expect(result.env.all_proxy).toBe(
+      process.platform === "win32" ? undefined : "socks5://proxy.example.com:1080",
+    );
+    expect(result.env.no_proxy).toBe(
+      process.platform === "win32" ? undefined : "localhost,127.0.0.1,api,agent",
+    );
   });
 
-  it("mirrors lowercase proxy env vars into uppercase aliases when only lowercase is present", () => {
+  it("preserves lowercase proxy values with OS-appropriate aliases", () => {
     vi.stubEnv("http_proxy", "http://proxy.example.com:8080");
     vi.stubEnv("https_proxy", "http://proxy.example.com:8080");
     vi.stubEnv("all_proxy", "socks5://proxy.example.com:1080");
@@ -113,10 +130,18 @@ describe("codex model discovery process helpers", () => {
 
     const result = buildCodexAppServerDiscoveryEnvWithStats(createModelDiscoveryInput());
 
-    expect(result.env.http_proxy).toBe("http://proxy.example.com:8080");
-    expect(result.env.https_proxy).toBe("http://proxy.example.com:8080");
-    expect(result.env.all_proxy).toBe("socks5://proxy.example.com:1080");
-    expect(result.env.no_proxy).toBe("localhost,127.0.0.1,api,agent");
+    expect(result.env.http_proxy).toBe(
+      process.platform === "win32" ? undefined : "http://proxy.example.com:8080",
+    );
+    expect(result.env.https_proxy).toBe(
+      process.platform === "win32" ? undefined : "http://proxy.example.com:8080",
+    );
+    expect(result.env.all_proxy).toBe(
+      process.platform === "win32" ? undefined : "socks5://proxy.example.com:1080",
+    );
+    expect(result.env.no_proxy).toBe(
+      process.platform === "win32" ? undefined : "localhost,127.0.0.1,api,agent",
+    );
     expect(result.env.HTTP_PROXY).toBe("http://proxy.example.com:8080");
     expect(result.env.HTTPS_PROXY).toBe("http://proxy.example.com:8080");
     expect(result.env.ALL_PROXY).toBe("socks5://proxy.example.com:1080");
@@ -143,7 +168,7 @@ describe("codex model discovery process helpers", () => {
       ),
     ).toBe("/env/codex");
 
-    vi.unstubAllEnvs();
+    vi.stubEnv("CODEX_CLI_PATH", undefined);
     expect(
       resolveDiscoveryExecutable(
         createModelDiscoveryInput({

@@ -1,3 +1,5 @@
+import { withProjectDeviceExecution } from "@aif/data";
+import { assertTaskExecutionAllowed } from "@aif/data";
 import { findProjectById, findTaskById, setTaskFields } from "@aif/data";
 import { createRuntimeWorkflowSpec } from "@aif/runtime";
 import { logger } from "@aif/shared";
@@ -38,6 +40,13 @@ function extractVerifyGateResult(resultText: string): VerifyGateResult | null {
 }
 
 export async function runVerifier(taskId: string, projectRoot: string): Promise<void> {
+  return await withProjectDeviceExecution({ taskId, projectRoot }, async (root) =>
+    runVerifierScoped(taskId, root ?? projectRoot),
+  );
+}
+
+async function runVerifierScoped(taskId: string, projectRoot: string): Promise<void> {
+  projectRoot = assertTaskExecutionAllowed(taskId, projectRoot) ?? projectRoot;
   const task = findTaskById(taskId);
 
   if (!task) {

@@ -5,6 +5,7 @@ import { drizzle, BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema.js";
 import { logger } from "./logger.js";
 import { findMonorepoRootFromUrl } from "./monorepoRoot.js";
+import { backfillPersonalIdentity } from "./personalIdentityMigration.js";
 
 const log = logger("db");
 
@@ -44,6 +45,8 @@ function ensureTables(sqlite: Database.Database): void {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       root_path TEXT NOT NULL,
+      personal_mode INTEGER NOT NULL DEFAULT 0,
+      publication_policy TEXT NOT NULL DEFAULT 'standard',
       planner_max_budget_usd REAL,
       plan_checker_max_budget_usd REAL,
       implementer_max_budget_usd REAL,
@@ -1094,6 +1097,263 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE tasks ADD COLUMN qa_check_playwright_configured INTEGER;
     `,
   },
+  {
+    version: 30,
+    description: "Persist personal project execution and publication restrictions",
+    sql: `
+      ALTER TABLE projects ADD COLUMN personal_mode INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE projects ADD COLUMN publication_policy TEXT NOT NULL DEFAULT 'standard';
+    `,
+  },
+  {
+    version: 31,
+    description: "Local device/checkouts and portable participant identity",
+    sql: `
+      CREATE TABLE handoff_local_device (
+        slot INTEGER PRIMARY KEY CHECK (slot = 1), device_id TEXT NOT NULL UNIQUE,
+        incarnation TEXT NOT NULL, name TEXT NOT NULL, installation_id TEXT,
+        owner_pid INTEGER, owner_token TEXT
+      );
+      CREATE TABLE handoff_project_checkouts (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        device_id TEXT NOT NULL, local_root TEXT NOT NULL, execution_environment TEXT NOT NULL,
+        head TEXT, branch TEXT
+      );
+      CREATE UNIQUE INDEX handoff_checkout_root ON handoff_project_checkouts (project_id, device_id, local_root, execution_environment);
+      CREATE TABLE handoff_participants (
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        id TEXT NOT NULL, display_name TEXT NOT NULL, PRIMARY KEY (project_id, id)
+      );
+      CREATE TABLE handoff_participant_bindings (
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        logical_participant_id TEXT NOT NULL,
+        participant_id TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+        PRIMARY KEY (project_id, logical_participant_id)
+      );
+      CREATE TABLE handoff_task_assignments (
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        logical_participant_id TEXT NOT NULL, display_name_snapshot TEXT NOT NULL,
+        PRIMARY KEY (task_id, logical_participant_id)
+      );
+      ALTER TABLE task_comments ADD COLUMN logical_author_id TEXT;
+      ALTER TABLE task_comments ADD COLUMN author_display_name_snapshot TEXT;
+    `,
+    backfill: (sqlite) => {
+      backfillPersonalIdentity(sqlite);
+      return {};
+    },
+  },
+  {
+    version: 32,
+    description: "Durable per-project sync journal, registers and ACK cursors",
+    sql: `
+      CREATE TABLE handoff_sync_streams (
+        stream_key TEXT PRIMARY KEY, project_id TEXT NOT NULL, origin_device_id TEXT NOT NULL,
+        incarnation TEXT NOT NULL, next_sequence INTEGER NOT NULL DEFAULT 1, applied_sequence INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE handoff_sync_operations (
+        operation_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, stream_key TEXT NOT NULL,
+        sequence INTEGER NOT NULL, json TEXT NOT NULL, digest TEXT NOT NULL,
+        outgoing INTEGER NOT NULL, applied INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE UNIQUE INDEX handoff_sync_sequence ON handoff_sync_operations (stream_key, sequence);
+      CREATE INDEX handoff_sync_pending ON handoff_sync_operations (project_id, applied, stream_key, sequence);
+      CREATE TABLE handoff_sync_fields (
+        project_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
+        field TEXT NOT NULL, versions_json TEXT NOT NULL, PRIMARY KEY (project_id, entity_type, entity_id, field)
+      );
+      CREATE TABLE handoff_sync_peer_cursors (
+        peer_id TEXT NOT NULL, stream_key TEXT NOT NULL,
+        sent_sequence INTEGER NOT NULL DEFAULT 0, ack_sequence INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (peer_id, stream_key)
+      );
+      CREATE TABLE handoff_sync_checkpoints (
+        checkpoint_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, producer_device_id TEXT NOT NULL,
+        watermarks_json TEXT NOT NULL, record_count INTEGER NOT NULL, digest TEXT,
+        received INTEGER NOT NULL, next_ordinal INTEGER NOT NULL DEFAULT 0,
+        received_bytes INTEGER NOT NULL DEFAULT 0, complete INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE handoff_sync_checkpoint_records (
+        checkpoint_id TEXT NOT NULL REFERENCES handoff_sync_checkpoints(checkpoint_id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL, json TEXT NOT NULL, PRIMARY KEY (checkpoint_id, ordinal)
+      );
+    `,
+  },
+  {
+    version: 33,
+    description: "Pinned peers, single-use pairing and resumable board bootstrap",
+    sql: `
+      CREATE TABLE handoff_sync_peers (
+        device_id TEXT PRIMARY KEY, name TEXT NOT NULL, fingerprint TEXT NOT NULL UNIQUE,
+        address TEXT, revoked INTEGER NOT NULL DEFAULT 0, last_contact_at TEXT, last_error_code TEXT
+      );
+      CREATE TABLE handoff_sync_peer_projects (
+        peer_id TEXT NOT NULL REFERENCES handoff_sync_peers(device_id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL, outgoing_checkpoint_id TEXT, incoming_checkpoint_id TEXT,
+        bootstrapped INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (peer_id, project_id)
+      );
+      CREATE TABLE handoff_sync_invitations (
+        id TEXT PRIMARY KEY, token_digest TEXT NOT NULL, expected_fingerprint TEXT NOT NULL,
+        project_ids_json TEXT NOT NULL, expires_at INTEGER NOT NULL,
+        accepted_device_id TEXT, accepted_request_json TEXT
+      );
+    `,
+  },
+  {
+    version: 34,
+    description: "Local task execution workspace and durable checkpoint intent",
+    sql: `
+      CREATE TABLE task_execution_workspaces (
+        task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        project_root TEXT NOT NULL, worktree_path TEXT NOT NULL UNIQUE,
+        snapshot_commit TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('preparing', 'active', 'checkpoint_prepared', 'checkpointed')),
+        revision INTEGER NOT NULL DEFAULT 0,
+        scope_json TEXT, intent_json TEXT, result_json TEXT
+      );
+    `,
+  },
+  {
+    version: 35,
+    description: "Immutable code/context snapshots and local workspace continuation journal",
+    sql: `
+      ALTER TABLE task_execution_workspaces ADD COLUMN source_snapshot_id TEXT;
+      CREATE TABLE handoff_code_snapshots (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, task_id TEXT NOT NULL,
+        descriptor_json TEXT NOT NULL, context_json TEXT NOT NULL
+      );
+      CREATE TABLE handoff_context_blobs (digest TEXT PRIMARY KEY, base64 TEXT NOT NULL);
+      CREATE TABLE handoff_code_snapshot_locations (
+        snapshot_id TEXT PRIMARY KEY REFERENCES handoff_code_snapshots(id), project_root TEXT NOT NULL
+      );
+      CREATE TABLE task_workspace_continuations (
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        from_revision INTEGER NOT NULL, snapshot_id TEXT NOT NULL REFERENCES handoff_code_snapshots(id),
+        worktree_path TEXT NOT NULL UNIQUE, previous_workspace_json TEXT NOT NULL, activated_revision INTEGER,
+        UNIQUE (task_id, from_revision)
+      );
+    `,
+  },
+  {
+    version: 36,
+    description: "Resumable explicit code snapshot exports and incoming transfers",
+    sql: `
+      CREATE TABLE handoff_snapshot_exports (
+        snapshot_id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
+        manifest_json TEXT NOT NULL, byte_size INTEGER NOT NULL
+      );
+      CREATE TABLE handoff_snapshot_transfers (
+        id TEXT PRIMARY KEY, peer_id TEXT NOT NULL, project_id TEXT NOT NULL,
+        snapshot_id TEXT NOT NULL, checkout_id TEXT NOT NULL, project_root TEXT NOT NULL,
+        worktree_path TEXT NOT NULL UNIQUE, manifest_json TEXT NOT NULL,
+        status TEXT NOT NULL, error_code TEXT, code_ready INTEGER NOT NULL DEFAULT 0,
+        context_ready INTEGER NOT NULL DEFAULT 0, selected_bundle_digest TEXT,
+        completed INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (peer_id, snapshot_id, checkout_id)
+      );
+      CREATE TABLE handoff_snapshot_chunks (
+        owner_id TEXT NOT NULL, digest TEXT NOT NULL, ordinal INTEGER NOT NULL,
+        base64 TEXT NOT NULL, PRIMARY KEY (owner_id, digest, ordinal)
+      );
+    `,
+  },
+  {
+    version: 37,
+    description: "Durable device execution grants and fenced local runs",
+    sql: `
+      CREATE TABLE task_device_grants (
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL, project_id TEXT NOT NULL,
+        execution_epoch INTEGER NOT NULL CHECK (execution_epoch >= 0),
+        predecessor_id TEXT, grant_json TEXT NOT NULL,
+        UNIQUE (task_id, execution_epoch), UNIQUE (predecessor_id)
+      );
+      CREATE TABLE task_device_grant_heads (
+        task_id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
+        grant_id TEXT NOT NULL REFERENCES task_device_grants(id),
+        owner_device_id TEXT NOT NULL, execution_epoch INTEGER NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('owned', 'observed', 'released', 'pending', 'conflicted')),
+        active_run_id TEXT, released_transfer_id TEXT, released_snapshot_id TEXT
+      );
+      CREATE TABLE task_device_runs (
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
+        grant_id TEXT NOT NULL REFERENCES task_device_grants(id),
+        owner_device_id TEXT NOT NULL, execution_epoch INTEGER NOT NULL,
+        worktree_path TEXT NOT NULL, snapshot_commit TEXT NOT NULL,
+        ownership_revision INTEGER NOT NULL, input_digest TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('running', 'settled', 'uncertain')),
+        started_at TEXT NOT NULL, settled_at TEXT
+      );
+    `,
+  },
+  {
+    version: 38,
+    description: "Bind local native sessions and chats to task grant and checkout",
+    sql: `
+      CREATE TABLE task_device_sessions (
+        key TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('chat', 'native')),
+        task_id TEXT NOT NULL, project_id TEXT NOT NULL, grant_id TEXT NOT NULL,
+        worktree_path TEXT NOT NULL, snapshot_commit TEXT NOT NULL,
+        native_session_id TEXT, runtime_key TEXT
+      );
+      CREATE INDEX task_device_native_session ON task_device_sessions(native_session_id);
+    `,
+  },
+  {
+    version: 39,
+    description: "Durable explicit device handoff journal",
+    sql: `
+      ALTER TABLE task_device_grant_heads RENAME TO task_device_grant_heads_v38;
+      CREATE TABLE task_device_grant_heads (
+        task_id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
+        grant_id TEXT NOT NULL REFERENCES task_device_grants(id),
+        owner_device_id TEXT NOT NULL, execution_epoch INTEGER NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('owned','observed','released','pending','accepted','conflicted')),
+        active_run_id TEXT, released_transfer_id TEXT, released_snapshot_id TEXT
+      );
+      INSERT INTO task_device_grant_heads SELECT * FROM task_device_grant_heads_v38;
+      DROP TABLE task_device_grant_heads_v38;
+      CREATE TABLE task_device_handoffs (
+        id TEXT PRIMARY KEY, direction TEXT NOT NULL CHECK(direction IN ('outgoing','incoming')),
+        project_id TEXT NOT NULL, task_id TEXT NOT NULL,
+        source_device_id TEXT NOT NULL, target_device_id TEXT NOT NULL, expected_grant_id TEXT NOT NULL,
+        phase TEXT NOT NULL CHECK(phase IN ('requested','quiescing','checkpointed','released','received','accepted','cancelled')),
+        revision INTEGER NOT NULL DEFAULT 0, input_digest TEXT, request_json TEXT, stop_json TEXT,
+        snapshot_id TEXT, successor_json TEXT, successor_grant_id TEXT,
+        previous_workspace_json TEXT, local_transfer_id TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX task_device_handoff_active ON task_device_handoffs(task_id)
+        WHERE direction='outgoing' AND phase IN ('requested','quiescing','checkpointed');
+      CREATE INDEX task_device_handoff_project ON task_device_handoffs(project_id);
+      CREATE INDEX task_device_handoff_task ON task_device_handoffs(task_id, direction, phase);
+    `,
+  },
+  {
+    version: 40,
+    description: "Local native process supervision receipts",
+    sql: `
+      CREATE TABLE task_device_processes (
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
+        run_id TEXT NOT NULL REFERENCES task_device_runs(id),
+        state TEXT NOT NULL CHECK(state IN ('reserved','identified','prepared','stopped')),
+        supervisor_id TEXT, identity_json TEXT, prepared_json TEXT, evidence_json TEXT,
+        created_at TEXT NOT NULL, stopped_at TEXT
+      );
+      CREATE UNIQUE INDEX task_device_process_supervisor ON task_device_processes(supervisor_id);
+      CREATE INDEX task_device_process_run ON task_device_processes(run_id, state);
+    `,
+  },
+  {
+    version: 41,
+    description: "Explicit isolated runtime admission before native task execution",
+    sql: `
+      CREATE TABLE task_device_run_admissions (
+        run_id TEXT PRIMARY KEY REFERENCES task_device_runs(id),
+        policy TEXT NOT NULL, runtime_id TEXT NOT NULL, transport TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 function splitSqlStatements(sqlText: string): string[] {
@@ -1408,7 +1668,9 @@ function ensureIndexes(sqlite: Database.Database): void {
 }
 
 /** Create a fresh in-memory DB — useful for testing */
-export function createTestDb(): BetterSQLite3Database<typeof schema> {
+export function createTestDb(): BetterSQLite3Database<typeof schema> & {
+  $client: Database.Database;
+} {
   const sqlite = new Database(":memory:");
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");

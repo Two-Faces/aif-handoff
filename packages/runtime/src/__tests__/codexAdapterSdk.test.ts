@@ -1,6 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RuntimeTransport } from "../types.js";
 import { TEST_USAGE_CONTEXT } from "./helpers/usageContext.js";
+
+afterEach(() => vi.unstubAllEnvs());
 
 const runCodexCliMock = vi.fn();
 const runCodexAgentApiMock = vi.fn();
@@ -72,6 +74,7 @@ describe("Codex adapter — SDK transport and capabilities", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
+    vi.stubEnv("CODEX_CLI_PATH", undefined);
     runCodexCliMock.mockResolvedValue({ outputText: "cli-output", sessionId: null });
     runCodexAgentApiMock.mockResolvedValue({ outputText: "api-output", sessionId: null });
     runCodexSdkMock.mockResolvedValue({ outputText: "sdk-output", sessionId: "thread-1" });

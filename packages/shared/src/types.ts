@@ -61,6 +61,8 @@ export interface Project {
   id: string;
   name: string;
   rootPath: string;
+  personalMode?: boolean;
+  publicationPolicy?: "standard" | "local_only";
   plannerMaxBudgetUsd: number | null;
   planCheckerMaxBudgetUsd: number | null;
   implementerMaxBudgetUsd: number | null;
@@ -159,7 +161,14 @@ interface ProjectInputSettings {
 }
 
 export type CreateProjectInput = ProjectInputSettings &
-  ({ rootPath: string; githubRepository?: never } | { rootPath?: never; githubRepository: string });
+  (
+    | {
+        rootPath: string;
+        githubRepository?: never;
+        registrationMode?: "initialize" | "attach_existing";
+      }
+    | { rootPath?: never; githubRepository: string; registrationMode?: never }
+  );
 
 export interface UpdateProjectInput extends ProjectInputSettings {
   rootPath: string;
@@ -258,6 +267,7 @@ export interface AuditActor {
 }
 
 export interface TaskExecutorHistoryEntry {
+  logicalAssignees?: Array<{ id: string | null; displayName: string }>;
   id: string;
   taskId: string;
   taskTitleSnapshot: string;
@@ -295,6 +305,7 @@ export interface TaskOwnership {
 }
 
 export interface HandoffTaskInput {
+  expectedSyncRevisions?: import("./sync/contracts.js").SyncRevisions;
   executionOwner: ExecutionOwner;
   assigneeIds: string[];
   expectedOwnershipRevision: number;
@@ -319,6 +330,9 @@ export interface TaskOwnershipConflict {
 }
 
 export interface Task {
+  personalMode?: boolean;
+  syncRevisions?: import("./sync/contracts.js").SyncRevisions;
+  unresolvedAssignees?: Array<{ logicalParticipantId: string; displayName: string }>;
   id: string;
   projectId: string;
   title: string;
@@ -392,6 +406,9 @@ export interface Task {
 }
 
 export interface TaskListItem {
+  personalMode?: boolean;
+  syncRevisions?: import("./sync/contracts.js").SyncRevisions;
+  unresolvedAssignees?: Array<{ logicalParticipantId: string; displayName: string }>;
   id: string;
   projectId: string;
   title: string;
@@ -473,6 +490,8 @@ export interface TaskActiveRuntimeSelection {
 }
 
 export interface TaskComment {
+  logicalAuthorId?: string | null;
+  authorDisplayNameSnapshot?: string | null;
   id: string;
   taskId: string;
   author: "human" | "agent";
@@ -521,6 +540,7 @@ export interface CreateTaskInput {
 
 /** PUT /tasks/:id body */
 export interface UpdateTaskInput {
+  expectedSyncRevisions?: import("./sync/contracts.js").SyncRevisions;
   title?: string;
   description?: string;
   attachments?: TaskCommentAttachment[];
@@ -593,6 +613,7 @@ export type TaskEvent = (typeof TASK_EVENTS)[number];
 
 /** POST /tasks/:id/events body */
 export interface TaskEventInput {
+  expectedSyncRevisions?: import("./sync/contracts.js").SyncRevisions;
   event: TaskEvent;
   deletePlanFile?: boolean;
   commitOnApprove?: boolean;
@@ -627,6 +648,7 @@ export type WsEventType =
   | "chat:session_created"
   | "chat:session_deleted"
   | "sync:task_created"
+  | "sync:board_updated"
   | "sync:task_updated"
   | "sync:status_changed"
   | "sync:plan_pushed"

@@ -1,7 +1,13 @@
-import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { RuntimeTransport } from "../../../types.js";
 import { buildSafeWindowsShellCommandLine } from "../../../shellSafety.js";
 import { PROXY_ENV_VARS } from "../../../proxyEnv.js";
+import { RuntimeExecutionError } from "../../../errors.js";
+import {
+  launchNativeStdioProcess,
+  type NativeProcessScope,
+  type RuntimeStdioProcess,
+} from "../../../supervision/nativeProcessScope.js";
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -49,6 +55,8 @@ export interface CodexAppServerLogger {
 }
 
 export interface CodexAppServerLaunchInput {
+  nativeProcessScope?: NativeProcessScope;
+  signal?: AbortSignal;
   runtimeId: string;
   profileId?: string | null;
   transport?: RuntimeTransport;
@@ -69,7 +77,8 @@ export interface CodexAppServerEnvironmentStats {
 }
 
 export interface CodexAppServerProcessContext {
-  process: ChildProcessWithoutNullStreams;
+  process: RuntimeStdioProcess;
+  stopNative?: () => Promise<void>;
   stderrTail: string[];
   executablePath: string;
   args: string[];
@@ -157,8 +166,8 @@ export function buildCodexAppServerEnvWithStats(
     env.CODEX_BASE_URL = baseUrl;
   }
 
-  // Windows env vars are case-insensitive; mirror proxy key casing to avoid
-  // losing one variant when a parent process forwarded only uppercase/lowercase.
+  // Unix clients may inspect either spelling. Windows must receive only one
+  // spelling: duplicate case-insensitive names are ambiguous to a native child.
   mirrorEnvPair(env, "HTTP_PROXY", "http_proxy");
   mirrorEnvPair(env, "HTTPS_PROXY", "https_proxy");
   mirrorEnvPair(env, "ALL_PROXY", "all_proxy");
@@ -176,6 +185,13 @@ export function buildCodexAppServerEnvWithStats(
 export function spawnCodexAppServerProcess(
   options: CodexAppServerSpawnOptions,
 ): CodexAppServerProcessContext {
+  if (options.input.nativeProcessScope !== undefined)
+    throw new RuntimeExecutionError(
+      "Native scope requires the asynchronous process launcher",
+      undefined,
+      "permission",
+      { adapterCode: "native_scope_required" },
+    );
   const transport = options.input.transport ?? RuntimeTransport.CLI;
   const executablePath = resolveCodexAppServerExecutable(options.input);
   const envStats = buildCodexAppServerEnvWithStats(options.input);
@@ -245,12 +261,41 @@ export function spawnCodexAppServerProcess(
   };
 }
 
+/** Async native launch preserves both durable barriers. Legacy discovery and
+ * session readers retain their existing spawn path when no host scope exists. */
+export async function launchCodexAppServerProcess(
+  options: CodexAppServerSpawnOptions,
+): Promise<CodexAppServerProcessContext> {
+  const scope = options.input.nativeProcessScope;
+  if (scope === undefined) return spawnCodexAppServerProcess(options);
+  const executablePath = resolveCodexAppServerExecutable(options.input);
+  const cwd = options.input.cwd ?? options.input.projectRoot ?? "";
+  const args = ["app-server"];
+  const child = await launchNativeStdioProcess(scope, {
+    executable: executablePath,
+    args,
+    cwd,
+    environment: buildCodexAppServerEnv(options.input),
+    signal: options.input.signal,
+  });
+  const stderrTail: string[] = [];
+  child.stderr.on("data", (chunk: Buffer | string) => {
+    stderrTail.push(String(chunk));
+    while (stderrTail.length > MAX_STDERR_TAIL_LINES) stderrTail.shift();
+  });
+  return { process: child, stopNative: () => child.stop(), stderrTail, executablePath, args, cwd };
+}
+
 export async function terminateCodexAppServerProcess(
   context: CodexAppServerProcessContext,
   logger?: CodexAppServerLogger,
   terminateTimeoutMs = DEFAULT_TERMINATE_TIMEOUT_MS,
   forceKillTimeoutMs = DEFAULT_FORCE_KILL_TIMEOUT_MS,
 ): Promise<void> {
+  if (context.stopNative) {
+    await context.stopNative();
+    return;
+  }
   if (hasProcessExited(context.process)) {
     return;
   }
@@ -316,18 +361,19 @@ function mirrorEnvPair(
   lowercaseKey: string,
 ): void {
   const value = env[uppercaseKey] ?? env[lowercaseKey];
-  if (!value) {
+  if (value === undefined) {
     return;
   }
   env[uppercaseKey] = value;
-  env[lowercaseKey] = value;
+  if (IS_WINDOWS) delete env[lowercaseKey];
+  else env[lowercaseKey] = value;
 }
 
 function isAllowedEnvironmentKey(key: string): boolean {
   return ALLOWED_ENV_KEYS.has(key) || ALLOWED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 
-export function hasProcessExited(process: ChildProcess): boolean {
+export function hasProcessExited(process: Pick<ChildProcess, "exitCode" | "signalCode">): boolean {
   return process.exitCode != null || process.signalCode != null;
 }
 
@@ -341,10 +387,7 @@ function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-async function waitForExit(
-  childProcess: ChildProcessWithoutNullStreams,
-  timeoutMs: number,
-): Promise<boolean> {
+async function waitForExit(childProcess: RuntimeStdioProcess, timeoutMs: number): Promise<boolean> {
   if (hasProcessExited(childProcess)) {
     return true;
   }

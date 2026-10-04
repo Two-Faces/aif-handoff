@@ -1,3 +1,5 @@
+import { assertNativeProcessMode } from "../../supervision/nativeProcessScope.js";
+import { assertNativeHttpInput, runNativeChatCompletion } from "../chatCompletion/native.js";
 import type {
   RuntimeConnectionValidationInput,
   RuntimeConnectionValidationResult,
@@ -260,6 +262,17 @@ function buildRequestBody(input: RuntimeRunInput, stream: boolean): Record<strin
 // Usage normalization
 // ---------------------------------------------------------------------------
 
+function runNativeCodexApi(input: RuntimeRunInput, stream: boolean) {
+  assertNativeHttpInput(input);
+  return runNativeChatCompletion(input, {
+    provider: "codex",
+    url: resolveBaseUrl(input) + "/chat/completions",
+    headers: buildHeaders(input),
+    body: buildRequestBody(input, stream),
+    stream,
+  });
+}
+
 function normalizeUsage(usage: unknown): RuntimeUsage | null {
   if (!usage || typeof usage !== "object") return null;
   const parsed = usage as Record<string, unknown>;
@@ -375,6 +388,8 @@ export async function runCodexAgentApi(
   input: RuntimeRunInput,
   logger?: CodexAgentApiLogger,
 ): Promise<RuntimeRunResult> {
+  assertNativeProcessMode(input, input.transport === undefined || input.transport === "api");
+  if (input.execution?.nativeProcessScope) return runNativeCodexApi(input, false);
   const baseUrl = resolveBaseUrl(input);
   const url = `${baseUrl}/chat/completions`;
 
@@ -641,6 +656,8 @@ export async function runCodexAgentApiStreaming(
   input: RuntimeRunInput,
   logger?: CodexAgentApiLogger,
 ): Promise<RuntimeRunResult> {
+  assertNativeProcessMode(input, input.transport === undefined || input.transport === "api");
+  if (input.execution?.nativeProcessScope) return runNativeCodexApi(input, true);
   logger?.info?.(
     {
       runtimeId: input.runtimeId,

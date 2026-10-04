@@ -138,6 +138,16 @@ export function useWebSocket(enabled = true) {
 
     ws.onopen = () => {
       console.debug("[ws] Connected");
+      for (const key of [
+        "projects",
+        "tasks",
+        "task",
+        "task-comments",
+        "task-executor-history",
+        "personal",
+        "peers",
+      ])
+        queryClient.invalidateQueries({ queryKey: [key] });
     };
 
     ws.onmessage = (event) => {
@@ -155,6 +165,20 @@ export function useWebSocket(enabled = true) {
       }
 
       console.debug("[ws] Event received:", raw.type);
+
+      if (raw.type === "sync:board_updated") {
+        for (const key of [
+          "projects",
+          "tasks",
+          "task",
+          "task-comments",
+          "task-executor-history",
+          "personal",
+          "peers",
+        ])
+          queryClient.invalidateQueries({ queryKey: [key] });
+        return;
+      }
 
       if (
         raw.type === "participant:created" ||

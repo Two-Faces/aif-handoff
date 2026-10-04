@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { writeFileSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { projects, tasks } from "@aif/shared";
 import { createTestDb } from "@aif/shared/server";
 import { UsageSource } from "@aif/runtime";
@@ -23,7 +24,8 @@ vi.mock("../subagentQuery.js", () => ({
 }));
 
 const { ensureAutoQueueTaskCommit } = await import("../autoQueueCommit.js");
-const { findTaskById } = await import("@aif/data");
+const { findTaskById, prepareTaskExecutionWorkspace, assertTaskExecutionAllowed } =
+  await import("@aif/data");
 
 function createGitProject(): { rootPath: string; initialSha: string } {
   return createGitTestRoot("auto-queue-commit-");
@@ -57,6 +59,40 @@ describe("ensureAutoQueueTaskCommit", () => {
     testDb.current = createTestDb();
     executeSubagentQueryMock.mockReset();
   });
+
+  it("checkpoints a registered workspace without runtime staging or changing source HEAD/index", async () => {
+    const fixture = createGitProject();
+    const rootPath = realpathSync.native(fixture.rootPath);
+    const worktreePath = `${rootPath}-task`;
+    expect(dirname(rootPath)).toBe(realpathSync.native(tmpdir()));
+    try {
+      seedAutoQueueTask(rootPath, fixture.initialSha);
+      prepareTaskExecutionWorkspace({
+        projectId: "project",
+        taskId: "task",
+        projectRoot: rootPath,
+        worktreePath,
+        snapshotCommit: fixture.initialSha,
+      });
+      writeFileSync(join(worktreePath, "task.txt"), "owned task change\n");
+      const index = readFileSync(join(rootPath, ".git/index"));
+      const result = await ensureAutoQueueTaskCommit({ taskId: "task", projectRoot: rootPath });
+      expect(result.status).toBe("committed");
+      expect(executeSubagentQueryMock).not.toHaveBeenCalled();
+      expect(
+        execFileSync("git", ["rev-parse", "HEAD"], { cwd: rootPath, encoding: "utf8" }).trim(),
+      ).toBe(fixture.initialSha);
+      expect(readFileSync(join(rootPath, ".git/index"))).toEqual(index);
+      expect(await ensureAutoQueueTaskCommit({ taskId: "task", projectRoot: rootPath })).toEqual(
+        result,
+      );
+      expect(() => assertTaskExecutionAllowed("task", worktreePath)).toThrow();
+    } finally {
+      expect(worktreePath).toBe(`${rootPath}-task`);
+      rmSync(worktreePath, { recursive: true, force: true });
+      rmSync(rootPath, { recursive: true, force: true });
+    }
+  }, 20_000);
 
   it("creates and verifies one commit for a dirty auto-queue task", async () => {
     const { rootPath, initialSha } = createGitProject();

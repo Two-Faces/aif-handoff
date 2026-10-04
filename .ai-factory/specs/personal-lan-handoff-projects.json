@@ -1,0 +1,335 @@
+{
+  "schemaVersion": 1,
+  "kind": "personal-handoff-registration-inventory",
+  "observedAt": "2026-10-02",
+  "implementationStatus": "planned",
+  "usage": "Preview-only registration input. Paths are device-local; do not replicate them as shared project roots. Branches and heads are observations, never checkout commands.",
+  "fork": {
+    "url": "https://github.com/Two-Faces/aif-handoff",
+    "windowsRoot": "E:\\Projects\\aif-handoff",
+    "sourceHead": "3d982ef344aaa2fb72f99d5603a1fea0051206ea"
+  },
+  "policies": {
+    "registration": "attach_existing",
+    "executionOnImport": "paused_manual",
+    "publication": "local_only",
+    "macPaths": "unknown",
+    "logicalIdentity": "explicit_confirmation",
+    "autoInitializeAiFactory": false,
+    "autoCheckoutObservedBranch": false
+  },
+  "checkouts": [
+    {
+      "checkoutKey": "dst-web-manager",
+      "projectId": null,
+      "productGroup": null,
+      "pilot": false,
+      "windowsBinding": {
+        "deviceId": null,
+        "executionEnvironment": "native_windows",
+        "localRoot": "E:\\Projects\\dst-web-manager",
+        "observedBranch": "master",
+        "observedHead": "5044dc0a6e5e5373e6b25b656235a71cf5cdf6ab"
+      },
+      "macBinding": {
+        "deviceId": null,
+        "localRoot": null,
+        "executionEnvironment": "native_macos",
+        "mappingConfirmed": false
+      },
+      "aiFactory": {
+        "observedVersion": "2.19.0",
+        "unknownDoesNotAuthorizeInstall": false
+      },
+      "identityCandidate": null,
+      "platformProfiles": [],
+      "registrationConfirmed": false
+    },
+    {
+      "checkoutKey": "GroundedPartyDLL",
+      "projectId": null,
+      "productGroup": null,
+      "pilot": false,
+      "windowsBinding": {
+        "deviceId": null,
+        "executionEnvironment": "native_windows",
+        "localRoot": "E:\\Projects\\GroundedPartyDLL",
+        "observedBranch": "main",
+        "observedHead": "b2ebb2d86cb6ce758c4c1623ab6dbc79dc3ea46a"
+      },
+      "macBinding": {
+        "deviceId": null,
+        "localRoot": null,
+        "executionEnvironment": "native_macos",
+        "mappingConfirmed": false
+      },
+      "aiFactory": {
+        "observedVersion": null,
+        "unknownDoesNotAuthorizeInstall": true
+      },
+      "identityCandidate": null,
+      "platformProfiles": [],
+      "registrationConfirmed": false
+    },
+    {
+      "checkoutKey": "igorlink/igorlink.com",
+      "projectId": null,
+      "productGroup": "igorlink",
+      "pilot": false,
+      "windowsBinding": {
+        "deviceId": null,
+        "executionEnvironment": "native_windows",
+        "localRoot": "E:\\Projects\\igorlink\\igorlink.com",
+        "observedBranch": "master",
+        "observedHead": "6930055264cea142afdb81f7c6c4b1cff235e1d7"
+      },
+      "macBinding": {
+        "deviceId": null,
+        "localRoot": null,
+        "executionEnvironment": "native_macos",
+        "mappingConfirmed": false
+      },
+      "aiFactory": {
+        "observedVersion": "2.19.0",
+        "unknownDoesNotAuthorizeInstall": false
+      },
+      "identityCandidate": "igorlink/igorlink.com-wsl-context",
+      "platformProfiles": [],
+      "registrationConfirmed": false
+    },
+    {
+      "checkoutKey": "igorlink/igorlink-front.com",
+      "projectId": null,
+      "productGroup": "igorlink",
+      "pilot": false,
+      "windowsBinding": {
+        "deviceId": null,
+        "executionEnvironment": "native_windows",
+        "localRoot": "E:\\Projects\\igorlink\\igorlink-front.com",
+        "observedBranch": "feat/monthly-income-report",
+        "observedHead": "d35f58a414c9d004d67f3597320c4a6519c7f663"
+      },
+      "macBinding": {
+        "deviceId": null,
+        "localRoot": null,
+        "executionEnvironment": "native_macos",
+        "mappingConfirmed": false
+      },
+      "aiFactory": {
+        "observedVersion": "2.19.0",
+        "unknownDoesNotAuthorizeInstall": false
+      },
+      "identityCandidate": null,
+      "platformProfiles": [],
+      "registrationConfirmed": false
+    },
+    {
+      "checkoutKey": "logistics",
+      "projectId": null,
+      "productGroup": null,
+      "pilot": false,
+      "windowsBinding": {
+        "deviceId": null,
+        "executionEnvironment": "native_windows",
+        "localRoot": "E:\\Projects\\logistics",
+        "observedBranch": "feature/phone-auth",
+        "observedHead": "ef2c84b2ae117275b6917ef002c73983b6216370"
+      },
+      "macBinding": {
+        "deviceId": null,
+        "localRoot": null,
+        "executionEnvironment": "native_macos",
+        "mappingConfirmed": false
+      },
+      "aiFactory": {
+        "observedVersion": "2.19.0",
+        "unknownDoesNotAuthorizeInstall": false
+      },
+      "identityCandidate": null,
+      "platformProfiles": [],
+      "registrationConfirmed": false
+    },
+    {
+      "checkoutKey": "sarich/crm-backend",
+      "projectId": null,
+      "productGroup": "sarich",
+      "pilot": true,
+      "windowsBinding": {
+        "deviceId": null,
+        "executionEnvironment": "native_windows",
+        "localRoot": "E:\\Projects\\sarich\\crm-backend",
+        "observedBranch": "feature/comm-m1-routing-fields",
+        "observedHead": "c7368c4380aa84e72bd96445d0606bb7e8b556a1"
+      },
+      "macBinding": {
+        "deviceId": null,
+        "localRoot": null,
+        "executionEnvironment": "native_macos",
+        "mappingConfirmed": false
+      },
+      "aiFactory": {
+        "observedVersion": "2.19.0",
+        "unknownDoesNotAuthorizeInstall": false
+      },
+      "identityCandidate": null,
+      "platformProfiles": [],
+      "registrationConfirmed": false
+    },
+    {
+      "checkoutKey": "sarich/crm-front-nuxt",
+      "projectId": null,
+      "productGroup": "sarich",
+      "pilot": true,
+      "windowsBinding": {
+        "deviceId": null,
+        "executionEnvironment": "native_windows",
+        "localRoot": "E:\\Projects\\sarich\\crm-front-nuxt",
+        "observedBranch": "feature/nuxt-bridge",
+        "observedHead": "9c66571a9f3bbc6565cde55e63d33f33774a9f0e"
+      },
+      "macBinding": {
+        "deviceId": null,
+        "localRoot": null,
+        "executionEnvironment": "native_macos",
+        "mappingConfirmed": false
+      },
+      "aiFactory": {
+        "observedVersion": "2.19.0",
+        "unknownDoesNotAuthorizeInstall": false
+      },
+      "identityCandidate": null,
+      "platformProfiles": [],
+      "registrationConfirmed": false
+    },
+    {
+      "checkoutKey": "sarich/crm-frontend",
+      "projectId": null,
+      "productGroup": "sarich",
+      "pilot": false,
+      "windowsBinding": {
+        "deviceId": null,
+        "executionEnvironment": "native_windows",
+        "localRoot": "E:\\Projects\\sarich\\crm-frontend",
+        "observedBranch": "stage",
+        "observedHead": "cbfef61f0e1a5fb137681a3179e774a1e750523e"
+      },
+      "macBinding": {
+        "deviceId": null,
+        "localRoot": null,
+        "executionEnvironment": "native_macos",
+        "mappingConfirmed": false
+      },
+      "aiFactory": {
+        "observedVersion": "2.19.0",
+        "unknownDoesNotAuthorizeInstall": false
+      },
+      "identityCandidate": null,
+      "platformProfiles": [],
+      "registrationConfirmed": false
+    },
+    {
+      "checkoutKey": "sarich/crm-sarich-ar",
+      "projectId": null,
+      "productGroup": "sarich",
+      "pilot": false,
+      "windowsBinding": {
+        "deviceId": null,
+        "executionEnvironment": "native_windows",
+        "localRoot": "E:\\Projects\\sarich\\crm-sarich-ar",
+        "observedBranch": "stage",
+        "observedHead": "ece5ef803a2f17f60407e10d0b8770edf607c2af"
+      },
+      "macBinding": {
+        "deviceId": null,
+        "localRoot": null,
+        "executionEnvironment": "native_macos",
+        "mappingConfirmed": false
+      },
+      "aiFactory": {
+        "observedVersion": null,
+        "unknownDoesNotAuthorizeInstall": true
+      },
+      "identityCandidate": null,
+      "platformProfiles": [],
+      "registrationConfirmed": false
+    },
+    {
+      "checkoutKey": "sarich/crm-tasks-backend",
+      "projectId": null,
+      "productGroup": "sarich",
+      "pilot": false,
+      "windowsBinding": {
+        "deviceId": null,
+        "executionEnvironment": "native_windows",
+        "localRoot": "E:\\Projects\\sarich\\crm-tasks-backend",
+        "observedBranch": "stage",
+        "observedHead": "28e07ae0774394a14f19811c4e035a8d9ccdbb9c"
+      },
+      "macBinding": {
+        "deviceId": null,
+        "localRoot": null,
+        "executionEnvironment": "native_macos",
+        "mappingConfirmed": false
+      },
+      "aiFactory": {
+        "observedVersion": null,
+        "unknownDoesNotAuthorizeInstall": true
+      },
+      "identityCandidate": null,
+      "platformProfiles": [],
+      "registrationConfirmed": false
+    },
+    {
+      "checkoutKey": "TorrServerViewer",
+      "projectId": null,
+      "productGroup": null,
+      "pilot": false,
+      "windowsBinding": {
+        "deviceId": null,
+        "executionEnvironment": "native_windows",
+        "localRoot": "E:\\Projects\\TorrServerViewer",
+        "observedBranch": "main",
+        "observedHead": "2e0ab0788d5139efe90e9511f8bcac4d534fd71b"
+      },
+      "macBinding": {
+        "deviceId": null,
+        "localRoot": null,
+        "executionEnvironment": "native_macos",
+        "mappingConfirmed": false
+      },
+      "aiFactory": {
+        "observedVersion": null,
+        "unknownDoesNotAuthorizeInstall": true
+      },
+      "identityCandidate": null,
+      "platformProfiles": [],
+      "registrationConfirmed": false
+    },
+    {
+      "checkoutKey": "igorlink/igorlink.com-wsl-context",
+      "projectId": null,
+      "productGroup": "igorlink",
+      "pilot": false,
+      "windowsBinding": {
+        "deviceId": null,
+        "executionEnvironment": "wsl",
+        "localRoot": "\\\\wsl.localhost\\ubuntu\\home\\aries\\projects\\igorlink.com",
+        "observedBranch": "feat/monthly-income-report",
+        "observedHead": "46ad5d1addf2f521e304b23320c19dba59c9a75b"
+      },
+      "macBinding": {
+        "deviceId": null,
+        "localRoot": null,
+        "executionEnvironment": "native_macos",
+        "mappingConfirmed": false
+      },
+      "aiFactory": {
+        "observedVersion": "2.19.0",
+        "unknownDoesNotAuthorizeInstall": false
+      },
+      "identityCandidate": "igorlink/igorlink.com",
+      "platformProfiles": [],
+      "registrationConfirmed": false
+    }
+  ]
+}

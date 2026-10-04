@@ -32,7 +32,7 @@ describe("codex app-server process helpers", () => {
       }),
     ).toBe("/env/codex");
 
-    vi.unstubAllEnvs();
+    vi.stubEnv("CODEX_CLI_PATH", undefined);
     expect(
       resolveCodexAppServerExecutable({
         runtimeId: "codex",
@@ -92,13 +92,35 @@ describe("codex app-server process helpers", () => {
       USER: "test-user",
       PATH: "/usr/bin",
       HTTP_PROXY: "http://proxy.example",
-      http_proxy: "http://proxy.example",
       ALL_PROXY: "socks5://proxy.example:1080",
-      all_proxy: "socks5://proxy.example:1080",
     });
 
     vi.unstubAllEnvs();
   });
+
+  it.each(["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"])(
+    "preserves %s without duplicate Windows environment names",
+    (key) => {
+      const lower = key.toLowerCase();
+      for (const [source, value] of [
+        [key, "fixture-proxy-value"],
+        [lower, "fixture-proxy-value"],
+        [key, ""],
+        [lower, ""],
+      ]) {
+        vi.stubEnv(key, undefined);
+        vi.stubEnv(lower, undefined);
+        vi.stubEnv(source, value);
+        const env = buildCodexAppServerEnv({ runtimeId: "codex" });
+        expect(env[key]).toBe(value);
+        expect(env[lower]).toBe(process.platform === "win32" ? undefined : value);
+        if (process.platform === "win32") {
+          const keys = Object.keys(env).map((name) => name.toLowerCase());
+          expect(new Set(keys).size).toBe(keys.length);
+        }
+      }
+    },
+  );
 
   it("does not leak similarly named secrets through exact shell keys", () => {
     vi.stubEnv("USER_TOKEN", "do-not-forward");

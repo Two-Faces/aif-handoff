@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import YAML from "yaml";
 import {
   findProjectById,
@@ -48,8 +48,8 @@ function buildMcpServerEntry(): RuntimeMcpInstallInput {
     cwd: MONOREPO_ROOT,
     env: {
       MCP_TRANSPORT: "stdio",
-      DATABASE_URL: join(MONOREPO_ROOT, env.DATABASE_URL),
-      PROJECTS_DIR: join(MONOREPO_ROOT, process.env.PROJECTS_DIR || ".projects"),
+      DATABASE_URL: resolve(MONOREPO_ROOT, env.DATABASE_URL),
+      PROJECTS_DIR: resolve(MONOREPO_ROOT, process.env.PROJECTS_DIR || ".projects"),
       LOG_LEVEL: "info",
       LOG_DESTINATION: "stderr",
     },

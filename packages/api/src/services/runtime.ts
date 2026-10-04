@@ -1,4 +1,12 @@
 import {
+  withProjectDeviceExecution,
+  createTaskDeviceRuntimeGuard,
+  recordTaskDeviceNativeSession,
+  recordTaskDeviceRuntimeEvent,
+} from "@aif/data";
+import { getResultSessionId } from "@aif/runtime";
+import { assertProjectExecutionAllowed } from "@aif/data";
+import {
   bootstrapRuntimeRegistry,
   buildRuntimeLimitBroadcastCacheKey,
   buildRuntimeLimitCacheSignature,
@@ -633,6 +641,25 @@ export async function runApiRuntimeOneShot(input: {
   result: RuntimeRunResult;
   context: RuntimeExecutionContext;
 }> {
+  return await withProjectDeviceExecution(
+    { projectId: input.projectId, taskId: input.taskId, projectRoot: input.projectRoot },
+    async (root) =>
+      runApiRuntimeOneShotScoped({ ...input, projectRoot: root ?? input.projectRoot }),
+  );
+}
+
+async function runApiRuntimeOneShotScoped(
+  input: Parameters<typeof runApiRuntimeOneShot>[0],
+): Promise<{
+  result: RuntimeRunResult;
+  context: RuntimeExecutionContext;
+}> {
+  input = {
+    ...input,
+    projectRoot:
+      assertProjectExecutionAllowed(input.projectId, input.taskId, input.projectRoot) ??
+      input.projectRoot,
+  };
   const env = getEnv();
   const workflow = createRuntimeWorkflowSpec({
     workflowKind: input.workflowKind ?? "oneshot",
@@ -666,7 +693,9 @@ export async function runApiRuntimeOneShot(input: {
       }
     : {};
   let latestLimitSnapshot: RuntimeLimitSnapshot | null = null;
-  const onRuntimeEvent = (event: RuntimeEvent) => {
+  const deviceRun = createTaskDeviceRuntimeGuard(input.taskId);
+  const onRuntimeEvent = deviceRun.bind((event: RuntimeEvent) => {
+    recordTaskDeviceRuntimeEvent(event, context.resolvedProfile);
     latestLimitSnapshot = observeRuntimeLimitEvent(event, latestLimitSnapshot, {
       logger: log,
       observedMessage: "Observed runtime limit event during API execution",
@@ -679,59 +708,63 @@ export async function runApiRuntimeOneShot(input: {
         runtimeProfileId: context.resolvedProfile.profileId,
       },
     });
-  };
+  });
   let result: RuntimeRunResult;
   try {
-    result = await context.adapter.run({
-      runtimeId: context.resolvedProfile.runtimeId,
-      providerId: context.resolvedProfile.providerId,
-      profileId: context.resolvedProfile.profileId,
-      transport: context.resolvedProfile.transport,
-      workflowKind: workflow.workflowKind,
-      prompt: input.prompt,
-      model: context.resolvedProfile.model ?? undefined,
-      projectRoot: input.projectRoot,
-      cwd: input.projectRoot,
-      headers: context.resolvedProfile.headers,
-      // Merge caller's usageContext with scope fields we already know here.
-      // The caller chooses the source (commit, fast-fix, ...); we fill in
-      // projectId + taskId so the sink has the full scope automatically.
-      usageContext: {
-        ...input.usageContext,
-        projectId: input.projectId,
-        taskId: input.taskId ?? null,
-      },
-      options: {
-        ...context.resolvedProfile.options,
-        ...(context.resolvedProfile.baseUrl ? { baseUrl: context.resolvedProfile.baseUrl } : {}),
-        ...(context.resolvedProfile.apiKeyEnvVar
-          ? { apiKeyEnvVar: context.resolvedProfile.apiKeyEnvVar }
-          : {}),
-      },
-      execution: {
-        // CLI/API transports produce output only after the full run completes,
-        // so start timeout is meaningless — disable it and rely on run timeout only.
-        startTimeoutMs:
-          context.resolvedProfile.transport === "sdk" ? env.API_RUNTIME_START_TIMEOUT_MS : 0,
-        runTimeoutMs: input.runTimeoutMs ?? env.API_RUNTIME_RUN_TIMEOUT_MS,
-        includePartialMessages: input.includePartialMessages ?? false,
-        maxTurns: input.maxTurns,
-        onEvent: onRuntimeEvent,
-        systemPromptAppend: input.systemPromptAppend,
-        bypassPermissions,
-        environment: input.taskId
-          ? { HANDOFF_MODE: "1", HANDOFF_TASK_ID: input.taskId, ...branchEnvironment }
-          : { HANDOFF_MODE: "1" },
-        hooks: {
-          permissionMode: bypassPermissions ? "bypassPermissions" : "acceptEdits",
-          allowDangerouslySkipPermissions: bypassPermissions,
-          _trustToken: RUNTIME_TRUST_TOKEN,
-          settings: { attribution: { commit: "", pr: "" } },
-          settingSources: ["project"],
+    result = await deviceRun.run(() =>
+      context.adapter.run({
+        runtimeId: context.resolvedProfile.runtimeId,
+        providerId: context.resolvedProfile.providerId,
+        profileId: context.resolvedProfile.profileId,
+        transport: context.resolvedProfile.transport,
+        workflowKind: workflow.workflowKind,
+        prompt: input.prompt,
+        model: context.resolvedProfile.model ?? undefined,
+        projectRoot: input.projectRoot,
+        cwd: input.projectRoot,
+        headers: context.resolvedProfile.headers,
+        // Merge caller's usageContext with scope fields we already know here.
+        // The caller chooses the source (commit, fast-fix, ...); we fill in
+        // projectId + taskId so the sink has the full scope automatically.
+        usageContext: {
+          ...input.usageContext,
+          projectId: input.projectId,
+          taskId: input.taskId ?? null,
         },
-      },
-    });
+        options: {
+          ...context.resolvedProfile.options,
+          ...(context.resolvedProfile.baseUrl ? { baseUrl: context.resolvedProfile.baseUrl } : {}),
+          ...(context.resolvedProfile.apiKeyEnvVar
+            ? { apiKeyEnvVar: context.resolvedProfile.apiKeyEnvVar }
+            : {}),
+        },
+        execution: {
+          // CLI/API transports produce output only after the full run completes,
+          // so start timeout is meaningless — disable it and rely on run timeout only.
+          startTimeoutMs:
+            context.resolvedProfile.transport === "sdk" ? env.API_RUNTIME_START_TIMEOUT_MS : 0,
+          runTimeoutMs: input.runTimeoutMs ?? env.API_RUNTIME_RUN_TIMEOUT_MS,
+          includePartialMessages: input.includePartialMessages ?? false,
+          maxTurns: input.maxTurns,
+          onEvent: onRuntimeEvent,
+          abortController: deviceRun.abortController,
+          systemPromptAppend: input.systemPromptAppend,
+          bypassPermissions,
+          environment: input.taskId
+            ? { HANDOFF_MODE: "1", HANDOFF_TASK_ID: input.taskId, ...branchEnvironment }
+            : { HANDOFF_MODE: "1" },
+          hooks: {
+            permissionMode: bypassPermissions ? "bypassPermissions" : "acceptEdits",
+            allowDangerouslySkipPermissions: bypassPermissions,
+            _trustToken: RUNTIME_TRUST_TOKEN,
+            settings: { attribution: { commit: "", pr: "" } },
+            settingSources: ["project"],
+          },
+        },
+      }),
+    );
 
+    recordTaskDeviceNativeSession(getResultSessionId(result), context.resolvedProfile);
     latestLimitSnapshot = extractLatestRuntimeLimitSnapshot(result.events) ?? latestLimitSnapshot;
     if (latestLimitSnapshot) {
       refreshRuntimeProfileLimitState({
@@ -758,6 +791,7 @@ export async function runApiRuntimeOneShot(input: {
       );
     }
   } catch (error) {
+    assertProjectExecutionAllowed(input.projectId, input.taskId, input.projectRoot);
     refreshRuntimeProfileLimitState({
       runtimeProfileId: context.resolvedProfile.profileId,
       runtimeId: context.resolvedProfile.runtimeId,

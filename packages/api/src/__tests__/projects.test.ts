@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -9,6 +9,18 @@ import { projects, runtimeProfiles, runtimeWarmupSessions, tasks } from "@aif/sh
 import { createTestDb } from "@aif/shared/server";
 
 const testDb = { current: createTestDb() };
+const temporaryDirectories: string[] = [];
+function temporaryDirectory(prefix: string) {
+  const directory = mkdtempSync(join(tmpdir(), prefix));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+afterEach(async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  for (const directory of temporaryDirectories.splice(0))
+    actual.rmSync(directory, { recursive: true, force: true });
+});
+afterAll(() => testDb.current.$client.close());
 const mockBroadcast = vi.fn();
 const mockExecFile = vi.hoisted(() => vi.fn());
 const mockRmSync = vi.hoisted(() => vi.fn());
@@ -143,6 +155,7 @@ describe("projects API", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    testDb.current.$client.close();
     testDb.current = createTestDb();
     app = createApp();
     mockBroadcast.mockReset();
@@ -526,7 +539,7 @@ describe("projects API", () => {
   });
 
   it("rejects enabling parallel execution when auto-queue is already enabled with git.create_branches=true and task worktrees are disabled", async () => {
-    const rootPath = mkdtempSync("/tmp/aif-parallel-auto-queue-");
+    const rootPath = temporaryDirectory("aif-parallel-auto-queue-");
     testDb.current
       .insert(projects)
       .values({
@@ -554,7 +567,7 @@ describe("projects API", () => {
 
   it("allows enabling parallel execution for branch-isolated auto-queue when task worktrees are enabled", async () => {
     mockTaskWorktreesEnabled.value = true;
-    const rootPath = mkdtempSync("/tmp/aif-parallel-auto-queue-");
+    const rootPath = temporaryDirectory("aif-parallel-auto-queue-");
     testDb.current
       .insert(projects)
       .values({
@@ -581,7 +594,7 @@ describe("projects API", () => {
   });
 
   it("returns MCP servers from .mcp.json", async () => {
-    const rootPath = mkdtempSync(join(tmpdir(), "aif-mcp-"));
+    const rootPath = temporaryDirectory("aif-mcp-");
     writeFileSync(
       join(rootPath, ".mcp.json"),
       JSON.stringify({ mcpServers: { test: { command: "echo" } } }),
@@ -597,7 +610,7 @@ describe("projects API", () => {
   });
 
   it("returns empty object when .mcp.json does not exist", async () => {
-    const rootPath = mkdtempSync(join(tmpdir(), "aif-no-mcp-"));
+    const rootPath = temporaryDirectory("aif-no-mcp-");
 
     const db = testDb.current;
     db.insert(projects).values({ id: "no-mcp-proj", name: "No MCP", rootPath }).run();
@@ -614,7 +627,7 @@ describe("projects API", () => {
   });
 
   it("returns empty object when .mcp.json has no mcpServers key", async () => {
-    const rootPath = mkdtempSync(join(tmpdir(), "aif-mcp-nokey-"));
+    const rootPath = temporaryDirectory("aif-mcp-nokey-");
     writeFileSync(join(rootPath, ".mcp.json"), JSON.stringify({ other: true }));
 
     const db = testDb.current;
@@ -627,7 +640,7 @@ describe("projects API", () => {
   });
 
   it("returns empty object when .mcp.json is invalid JSON", async () => {
-    const rootPath = mkdtempSync(join(tmpdir(), "aif-mcp-bad-"));
+    const rootPath = temporaryDirectory("aif-mcp-bad-");
     writeFileSync(join(rootPath, ".mcp.json"), "not json{{{");
 
     const db = testDb.current;
@@ -641,7 +654,7 @@ describe("projects API", () => {
 
   describe("GET /projects/:id/roadmap/status", () => {
     it("returns exists: true when ROADMAP.md is present", async () => {
-      const rootPath = mkdtempSync(join(tmpdir(), "aif-roadmap-"));
+      const rootPath = temporaryDirectory("aif-roadmap-");
       const aifDir = join(rootPath, ".ai-factory");
       mkdirSync(aifDir, { recursive: true });
       writeFileSync(join(aifDir, "ROADMAP.md"), "# Roadmap\n");
@@ -656,7 +669,7 @@ describe("projects API", () => {
     });
 
     it("returns exists: false when ROADMAP.md is missing", async () => {
-      const rootPath = mkdtempSync(join(tmpdir(), "aif-no-roadmap-"));
+      const rootPath = temporaryDirectory("aif-no-roadmap-");
 
       const db = testDb.current;
       db.insert(projects).values({ id: "rm-missing", name: "RM Missing", rootPath }).run();
@@ -675,7 +688,7 @@ describe("projects API", () => {
 
   it("returns 500 and rolls back project when ai-factory init fails", async () => {
     const { initProject: initProjectMock } = await import("@aif/runtime");
-    const rootPath = mkdtempSync("/tmp/aif-local-init-fail-");
+    const rootPath = temporaryDirectory("aif-local-init-fail-");
     const sentinel = join(rootPath, "keep.txt");
     writeFileSync(sentinel, "keep");
     (initProjectMock as ReturnType<typeof vi.fn>).mockReturnValueOnce({
@@ -787,7 +800,7 @@ describe("projects API", () => {
     });
 
     it("creates a project from the canonical GitHub repository without exposing credentials", async () => {
-      const managedRoot = mkdtempSync("/tmp/aif-github-create-");
+      const managedRoot = temporaryDirectory("aif-github-create-");
       vi.stubEnv("PROJECTS_MOUNT", managedRoot);
       const fetchMock = vi.fn().mockResolvedValue(githubRepositoryResponse());
       vi.stubGlobal("fetch", fetchMock);
@@ -916,7 +929,7 @@ describe("projects API", () => {
     );
 
     it("preserves a pre-existing clone destination on conflict", async () => {
-      const managedRoot = mkdtempSync("/tmp/aif-github-conflict-");
+      const managedRoot = temporaryDirectory("aif-github-conflict-");
       const destination = join(managedRoot, "github", "canonical-owner", "canonical-repository");
       mkdirSync(destination, { recursive: true });
       const sentinel = join(destination, "keep.txt");
@@ -936,7 +949,7 @@ describe("projects API", () => {
     });
 
     it("cleans a partial managed directory after clone failure", async () => {
-      const managedRoot = mkdtempSync("/tmp/aif-github-clone-fail-");
+      const managedRoot = temporaryDirectory("aif-github-clone-fail-");
       const destination = join(managedRoot, "github", "canonical-owner", "canonical-repository");
       vi.stubEnv("PROJECTS_MOUNT", managedRoot);
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(githubRepositoryResponse()));
@@ -956,7 +969,7 @@ describe("projects API", () => {
     });
 
     it("preserves the clone error when managed-directory cleanup fails", async () => {
-      const managedRoot = mkdtempSync("/tmp/aif-github-cleanup-fail-");
+      const managedRoot = temporaryDirectory("aif-github-cleanup-fail-");
       vi.stubEnv("PROJECTS_MOUNT", managedRoot);
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(githubRepositoryResponse()));
       mockExecFile.mockImplementationOnce((...args: unknown[]) => {
@@ -981,7 +994,7 @@ describe("projects API", () => {
     });
 
     it("rolls back the database and managed directory when init fails", async () => {
-      const managedRoot = mkdtempSync("/tmp/aif-github-init-fail-");
+      const managedRoot = temporaryDirectory("aif-github-init-fail-");
       const destination = join(managedRoot, "github", "canonical-owner", "canonical-repository");
       vi.stubEnv("PROJECTS_MOUNT", managedRoot);
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(githubRepositoryResponse()));
@@ -1001,7 +1014,7 @@ describe("projects API", () => {
     });
 
     it("allows exactly one concurrent request to claim a clone destination", async () => {
-      const managedRoot = mkdtempSync("/tmp/aif-github-race-");
+      const managedRoot = temporaryDirectory("aif-github-race-");
       vi.stubEnv("PROJECTS_MOUNT", managedRoot);
       vi.stubGlobal(
         "fetch",
@@ -1322,7 +1335,7 @@ describe("projects API", () => {
     });
 
     it("PATCH rejects enabling auto-queue for parallel projects with git.create_branches=true and task worktrees disabled", async () => {
-      const rootPath = mkdtempSync("/tmp/aif-auto-queue-branch-");
+      const rootPath = temporaryDirectory("aif-auto-queue-branch-");
       testDb.current
         .insert(projects)
         .values({
@@ -1346,7 +1359,7 @@ describe("projects API", () => {
 
     it("PATCH allows enabling auto-queue for parallel branch-isolated projects when task worktrees are enabled", async () => {
       mockTaskWorktreesEnabled.value = true;
-      const rootPath = mkdtempSync("/tmp/aif-auto-queue-branch-");
+      const rootPath = temporaryDirectory("aif-auto-queue-branch-");
       testDb.current
         .insert(projects)
         .values({
@@ -1368,7 +1381,7 @@ describe("projects API", () => {
     });
 
     it("PATCH allows parallel auto-queue when git.create_branches=false", async () => {
-      const rootPath = mkdtempSync(join(tmpdir(), "aif-auto-queue-no-branch-"));
+      const rootPath = temporaryDirectory("aif-auto-queue-no-branch-");
       mkdirSync(join(rootPath, ".ai-factory"), { recursive: true });
       writeFileSync(
         join(rootPath, ".ai-factory", "config.yaml"),

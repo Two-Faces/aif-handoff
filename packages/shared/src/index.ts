@@ -1,6 +1,43 @@
+export * from "./personalMode.js";
+export * from "./deviceExecution.js";
+export * from "./processSupervision.js";
+export * from "./handoff/deviceHandoff.js";
+export * from "./existingCheckout.js";
+export * from "./sync/contracts.js";
+export * from "./sync/causality.js";
+
 // Schema
 export {
   projects,
+  localDevice,
+  projectCheckouts,
+  logicalParticipants,
+  participantBindings,
+  logicalTaskAssignments,
+  syncStreams,
+  syncOperations,
+  syncFields,
+  syncPeerCursors,
+  syncCheckpoints,
+  syncCheckpointRecords,
+  syncPeers,
+  syncPeerProjects,
+  syncInvitations,
+  taskExecutionWorkspaces,
+  taskDeviceGrants,
+  taskDeviceGrantHeads,
+  taskDeviceRuns,
+  taskDeviceRunAdmissions,
+  taskDeviceSessions,
+  taskDeviceHandoffs,
+  taskDeviceProcesses,
+  codeSnapshots,
+  contextSnapshotBlobs,
+  codeSnapshotLocations,
+  taskWorkspaceContinuations,
+  snapshotExports,
+  snapshotTransfers,
+  snapshotChunks,
   appSettings,
   participants,
   participantSessions,
@@ -245,6 +282,36 @@ export {
 } from "./gitIsolation.js";
 
 export { buildCommitPrompt } from "./commitWorkflow.js";
+export * from "./handoff/contracts.js";
+export * from "./handoff/contextSnapshot.js";
+export * from "./handoff/transferContracts.js";
+export * from "./handoff/gitSnapshot.js";
+
+export {
+  assertTaskCheckout,
+  assertTaskCheckoutDestination,
+  prepareTaskCheckout,
+  taskCheckpointRef,
+  taskCheckoutFilePath,
+  TaskCheckoutError,
+  type TaskCheckoutInput,
+} from "./taskCheckout.js";
+export {
+  beginTaskChangeScope,
+  commitTaskChanges,
+  prepareTaskCommit,
+  publishTaskCommit,
+  serializeTaskChangeScope,
+  restoreTaskChangeScope,
+  serializeTaskCommitIntent,
+  preparedTaskCommitSha,
+  preparedTaskCheckpointRefTarget,
+  adoptTransferredTaskCheckpoint,
+  restoreTaskCommitIntent,
+  type TaskChangeScope,
+  type TaskCommitIntent,
+  type TaskCommitResult,
+} from "./taskCommit.js";
 
 // Attachment utilities
 export {
@@ -312,3 +379,4 @@ export {
   type SafeRuntimeErrorCategory,
   type SafeRuntimeErrorReason,
 } from "./runtimeLimitUtils.js";
+export * from "./sync/peers.js";

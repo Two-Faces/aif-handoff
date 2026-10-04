@@ -78,6 +78,34 @@
  *
  * ## Reading execution options in run()
  *
+ * `execution.nativeProcessScope` is an internal host capability, never a profile
+ * option. Every run/resume/fork/stream entry must call assertNativeProcessMode
+ * before provider activity. Pass false until that transport uses the native
+ * launcher and awaits durable stop proof; ignoring the scope is forbidden.
+ * Codex app-server/default JSONL CLI and fixed Codex SDK/Claude SDK/API/CLI workers integrate this path. It does
+ * not advertise whole-adapter containment or enable personal execution. Do not
+ * fall back to a shell, retry another launch, or run discovery outside the scope.
+ * Batch CLI completion must await both native stop and drained stdout/stderr,
+ * including completion before listeners attach. Bound total collected output,
+ * decode split UTF-8, and reject incomplete/failed protocol and callback errors.
+ * SDKs with private spawn should run inside a fixed supervised worker, never
+ * monkey-patch global spawn or silently switch transports. Keep host callbacks
+ * fenced, SDK imports host-resolved, secrets off argv and worker failures opaque.
+ * Adapter construction must not spawn discovery helpers: defer legacy PATH
+ * discovery, and contain executable version probes in the native worker.
+ * A worker's direct CLI mode must not fall back to SDK. Generate literal argv,
+ * bound raw stdout/stderr before filtering metadata, and stop on blocked stdin.
+ * Text-only HTTP clients can use a fixed native worker: preserve provider
+ * request builders/proxy settings, reject retries/redirects/tools, and validate
+ * complete JSON/SSE plus usage before success. Local client stop never proves
+ * that remote inference or a separately owned executor stopped. Keep such
+ * executors (including direct session creation) denied until they are owned.
+ * Owned server adapters must start a fresh server inside the native unit, use
+ * private auth/storage and a locally selected endpoint, and exclude ambient
+ * plugins/config/MCP. Verify the actual binary with a local model/tool fixture.
+ * Remove private attempt artifacts only after native stop acknowledgement;
+ * uncertain stop and coordinator death must retain them for explicit recovery.
+ *
  * ```ts
  * async run(input: RuntimeRunInput): Promise<RuntimeRunResult> {
  *   const exec = input.execution;            // RuntimeExecutionIntent | undefined

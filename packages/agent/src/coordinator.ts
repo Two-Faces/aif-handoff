@@ -1,3 +1,9 @@
+import { withProjectDeviceExecution } from "@aif/data";
+import {
+  isPersonalProject,
+  assertTaskExecutionAllowed,
+  getTaskExecutionWorkspace,
+} from "@aif/data";
 import {
   clearTaskActiveRuntimeSelection,
   clearTaskRuntimeLimitSnapshot,
@@ -536,6 +542,22 @@ function blockCandidateIfRuntimeLimited(task: TaskRow, stage: StatusTransition):
 
 /** Returns true on success, false on failure. */
 async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<boolean> {
+  try {
+    return await withProjectDeviceExecution(
+      { taskId: task.id, projectId: task.projectId, coordinatorId: COORDINATOR_ID },
+      () => processOneTaskScoped(task, stage),
+    );
+  } catch (error) {
+    log.error(
+      { taskId: task.id, error },
+      "Task lifecycle fenced; reservation retained for recovery",
+    );
+    return false;
+  }
+}
+
+async function processOneTaskScoped(task: TaskRow, stage: StatusTransition): Promise<boolean> {
+  if (isPersonalProject(task.projectId)) return false;
   if (task.executionOwner !== "ai") {
     log.warn(
       { taskId: task.id, stage: stage.label, executionOwner: task.executionOwner },
@@ -553,9 +575,18 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
     return false;
   }
 
-  if (_runtimeRegistry) {
+  let executionRoot: string;
+  try {
+    const requestedRoot = task.worktreePath ?? project.rootPath;
+    executionRoot = assertTaskExecutionAllowed(task.id, requestedRoot) ?? requestedRoot;
+  } catch (error) {
+    log.error({ taskId: task.id, error }, "Task workspace is not ready for execution");
+    return false;
+  }
+
+  if (_runtimeRegistry && !getTaskExecutionWorkspace(task.id)) {
     const initResult = initProject({
-      projectRoot: task.worktreePath ?? project.rootPath,
+      projectRoot: executionRoot,
       registry: _runtimeRegistry,
     });
     if (!initResult.ok) {
@@ -591,7 +622,6 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
   );
 
   try {
-    const executionRoot = task.worktreePath ?? project.rootPath;
     const executionBoundaryTask = findTaskById(task.id);
     if (!executionBoundaryTask || executionBoundaryTask.executionOwner !== "ai") {
       log.warn(
@@ -605,6 +635,8 @@ async function processOneTask(task: TaskRow, stage: StatusTransition): Promise<b
       return false;
     }
     await runStageWithTimeout(stage.runner, task.id, executionRoot, stage.label);
+
+    assertTaskExecutionAllowed(task.id, executionRoot);
 
     flushActivityQueue(task.id);
 
@@ -858,6 +890,7 @@ export function processDueScheduledTasks(): number {
 
   let fired = 0;
   for (const task of due) {
+    if (isPersonalProject(task.projectId)) continue;
     try {
       const project = findProjectById(task.projectId);
       if (scheduledTaskHasDirtyAutoQueueWorktree(task, project)) {
@@ -930,6 +963,7 @@ export function processAutoQueueAdvance(): number {
 
   let advanced = 0;
   for (const project of projects) {
+    if (isPersonalProject(project.id)) continue;
     // Serialization predicate combines:
     //   - current config (`git.create_branches=true` on a real git repo), AND
     //   - task state (any in-flight task already has a persisted branchName).

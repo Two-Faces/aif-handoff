@@ -277,11 +277,13 @@ export function Header({
                   "gap-1 font-mono text-3xs",
                   runtimeProfilesOpen && "border-primary/70 bg-primary/10",
                 )}
-                aria-label="Runtime profiles"
+                aria-label={
+                  selectedProject?.personalMode ? "Personal project settings" : "Runtime profiles"
+                }
                 title={runtimeButtonTitle}
               >
                 <Cpu className="h-3.5 w-3.5" />
-                <span>RUNTIME</span>
+                <span>{selectedProject?.personalMode ? "PROJECT" : "RUNTIME"}</span>
               </Button>
               <Button
                 variant="outline"

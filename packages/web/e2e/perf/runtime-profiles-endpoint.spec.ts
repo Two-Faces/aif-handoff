@@ -51,7 +51,8 @@ test.describe("runtime-profiles endpoint timing", () => {
 
     // Baseline from the node-side request API hits the API directly (no proxy)
     // so that a broken Vite dev proxy surfaces as a diff between the two.
-    const baseline = await request.get("http://localhost:3009/runtime-profiles?includeGlobal=true");
+    const apiUrl = process.env.AIF_API_URL ?? "http://localhost:3009";
+    const baseline = await request.get(`${apiUrl}/runtime-profiles?includeGlobal=true`);
     expect(baseline.ok()).toBeTruthy();
   });
 });

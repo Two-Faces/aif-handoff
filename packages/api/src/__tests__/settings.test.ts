@@ -326,7 +326,10 @@ describe("settings API — config routes", () => {
     const codexConfigPath = join(fakeHome, ".codex", "config.toml");
 
     beforeEach(() => {
-      delete process.env.MCP_PORT;
+      vi.stubEnv("MCP_PORT", undefined);
+      vi.stubEnv("DATABASE_URL", "./data/aif.sqlite");
+      vi.stubEnv("PROJECTS_DIR", ".projects");
+      resetEnvCache();
       try {
         rmSync(claudeConfigPath);
       } catch {
@@ -337,6 +340,11 @@ describe("settings API — config routes", () => {
       } catch {
         /* ok */
       }
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      resetEnvCache();
     });
 
     it("GET /settings/mcp returns installed: false when no config", async () => {
@@ -381,6 +389,42 @@ describe("settings API — config routes", () => {
       expect(codexToml).toContain("[mcp_servers.handoff]");
       expect(codexToml).toContain('command = "npx"');
       expect(codexToml).not.toContain('url = "http://localhost:3100/mcp"');
+    });
+
+    it.each([
+      {
+        kind: "absolute",
+        database: join(fakeHome, "local data", "personal.sqlite"),
+        projects: join(fakeHome, "Рабочие проекты"),
+        expectedDatabase: join(fakeHome, "local data", "personal.sqlite"),
+        expectedProjects: join(fakeHome, "Рабочие проекты"),
+      },
+      {
+        kind: "relative",
+        database: "./local-data/personal.sqlite",
+        projects: "./checkouts",
+        expectedDatabase: join(tempRoot, "local-data", "personal.sqlite"),
+        expectedProjects: join(tempRoot, "checkouts"),
+      },
+    ])("preserves $kind database and checkout locations in MCP config", async (fixture) => {
+      vi.stubEnv("DATABASE_URL", fixture.database);
+      vi.stubEnv("PROJECTS_DIR", fixture.projects);
+      resetEnvCache();
+      writeFileSync(claudeConfigPath, "{}");
+
+      const res = await app.request("/settings/mcp/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ success: true });
+      const config = JSON.parse(readFileSync(claudeConfigPath, "utf-8"));
+      expect(config.mcpServers.handoff.env).toMatchObject({
+        DATABASE_URL: fixture.expectedDatabase,
+        PROJECTS_DIR: fixture.expectedProjects,
+      });
     });
 
     it("POST /settings/mcp/install adds handoff HTTP server when MCP_PORT is set", async () => {

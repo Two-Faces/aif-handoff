@@ -125,8 +125,14 @@ export function TaskDetailHeader({
         )
   ).filter(
     (action) =>
-      !task.github ||
-      (action.event !== "approve_done" && action.actionType !== "open_request_changes"),
+      (!task.github ||
+        (action.event !== "approve_done" && action.actionType !== "open_request_changes")) &&
+      (!task.personalMode ||
+        (!(["start_ai", "retry_from_blocked", "fast_fix"] as Array<string | undefined>).includes(
+          action.event,
+        ) &&
+          !(action.event === "start_implementation" && task.executionOwner === "ai") &&
+          action.actionType !== "open_fast_fix")),
   );
   const canManageOwnership = Boolean(
     task.permissions?.canAssign || task.permissions?.canHandoff || task.permissions?.canSelfAssign,
@@ -151,7 +157,9 @@ export function TaskDetailHeader({
   // would otherwise advance — paused backlog tasks are skipped by both the
   // scheduler and the auto-queue advancer.
   const showPauseButton =
-    task.executionOwner === "ai" && !["done", "verified"].includes(task.status);
+    !task.personalMode &&
+    task.executionOwner === "ai" &&
+    !["done", "verified"].includes(task.status);
 
   return (
     <div className="border-b border-border p-6 pb-4 pr-14">
@@ -215,6 +223,20 @@ export function TaskDetailHeader({
         <TaskOwnershipSummary executionOwner={task.executionOwner} assignees={task.assignees} />
         <SheetTitle className="tracking-tight">{task.title}</SheetTitle>
       </SheetHeader>
+
+      {task.personalMode && (
+        <AlertBox variant="info" className="mb-3 text-xs">
+          Board changes sync between paired devices. AI execution, code transfer and file
+          synchronization are not available in this milestone.
+          {!!task.unresolvedAssignees?.length && (
+            <p className="mt-1">
+              Unmapped assignees:{" "}
+              {task.unresolvedAssignees.map((person) => person.displayName).join(", ")}. Confirm the
+              local account mapping in project settings.
+            </p>
+          )}
+        </AlertBox>
+      )}
 
       {task.status === "blocked_external" && runtimeLimitDisplay && (
         <AlertBox

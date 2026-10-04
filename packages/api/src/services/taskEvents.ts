@@ -1,3 +1,4 @@
+import { withProjectDeviceExecution, invalidateTaskDeviceExecution } from "@aif/data";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -11,6 +12,9 @@ import {
   type AuditActor,
   type ParticipantRole,
   type TaskEvent,
+  type SyncRevisions,
+  SyncError,
+  PERSONAL_EXECUTION_BLOCK,
 } from "@aif/shared";
 import {
   applyTaskAction,
@@ -19,6 +23,8 @@ import {
   getLatestHumanComment,
   persistTaskPlanForTask,
   setTaskFields,
+  isPersonalProject,
+  assertTaskExecutionAllowed,
   type TaskRow,
 } from "@aif/data";
 import { AiHandoffRequiredError, runFastFixQuery, withTimeout } from "./fastFix.js";
@@ -31,6 +37,7 @@ interface EventHandlerInput {
   actor?: AuditActor;
   participantRole?: ParticipantRole | null;
   participantActive?: boolean;
+  expectedSyncRevisions?: SyncRevisions;
 }
 
 export type EventHandlerResult =
@@ -41,8 +48,9 @@ function restoreTaskBranchForMutation(
   task: TaskRow,
   projectRoot: string,
 ): EventHandlerResult | null {
-  if (!task.branchName || task.isFix) return null;
   try {
+    assertTaskExecutionAllowed(task.id, projectRoot);
+    if (!task.branchName || task.isFix) return null;
     // task.branchName is a source-of-truth contract: every mutation path
     // (fast-fix, regular transition, accept_existing_plan) must land on the
     // persisted branch or fail loud. Use `restorePersistedBranch` instead of
@@ -66,8 +74,9 @@ function restoreTaskBranchForMutation(
 }
 
 function assertTaskBranchPostRun(task: TaskRow, projectRoot: string): EventHandlerResult | null {
-  if (!task.branchName || task.isFix) return null;
   try {
+    assertTaskExecutionAllowed(task.id, projectRoot);
+    if (!task.branchName || task.isFix) return null;
     assertCurrentBranch(projectRoot, task.branchName);
     return null;
   } catch (err) {
@@ -81,6 +90,12 @@ function assertTaskBranchPostRun(task: TaskRow, projectRoot: string): EventHandl
 }
 
 async function handleFastFix(input: EventHandlerInput): Promise<EventHandlerResult> {
+  return await withProjectDeviceExecution({ taskId: input.taskId }, async () =>
+    handleFastFixScoped(input),
+  );
+}
+
+async function handleFastFixScoped(input: EventHandlerInput): Promise<EventHandlerResult> {
   const task = findTaskById(input.taskId);
   if (!task) {
     return { ok: false, status: 404, error: "Task not found" };
@@ -141,7 +156,8 @@ async function handleFastFix(input: EventHandlerInput): Promise<EventHandlerResu
       90_000,
       "Fast fix query timed out",
     );
-  } catch {
+  } catch (error) {
+    if (invalidateTaskDeviceExecution()) throw error;
     // Fallback to no-tools mode below
   }
 
@@ -205,7 +221,11 @@ function handleRegularTransition(input: EventHandlerInput): EventHandlerResult {
   if (!task) {
     return { ok: false, status: 404, error: "Task not found" };
   }
-  if ((input.event === "approve_done" || input.event === "start_ai") && input.deletePlanFile) {
+  if (
+    !isPersonalProject(task.projectId) &&
+    (input.event === "approve_done" || input.event === "start_ai") &&
+    input.deletePlanFile
+  ) {
     const project = findProjectById(task.projectId);
     if (!project) {
       return { ok: false, status: 404, error: "Project not found for task" };
@@ -239,6 +259,7 @@ function handleRegularTransition(input: EventHandlerInput): EventHandlerResult {
     participantRole: input.participantRole,
     participantActive: input.participantActive,
     expectedStatus: task.status,
+    expectedSyncRevisions: input.expectedSyncRevisions,
   });
   if (!transition.ok) {
     const authorizationDenied =
@@ -285,10 +306,9 @@ function handleAcceptExistingPlan(input: EventHandlerInput): EventHandlerResult 
   // Fix tasks keep the legacy no-branch behavior.
   let boundBranchName: string | null = task.branchName ?? null;
   let executionRoot = task.worktreePath ?? project.rootPath;
-  if (!task.isFix && boundBranchName) {
-    const branchError = restoreTaskBranchForMutation(task, executionRoot);
-    if (branchError) return branchError;
-  } else if (!task.isFix && !boundBranchName) {
+  const rootError = restoreTaskBranchForMutation(task, executionRoot);
+  if (rootError) return rootError;
+  if (!task.isFix && !boundBranchName && !task.worktreePath) {
     try {
       const branchResult = ensureFeatureBranch({
         projectRoot: project.rootPath,
@@ -406,6 +426,21 @@ export async function handleTaskEvent(input: EventHandlerInput): Promise<EventHa
         };
       }
     }
+    const task = findTaskById(input.taskId);
+    if (task && isPersonalProject(task.projectId)) {
+      if (input.event === "fast_fix" || input.deletePlanFile) {
+        return { ok: false, status: 403, ...PERSONAL_EXECUTION_BLOCK };
+      }
+      if (input.event === "accept_existing_plan" && !task.plan?.trim()) {
+        return {
+          ok: false,
+          status: 409,
+          code: "plan_required",
+          error: "Save a board plan before accepting it",
+        };
+      }
+      return handleRegularTransition(input);
+    }
     if (input.event === "fast_fix") {
       return await handleFastFix(input);
     }
@@ -414,6 +449,9 @@ export async function handleTaskEvent(input: EventHandlerInput): Promise<EventHa
     }
     return handleRegularTransition(input);
   } catch (error) {
+    if (error instanceof SyncError) {
+      return { ok: false, status: 409, code: error.code, error: error.message };
+    }
     if (error instanceof AiHandoffRequiredError) {
       return {
         ok: false,

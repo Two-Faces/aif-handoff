@@ -148,3 +148,6 @@ export type { SyncDirection, ConflictResolution, SyncEvent, PlanAnnotation } fro
 // Planner mode defaults (pure, browser-safe)
 export { defaultsForMode } from "./plannerDefaults.js";
 export type { PlannerMode, PlannerFlagDefaults } from "./plannerDefaults.js";
+export { peerInvitationSchema, type PeerInvitation } from "./sync/peers.js";
+export type { SyncRevisions, SyncDot, SyncEntityType } from "./sync/contracts.js";
+export type { FieldVersion } from "./sync/causality.js";
